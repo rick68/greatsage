@@ -1,3 +1,14 @@
+[dependencies]
+bevy = { version = "0.18.0", default-features = false, features = [
+    "bevy_log",
+] }
+bevy-tokio-tasks = "0.18.0"
+tokio = { version = "1.49.0", features = ["macros", "rt"] }
+
+[lints.clippy]
+diverging_sub_expression = "allow"
+let_underscore_future = "allow"
+
 [package]
 name = "greatsage"
 version = "0.0.0"
@@ -6,6 +17,3 @@ categories = []
 description = "Rimuru's Unique Skill, you know the one."
 keywords = []
 license = "MIT OR Apache-2.0"
-
-[dependencies]
-tokio = { version = "1.49.0", features = ["macros", "rt"] }
