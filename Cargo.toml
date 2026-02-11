@@ -2,6 +2,10 @@
 name = "greatsage"
 version = "0.0.0"
 edition = "2024"
+categories = []
+description = "Rimuru's Unique Skill, you know the one."
+keywords = []
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 tokio = { version = "1.49.0", features = ["macros", "rt"] }
