@@ -19,7 +19,7 @@ fn setup(runtime: ResMut<'_, TokioTasksRuntime>) {
         runtime.spawn_background_task::<_, (), _>(|mut ctx: TaskContext| async move {
             () = ctx
                 .run_on_main_thread::<_, ()>(|_ctx: MainThreadContext<'_>| {
-                    info!("co'i le munje");
+                    info!("coi le munje");
                 })
                 .await;
         });
