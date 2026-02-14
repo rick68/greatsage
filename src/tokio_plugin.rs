@@ -7,7 +7,7 @@ use {
             resource::Resource,
             system::IsFunctionSystem,
         },
-        prelude::{Deref, DerefMut},
+        prelude::Deref,
         tasks::futures_lite::StreamExt,
     },
     bevy_ratatui::crossterm,
@@ -21,7 +21,7 @@ use {
 
 const SIGNALS: &[i32] = &[SIGHUP, SIGINT, SIGQUIT, SIGTERM];
 
-#[derive(Default, Deref, DerefMut, Resource)]
+#[derive(Default, Deref, Resource)]
 struct AppCancelToken(Arc<CancellationToken>);
 
 fn setup_signal_handles(runtime: ResMut<'_, TokioTasksRuntime>, cancel: Res<'_, AppCancelToken>) {
@@ -36,7 +36,7 @@ fn setup_signal_handles(runtime: ResMut<'_, TokioTasksRuntime>, cancel: Res<'_, 
                     Some(_signal) = signals.next(), if cfg!(not(target_os = "windows")) => {
                         let _: io::Result<()> = crossterm::terminal::disable_raw_mode();
 
-                        () = ctx.run_on_main_thread::<_, ()>(move |ctx: MainThreadContext<'_>| {
+                        () = ctx.run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
                             let _: Option<MessageId<AppExit>> =
                                 ctx.world.write_message_default::<AppExit>();
                         }).await;
@@ -46,7 +46,7 @@ fn setup_signal_handles(runtime: ResMut<'_, TokioTasksRuntime>, cancel: Res<'_, 
                     }
                     else => {
                         break;
-                    },
+                    }
                 }
             }
         });
@@ -64,7 +64,7 @@ fn shutdown_tokio_on_exit(
 
             while Arc::strong_count(&cancel) != 1 {}
 
-            let _ = ratatui::restore();
+            () = ratatui::restore();
             let _: io::Result<()> = crossterm::terminal::disable_raw_mode();
         }
     }
