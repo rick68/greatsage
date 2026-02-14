@@ -38,7 +38,7 @@ fn setup_signal_handles(runtime: ResMut<'_, TokioTasksRuntime>, cancel: Res<'_, 
 
                         () = ctx.run_on_main_thread::<_, ()>(move |ctx: MainThreadContext<'_>| {
                             let _: Option<MessageId<AppExit>> =
-                                ctx.world.write_message::<AppExit>(AppExit::Success);
+                                ctx.world.write_message_default::<AppExit>();
                         }).await;
                     }
                     _ = cancel.cancelled() => {
