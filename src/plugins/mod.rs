@@ -1,3 +1,5 @@
-pub mod tokio_plugin;
-#[cfg(feature = "tui")]
-pub mod tui_plugin;
+mod tokio_plugin;
+pub use tokio_plugin::plugin as tokio_plugin;
+
+mod tui_plugin;
+pub use tui_plugin::plugin as tui_plugin;
