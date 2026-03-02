@@ -12,7 +12,10 @@ use {
     },
     bevy_ratatui::crossterm,
     bevy_tokio_tasks::{MainThreadContext, TaskContext, TokioTasksPlugin, TokioTasksRuntime},
-    signal_hook::consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM},
+    signal_hook::{
+        consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM},
+        iterator::exfiltrator::SignalOnly,
+    },
     signal_hook_tokio::{Signals, SignalsInfo},
     std::sync::Arc,
     tokio::{io, task::JoinHandle},
@@ -29,7 +32,7 @@ fn setup_signal_handles(runtime: ResMut<'_, TokioTasksRuntime>, cancel: Res<'_, 
     let _: JoinHandle<()> =
         runtime.spawn_background_task::<_, (), _>(|mut ctx: TaskContext| async move {
             #[cfg(not(target_os = "windows"))]
-            let mut signals: SignalsInfo = Signals::new(SIGNALS).unwrap();
+            let mut signals: SignalsInfo<SignalOnly> = Signals::new(SIGNALS).unwrap();
 
             loop {
                 tokio::select! {
@@ -70,7 +73,7 @@ fn shutdown_tokio_on_exit(
     }
 }
 
-pub(super) fn plugin(app: &mut App) {
+pub fn plugin(app: &mut App) {
     let _: &mut App = app
         .add_plugins::<_>(TokioTasksPlugin::default())
         .init_resource::<AppCancelToken>()

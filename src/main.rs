@@ -1,6 +1,9 @@
 #![windows_subsystem = "windows"]
 
+mod plugins;
+
 use {
+    crate::plugins::tokio_plugin,
     bevy::{
         MinimalPlugins,
         app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update},
@@ -18,28 +21,30 @@ use {
     std::time::Duration,
 };
 
-mod tokio_plugin;
-
 const FRAMES_PER_SECOND: f32 = 30.0;
 
 fn draw_scene_system(mut context: ResMut<'_, RatatuiContext>) -> bevy::ecs::error::Result {
-    let mut text = Text::raw("");
+    let mut text: Text<'_> = Text::default();
 
-    let _: CompletedFrame = context.draw::<_>(|frame: &mut Frame<'_>| {
-        text.push_line("coi le munje");
-
-        frame.render_widget(text.centered(), frame.area())
+    let _: CompletedFrame<'_> = context.draw::<_>(|frame: &mut Frame<'_>| {
+        () = text.push_line::<&str>("coi le munje");
+        () = frame.render_widget::<Text<'_>>(text.centered(), frame.area())
     })?;
 
     Ok(())
 }
 
-fn hotkeys(input: Res<'_, ButtonInput<KeyCode>>, mut exit: MessageWriter<'_, AppExit>) {
-    () = input.get_just_pressed().for_each::<_>(|key: &KeyCode| {
-        if key == &KeyCode::Escape {
-            let _: MessageId<AppExit> = exit.write_default();
-        }
-    })
+fn hotkeys(
+    input: Res<'_, ButtonInput<bevy::input::keyboard::KeyCode>>,
+    mut exit: MessageWriter<'_, AppExit>,
+) {
+    () = input
+        .get_just_pressed()
+        .for_each::<_>(|key_code: &bevy::input::keyboard::KeyCode| {
+            if key_code == &KeyCode::Escape {
+                let _: MessageId<AppExit> = exit.write_default();
+            }
+        })
 }
 
 fn main() {
@@ -48,12 +53,13 @@ fn main() {
     let _: &mut App = app
         .add_plugins::<(_, _, _, _)>((
             MinimalPlugins
-                .set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f32(
-                    FRAMES_PER_SECOND.recip(),
-                )))
+                .set::<ScheduleRunnerPlugin>(ScheduleRunnerPlugin::run_loop(
+                    Duration::from_secs_f32(FRAMES_PER_SECOND.recip()),
+                ))
                 .build(),
             tokio_plugin::plugin,
             RatatuiPlugins {
+                enable_mouse_capture: true,
                 enable_input_forwarding: true,
                 ..default::<RatatuiPlugins>()
             },
@@ -69,7 +75,7 @@ fn main() {
             (
                 IsFunctionSystem,
                 fn(
-                    _, // Res<'_, ButtonInput<KeyCode>>
+                    _, // Res<'_, ButtonInput<bevy::input::keyboard::KeyCode>>
                     _, // MessageWriter<'_, AppExit>
                 ) -> (),
             ),
