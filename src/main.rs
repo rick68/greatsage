@@ -8,15 +8,21 @@ use {
         MinimalPlugins,
         app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update},
         ecs::{
-            change_detection::{NonSend, Res, ResMut},
+            change_detection::{Res, ResMut},
             message::{MessageId, MessageWriter},
+            resource::Resource,
             schedule::ScheduleConfigTupleMarker,
             system::IsFunctionSystem,
         },
         input::ButtonInput,
     },
     bevy_ratatui::RatatuiContext,
-    ratatui::{CompletedFrame, Frame, text::Text},
+    ratatui::{
+        CompletedFrame, Frame,
+        layout::{Constraint, Layout, Rect},
+        style::Style,
+        widgets::{Block, Paragraph},
+    },
     std::time::Duration,
 };
 
@@ -37,31 +43,38 @@ fn hotkeys(
         })
 }
 
-struct Main<'a> {
-    text: Text<'a>,
+#[derive(Resource)]
+struct Main {
+    input: String,
 }
 
-impl Default for Main<'_> {
+impl Default for Main {
     fn default() -> Self {
-        let mut text: Text<'_> = Text::default();
-        () = text.push_line::<&str>("coi le munje");
-
-        Self { text }
+        Self {
+            // input: String::new(),
+            input: String::from("coi le munje"),
+        }
     }
 }
 
-impl<'a> Main<'a> {
-    fn draw(&self, frame: &mut Frame<'a>) {
-        () = frame.render_widget::<Text<'_>>(self.text.clone().centered(), frame.area());
+impl Main {
+    fn draw(&self, frame: &mut Frame<'_>) {
+        let vertical: Layout = Layout::vertical([Constraint::Min(1), Constraint::Length(3)]);
+        let [_, input_area]: [Rect; 2] = vertical.areas::<2>(frame.area());
+
+        let input: Paragraph<'_> = Paragraph::new::<&str>(self.input.as_str())
+            .style::<Style>(Style::default())
+            .block(Block::bordered());
+        () = frame.render_widget::<_>(input, input_area);
     }
 }
 
 fn draw_scene_system(
     mut context: ResMut<'_, RatatuiContext>,
-    root: NonSend<'_, Main<'_>>,
+    root: Res<'_, Main>,
 ) -> bevy::ecs::error::Result {
     let _: CompletedFrame<'_> = context.draw::<_>(|frame: &mut Frame<'_>| {
-        () = root.draw(frame);
+        () = (*root).draw(frame);
     })?;
 
     Ok(())
@@ -80,7 +93,7 @@ fn main() {
             tokio_plugin,
             tui_plugin,
         ))
-        .init_non_send_resource::<Main<'_>>()
+        .init_resource::<Main>()
         .add_systems::<(
             ScheduleConfigTupleMarker,
             (
@@ -94,7 +107,7 @@ fn main() {
                 IsFunctionSystem,
                 fn(
                     _, // ResMut<'_, RatatuiContext>
-                    _, // NonSend<'_, Main<'_>>
+                    _, // Res<'_, Main>
                 ) -> bevy::ecs::error::Result,
             ),
         )>(Update, (hotkeys, draw_scene_system));
