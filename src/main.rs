@@ -15,6 +15,7 @@ use {
             system::{IsFunctionSystem, Local},
         },
         input::ButtonInput,
+        prelude::{Deref, DerefMut},
         time::{Time, Timer, TimerMode},
     },
     bevy_ratatui::RatatuiContext,
@@ -28,6 +29,15 @@ use {
 };
 
 const FRAMES_PER_SECOND: f32 = 30.0;
+
+#[derive(Deref, DerefMut, Resource)]
+struct UiDirty(bool);
+
+impl Default for UiDirty {
+    fn default() -> Self {
+        Self(true)
+    }
+}
 
 #[derive(Resource)]
 struct Main {
@@ -85,17 +95,24 @@ fn draw_scene_system(
     time: Res<'_, Time<()>>,
     mut timer: Local<'_, Option<Timer>>,
     mut show_cursor: Local<'_, bool>,
+    mut dirty: ResMut<'_, UiDirty>,
 ) -> bevy::ecs::error::Result {
-    let timer = timer.get_or_insert(Timer::new(Duration::from_millis(864), TimerMode::Repeating));
+    let timer: &mut Timer =
+        timer.get_or_insert(Timer::new(Duration::from_millis(864), TimerMode::Repeating));
     let _: &Timer = timer.tick(time.delta());
 
     if timer.just_finished() {
         *show_cursor ^= true;
+        **dirty = true;
     }
 
-    let _: CompletedFrame<'_> = context.draw::<_>(|frame: &mut Frame<'_>| {
-        () = (*root).draw(frame, *show_cursor);
-    })?;
+    if **dirty {
+        let _: CompletedFrame<'_> = context.draw::<_>(|frame: &mut Frame<'_>| {
+            () = (*root).draw(frame, *show_cursor);
+        })?;
+    }
+
+    **dirty = false;
 
     Ok(())
 }
@@ -113,6 +130,7 @@ fn main() {
             tokio_plugin,
             tui_plugin,
         ))
+        .init_resource::<UiDirty>()
         .init_resource::<Main>()
         .add_systems::<(
             ScheduleConfigTupleMarker,
@@ -131,6 +149,7 @@ fn main() {
                     _, // Res<'_, Time<()>>
                     _, // Local<'_, Option<Timer>>
                     _, // Local<'_, bool>
+                    _, // ResMut<'_, UiDirty>
                 ) -> bevy::ecs::error::Result,
             ),
         )>(Update, (hotkeys, draw_scene_system));
