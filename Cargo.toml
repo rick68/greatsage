@@ -1,11 +1,11 @@
 [dependencies]
 bevy = { version = "0.18.0", default-features = false }
-bevy_ratatui = { git = "https://github.com/ratatui/bevy_ratatui.git", rev = "d7632f55c798fd2aac44a1cbab4a553fcfa2834e" }  # for bevy 0.18
+bevy_ratatui = "0.11.1"
 bevy-tokio-tasks = "0.18.0"
 ratatui = "0.30.0"
 signal-hook = "0.4.3"
 signal-hook-tokio = { version = "0.4.0", features = ["futures-v0_3"] }
-tokio = { version = "1.49.0", features = ["macros", "rt"] }
+tokio = { version = "1.50.0", features = ["macros", "rt"] }
 tokio-util = "0.7.18"
 
 [features]
