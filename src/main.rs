@@ -9,26 +9,27 @@ use {
         app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update},
         ecs::{
             change_detection::{Res, ResMut},
-            message::{MessageId, MessageWriter},
+            message::{MessageId, MessageReader, MessageWriter},
             resource::Resource,
             schedule::ScheduleConfigTupleMarker,
             system::{IsFunctionSystem, Local},
         },
-        input::ButtonInput,
         prelude::{Deref, DerefMut},
         time::{Time, Timer, TimerMode},
     },
-    bevy_ratatui::RatatuiContext,
+    bevy_ratatui::{RatatuiContext, event::KeyMessage},
     ratatui::{
-        CompletedFrame, Frame,
+        CompletedFrame, Frame, crossterm,
         layout::{Constraint, Layout, Rect},
         style::Style,
         widgets::{Block, Paragraph},
     },
     std::time::Duration,
+    unicode_width::UnicodeWidthStr,
 };
 
 const FRAMES_PER_SECOND: f32 = 30.0;
+const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
 
 #[derive(Deref, DerefMut, Resource)]
 struct UiDirty(bool);
@@ -50,7 +51,7 @@ impl Default for Main {
         let text: &str = "coi le munje";
         Self {
             input: String::from(text),
-            character_index: text.chars().count(),
+            character_index: UnicodeWidthStr::width(text),
         }
     }
 }
@@ -74,19 +75,17 @@ impl Main {
     }
 }
 
-fn hotkeys(
-    input: Res<'_, ButtonInput<bevy::input::keyboard::KeyCode>>,
-    mut exit: MessageWriter<'_, AppExit>,
-) {
-    use bevy::input::keyboard::KeyCode;
+fn hotkeys(mut messages: MessageReader<'_, '_, KeyMessage>, mut exit: MessageWriter<'_, AppExit>) {
+    use crossterm::event::KeyCode;
 
-    () = input
-        .get_just_pressed()
-        .for_each::<_>(|key_code: &KeyCode| {
-            if key_code == &KeyCode::Escape {
+    for message in messages.read() {
+        match message.code {
+            KeyCode::Esc => {
                 let _: MessageId<AppExit> = exit.write_default();
             }
-        })
+            _ => (),
+        }
+    }
 }
 
 fn draw_scene_system(
@@ -97,8 +96,10 @@ fn draw_scene_system(
     mut show_cursor: Local<'_, bool>,
     mut dirty: ResMut<'_, UiDirty>,
 ) -> bevy::ecs::error::Result {
-    let timer: &mut Timer =
-        timer.get_or_insert(Timer::new(Duration::from_millis(864), TimerMode::Repeating));
+    let timer: &mut Timer = timer.get_or_insert(Timer::new(
+        Duration::from_millis(CURSOR_BLINK_INTERVAL_MS),
+        TimerMode::Repeating,
+    ));
     let _: &Timer = timer.tick(time.delta());
 
     if timer.just_finished() {
@@ -137,7 +138,7 @@ fn main() {
             (
                 IsFunctionSystem,
                 fn(
-                    _, // Res<'_, ButtonInput<bevy::input::keyboard::KeyCode>>
+                    _, // Res<'_, ButtonInput<crossterm::event::KeyCode>>
                     _, // MessageWriter<'_, AppExit>
                 ) -> (),
             ),
