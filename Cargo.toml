@@ -1,5 +1,5 @@
 [dependencies]
-bevy = { version = "0.18.0", default-features = false, features = ["std"] }
+bevy = { version = "0.18.1", default-features = false, features = ["std"] }
 bevy_ratatui = "0.11.1"
 bevy-tokio-tasks = "0.18.0"
 ratatui = "0.30.0"
