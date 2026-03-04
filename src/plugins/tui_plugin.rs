@@ -1,10 +1,11 @@
 use {
     bevy::{
-        app::App,
+        app::{App, PreUpdate},
+        ecs::{change_detection::ResMut, message::MessageReader, system::IsFunctionSystem},
         prelude::{Deref, DerefMut, Resource},
         utils::default,
     },
-    bevy_ratatui::RatatuiPlugins,
+    bevy_ratatui::{RatatuiPlugins, event::ResizeMessage},
 };
 
 #[derive(Deref, DerefMut, Resource)]
@@ -16,6 +17,15 @@ impl Default for RenderNeeded {
     }
 }
 
+fn handle_resize(
+    mut messages: MessageReader<'_, '_, ResizeMessage>,
+    mut dirty: ResMut<'_, RenderNeeded>,
+) {
+    for ResizeMessage(_size) in messages.read() {
+        **dirty = true;
+    }
+}
+
 pub fn plugin(app: &mut App) {
     let _: &mut App = app
         .add_plugins::<_>(RatatuiPlugins {
@@ -23,5 +33,12 @@ pub fn plugin(app: &mut App) {
             enable_input_forwarding: true,
             ..default::<RatatuiPlugins>()
         })
-        .init_resource::<RenderNeeded>();
+        .init_resource::<RenderNeeded>()
+        .add_systems::<(
+            IsFunctionSystem,
+            fn(
+                _, // MessageReader<'_, '_, ResizeMessage>
+                _, // ResMut<'_, RenderNeeded>
+            ) -> (),
+        )>(PreUpdate, handle_resize);
 }
