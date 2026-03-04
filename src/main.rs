@@ -22,10 +22,11 @@ use {
         CompletedFrame, Frame, crossterm,
         layout::{Constraint, Layout, Rect},
         style::Style,
+        text::Line,
         widgets::{Block, Paragraph},
     },
     std::time::Duration,
-    unicode_width::{UnicodeWidthChar, UnicodeWidthStr},
+    unicode_width::UnicodeWidthChar,
 };
 
 const FRAMES_PER_SECOND: f32 = 30.0;
@@ -44,27 +45,41 @@ impl Default for RenderNeeded {
 struct Main {
     input: String,
     character_index: usize,
+    output: Vec<String>,
 }
 
 impl Default for Main {
     fn default() -> Self {
-        let text: &str = "coi le munje";
         Self {
-            input: String::from(text),
-            character_index: UnicodeWidthStr::width(text),
+            input: String::new(),
+            character_index: 0,
+            output: vec![],
         }
     }
 }
 
 impl Main {
     fn draw(&self, frame: &mut Frame<'_>, show_cursor: bool) {
-        let vertical: Layout = Layout::vertical([Constraint::Min(1), Constraint::Length(3)]);
-        let [_, input_area]: [Rect; 2] = vertical.areas::<2>(frame.area());
+        let vertical: Layout = Layout::vertical([Constraint::Min(3), Constraint::Length(3)]);
+        let [output_area, input_area]: [Rect; 2] = vertical.areas::<2>(frame.area());
+
+        let lines: Vec<Line> = self
+            .output
+            .iter()
+            .map::<Line<'_>, fn(&String) -> Line<'_>>(|data: &String| -> Line<'_> {
+                Line::raw(data)
+            })
+            .collect::<Vec<Line<'_>>>();
+
+        let output: Paragraph<'_> = Paragraph::new::<_>(lines)
+            .style::<Style>(Style::default())
+            .block(Block::bordered().title::<&str>("Output"));
+        () = frame.render_widget::<Paragraph<'_>>(output, output_area);
 
         let input: Paragraph<'_> = Paragraph::new::<&str>(self.input.as_str())
             .style::<Style>(Style::default())
-            .block(Block::bordered());
-        () = frame.render_widget::<_>(input, input_area);
+            .block(Block::bordered().title::<&str>("Input"));
+        () = frame.render_widget::<Paragraph<'_>>(input, input_area);
 
         if show_cursor {
             frame.set_cursor_position::<(u16, u16)>((
@@ -86,6 +101,7 @@ fn hotkeys(
     let Main {
         input,
         character_index,
+        output,
     } = root.as_mut();
 
     for message in messages.read() {
@@ -104,6 +120,11 @@ fn hotkeys(
                 {
                     *character_index -= width;
                 }
+            }
+            KeyCode::Enter if kind == &KeyEventKind::Press => {
+                () = output.push(input.clone());
+                *input = String::new();
+                *character_index = 0;
             }
             KeyCode::Esc => {
                 let _: MessageId<AppExit> = exit.write_default();
