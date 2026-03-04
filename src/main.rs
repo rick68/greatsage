@@ -165,7 +165,7 @@ fn main() {
             (
                 IsFunctionSystem,
                 fn(
-                    _, // Res<'_, ButtonInput<crossterm::event::KeyCode>>
+                    _, // Res<'_, MessageReader<'_, '_, KeyMessage>>
                     _, // ResMut<'_, Main>
                     _, // ResMut<'_, RenderNeeded>
                     _, // MessageWriter<'_, AppExit>
