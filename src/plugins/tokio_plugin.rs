@@ -10,7 +10,7 @@ use {
         prelude::Deref,
         tasks::futures_lite::StreamExt,
     },
-    bevy_ratatui::crossterm,
+    bevy_ratatui::crossterm::{self, execute, terminal::LeaveAlternateScreen},
     bevy_tokio_tasks::{MainThreadContext, TaskContext, TokioTasksPlugin, TokioTasksRuntime},
     signal_hook::{
         consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM},
@@ -38,6 +38,7 @@ fn setup_signal_handles(runtime: ResMut<'_, TokioTasksRuntime>, cancel: Res<'_, 
                 tokio::select! {
                     Some(_signal) = signals.next(), if cfg!(not(target_os = "windows")) => {
                         let _: io::Result<()> = crossterm::terminal::disable_raw_mode();
+                        let _: io::Result<()> = execute!(std::io::stdout(), LeaveAlternateScreen);
 
                         () = ctx.run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
                             let _: Option<MessageId<AppExit>> =
