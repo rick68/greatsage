@@ -25,16 +25,16 @@ use {
         widgets::{Block, Paragraph},
     },
     std::time::Duration,
-    unicode_width::UnicodeWidthStr,
+    unicode_width::{UnicodeWidthChar, UnicodeWidthStr},
 };
 
 const FRAMES_PER_SECOND: f32 = 30.0;
 const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
 
 #[derive(Deref, DerefMut, Resource)]
-struct UiDirty(bool);
+struct RenderNeeded(bool);
 
-impl Default for UiDirty {
+impl Default for RenderNeeded {
     fn default() -> Self {
         Self(true)
     }
@@ -75,16 +75,43 @@ impl Main {
     }
 }
 
-fn hotkeys(mut messages: MessageReader<'_, '_, KeyMessage>, mut exit: MessageWriter<'_, AppExit>) {
-    use crossterm::event::KeyCode;
+fn hotkeys(
+    mut messages: MessageReader<'_, '_, KeyMessage>,
+    mut root: ResMut<'_, Main>,
+    mut dirty: ResMut<'_, RenderNeeded>,
+    mut exit: MessageWriter<'_, AppExit>,
+) {
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+
+    let Main {
+        input,
+        character_index,
+    } = root.as_mut();
 
     for message in messages.read() {
-        match message.code {
+        let KeyEvent { code, kind, .. } = &**message;
+
+        match code {
+            KeyCode::Char(c) if kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat => {
+                () = input.push(*c);
+                if let Some(width) = UnicodeWidthChar::width(*c) {
+                    *character_index = character_index.saturating_add(width);
+                }
+            }
+            KeyCode::Backspace if kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat => {
+                if let Some(c) = input.pop()
+                    && let Some(width) = UnicodeWidthChar::width(c)
+                {
+                    *character_index -= width;
+                }
+            }
             KeyCode::Esc => {
                 let _: MessageId<AppExit> = exit.write_default();
             }
             _ => (),
         }
+
+        **dirty = true;
     }
 }
 
@@ -92,17 +119,17 @@ fn draw_scene_system(
     mut context: ResMut<'_, RatatuiContext>,
     root: Res<'_, Main>,
     time: Res<'_, Time<()>>,
-    mut timer: Local<'_, Option<Timer>>,
+    mut cursor_timer: Local<'_, Option<Timer>>,
     mut show_cursor: Local<'_, bool>,
-    mut dirty: ResMut<'_, UiDirty>,
+    mut dirty: ResMut<'_, RenderNeeded>,
 ) -> bevy::ecs::error::Result {
-    let timer: &mut Timer = timer.get_or_insert(Timer::new(
+    let cursor_timer: &mut Timer = cursor_timer.get_or_insert(Timer::new(
         Duration::from_millis(CURSOR_BLINK_INTERVAL_MS),
         TimerMode::Repeating,
     ));
-    let _: &Timer = timer.tick(time.delta());
+    let _: &Timer = cursor_timer.tick(time.delta());
 
-    if timer.just_finished() {
+    if cursor_timer.just_finished() {
         *show_cursor ^= true;
         **dirty = true;
     }
@@ -131,7 +158,7 @@ fn main() {
             tokio_plugin,
             tui_plugin,
         ))
-        .init_resource::<UiDirty>()
+        .init_resource::<RenderNeeded>()
         .init_resource::<Main>()
         .add_systems::<(
             ScheduleConfigTupleMarker,
@@ -139,6 +166,8 @@ fn main() {
                 IsFunctionSystem,
                 fn(
                     _, // Res<'_, ButtonInput<crossterm::event::KeyCode>>
+                    _, // ResMut<'_, Main>
+                    _, // ResMut<'_, RenderNeeded>
                     _, // MessageWriter<'_, AppExit>
                 ) -> (),
             ),
@@ -150,7 +179,7 @@ fn main() {
                     _, // Res<'_, Time<()>>
                     _, // Local<'_, Option<Timer>>
                     _, // Local<'_, bool>
-                    _, // ResMut<'_, UiDirty>
+                    _, // ResMut<'_, RenderNeeded>
                 ) -> bevy::ecs::error::Result,
             ),
         )>(Update, (hotkeys, draw_scene_system));
