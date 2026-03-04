@@ -3,7 +3,7 @@
 mod plugins;
 
 use {
-    crate::plugins::{tokio_plugin, tui_plugin},
+    crate::plugins::{RenderNeeded, tokio_plugin, tui_plugin},
     bevy::{
         MinimalPlugins,
         app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update},
@@ -14,7 +14,6 @@ use {
             schedule::ScheduleConfigTupleMarker,
             system::{IsFunctionSystem, Local},
         },
-        prelude::{Deref, DerefMut},
         time::{Time, Timer, TimerMode},
     },
     bevy_ratatui::{RatatuiContext, event::KeyMessage},
@@ -31,15 +30,6 @@ use {
 
 const FRAMES_PER_SECOND: f32 = 30.0;
 const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
-
-#[derive(Deref, DerefMut, Resource)]
-struct RenderNeeded(bool);
-
-impl Default for RenderNeeded {
-    fn default() -> Self {
-        Self(true)
-    }
-}
 
 #[derive(Resource)]
 struct Main {
@@ -179,7 +169,6 @@ fn main() {
             tokio_plugin,
             tui_plugin,
         ))
-        .init_resource::<RenderNeeded>()
         .init_resource::<Main>()
         .add_systems::<(
             ScheduleConfigTupleMarker,
