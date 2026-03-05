@@ -26,7 +26,7 @@ fn handle_resize(
     }
 }
 
-pub fn plugin(app: &mut App) {
+pub fn tui_plugin(app: &mut App) {
     let _: &mut App = app
         .add_plugins::<_>(RatatuiPlugins {
             enable_mouse_capture: true,

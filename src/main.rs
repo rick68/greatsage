@@ -1,9 +1,13 @@
 #![windows_subsystem = "windows"]
 
-mod plugins;
+mod tokio;
+mod tui;
 
 use {
-    crate::plugins::{RenderNeeded, tokio_plugin, tui_plugin},
+    crate::{
+        tokio::tokio_plugin,
+        tui::{RenderNeeded, tui_plugin},
+    },
     bevy::{
         MinimalPlugins,
         app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update},
