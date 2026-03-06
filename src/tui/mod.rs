@@ -1,3 +1,5 @@
+mod tui_main;
+
 use {
     bevy::{
         app::{App, PreUpdate},
@@ -23,17 +25,21 @@ fn handle_resize(
 ) {
     for ResizeMessage(_size) in messages.read() {
         **dirty = true;
+        break;
     }
 }
 
 pub fn tui_plugin(app: &mut App) {
     let _: &mut App = app
-        .add_plugins::<_>(RatatuiPlugins {
-            enable_mouse_capture: true,
-            enable_input_forwarding: true,
-            ..default::<RatatuiPlugins>()
-        })
         .init_resource::<RenderNeeded>()
+        .add_plugins::<(_, _, _)>((
+            RatatuiPlugins {
+                enable_mouse_capture: true,
+                enable_input_forwarding: true,
+                ..default::<RatatuiPlugins>()
+            },
+            tui_main::plugin,
+        ))
         .add_systems::<(
             IsFunctionSystem,
             fn(
