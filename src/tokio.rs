@@ -25,7 +25,7 @@ use {
 const SIGNALS: &[i32] = &[SIGHUP, SIGINT, SIGQUIT, SIGTERM];
 
 #[derive(Default, Deref, Resource)]
-struct AppCancelToken(Arc<CancellationToken>);
+pub struct AppCancelToken(Arc<CancellationToken>);
 
 fn setup_signal_handles(runtime: ResMut<'_, TokioTasksRuntime>, cancel: Res<'_, AppCancelToken>) {
     let cancel: Arc<CancellationToken> = cancel.clone();
@@ -45,12 +45,8 @@ fn setup_signal_handles(runtime: ResMut<'_, TokioTasksRuntime>, cancel: Res<'_, 
                                 ctx.world.write_message_default::<AppExit>();
                         }).await;
                     }
-                    _ = cancel.cancelled() => {
-                        break;
-                    }
-                    else => {
-                        break;
-                    }
+                    _ = cancel.cancelled() => break,
+                    else => break,
                 }
             }
         });
