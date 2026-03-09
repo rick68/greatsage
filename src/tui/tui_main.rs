@@ -34,6 +34,8 @@ use {
 };
 
 const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
+const PROMPT_PREFIX: &str = "🤖 > ";
+const PROMPT_SUFFIX_LENGTH: usize = 5;
 
 #[derive(Clone, Copy, Debug, Default, EnumCount, Eq, FromRepr, Hash, PartialEq, States)]
 #[repr(u8)]
@@ -120,14 +122,15 @@ impl<'a> TuiMain<'a> {
             &mut self.vertical_scroll_state,
         );
 
-        let input: Paragraph<'_> = Paragraph::<'_>::new::<&str>(self.input.as_str())
-            .style::<Style>(Style::default())
-            .block(Block::<'_>::bordered().title::<&str>("Input"));
+        let input: Paragraph<'_> =
+            Paragraph::<'_>::new::<String>(format!("{}{}", PROMPT_PREFIX, self.input))
+                .style::<Style>(Style::default())
+                .block(Block::<'_>::bordered().title::<&str>("Input"));
         () = frame.render_widget::<Paragraph<'_>>(input, input_area);
 
         if self.show_cursor && self.focused == TuiMainFocus::InputArea {
             () = frame.set_cursor_position::<(u16, u16)>((
-                input_area.left() + self.character_index as u16 + 1,
+                input_area.left() + (self.character_index + PROMPT_SUFFIX_LENGTH) as u16 + 1,
                 input_area.top() + 1,
             ));
         }
