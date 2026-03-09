@@ -164,13 +164,15 @@ fn handle_protocol_events(
                 task_description,
                 ..
             } => {
-                let span: Span<'_> = format!(
-                    "🎯 Task Started - Agent: {actor_id:?}\n   📝 Task: {task_description}"
-                )
-                .cyan();
+                let span: Span<'_> = format!("🎯 Task Started - Agent: {actor_id:?}").cyan();
                 let line: Line<'_> = Line::from(span);
-
                 () = tui.output.push(line);
+
+                let span: Span<'_> = format!("   📝 Task: {task_description}").cyan();
+                let line: Line<'_> = Line::from(span);
+                () = tui.output.push(line);
+
+                () = tui.scroll_to_bottom();
             }
             Event::ToolCallRequested {
                 tool_name,
@@ -182,6 +184,7 @@ fn handle_protocol_events(
                 let line: Line<'_> = Line::from(span);
 
                 () = tui.output.push(line);
+                () = tui.scroll_to_bottom();
             }
             Event::ToolCallCompleted {
                 tool_name, result, ..
@@ -191,6 +194,7 @@ fn handle_protocol_events(
                 let line: Line<'_> = Line::from(span);
 
                 () = tui.output.push(line);
+                () = tui.scroll_to_bottom();
             }
             Event::TaskComplete { result, .. } => {
                 match serde_json::from_str::<ReActAgentOutput>(result) {
@@ -218,6 +222,7 @@ fn handle_protocol_events(
                         let span: Span<'_> = "─".repeat(50).blue();
                         let line: Line<'_> = Line::<'_>::from(span);
                         () = tui.output.push(line);
+                        () = tui.scroll_to_bottom();
                     }
                     Err(_) => {
                         //Do Nothing
@@ -233,6 +238,7 @@ fn handle_protocol_events(
                     format!("🔄 Turn {}/{max_turns} started", turn_number + 1).blue();
                 let line: Line<'_> = Line::<'_>::from(span);
                 () = tui.output.push(line);
+                () = tui.scroll_to_bottom();
             }
             Event::TurnCompleted {
                 turn_number,
@@ -247,6 +253,7 @@ fn handle_protocol_events(
                 .blue();
                 let line: Line<'_> = Line::<'_>::from(span);
                 () = tui.output.push(line);
+                () = tui.scroll_to_bottom();
             }
             _ => {
                 // Handle other events silently or with debug output
@@ -270,7 +277,11 @@ fn spawn_agent_task(
     for AgentRequest(input) in messages.read() {
         let output: &mut Vec<Line<'_>> = tui.output.as_mut();
 
-        let span: Span<'_> = Span::<'_>::raw("\n🔄 Processing your request...\n");
+        let span: Span<'_> = Span::<'_>::raw("");
+        let line: Line<'_> = Line::<'_>::from(span);
+        () = output.push(line);
+
+        let span: Span<'_> = Span::<'_>::raw("🔄 Processing your request...\n");
         let line: Line<'_> = Line::<'_>::from(span);
         () = output.push(line);
 

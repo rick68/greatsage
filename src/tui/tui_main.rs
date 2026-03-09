@@ -102,10 +102,9 @@ impl<'a> TuiMain<'a> {
 
         self.output_area = output_area;
 
-        let text: &Vec<Line<'_>> = &self.output;
+        let mut text: &Vec<Line<'_>> = &self.output;
         let output: Paragraph<'_> = Paragraph::<'_>::new::<Vec<Line<'_>>>(text.clone())
             .style::<Style>(Style::default())
-            .wrap(Wrap { trim: true })
             .block(Block::<'_>::bordered().title::<&str>("Output"))
             .scroll((self.vertical_scroll as u16, 0));
         self.vertical_scroll_state = self
@@ -161,7 +160,7 @@ impl<'a> TuiMain<'a> {
         self.vertical_scroll = 0;
     }
 
-    fn scroll_to_bottom(&mut self) {
+    pub fn scroll_to_bottom(&mut self) {
         if self.output.len() > self.output_area_height() {
             self.vertical_scroll = self.max_scroll();
         }
