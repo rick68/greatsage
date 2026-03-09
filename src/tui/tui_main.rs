@@ -145,6 +145,10 @@ impl<'a> TuiMain<'a> {
         }
     }
 
+    fn scroll_to_top(&mut self) {
+        self.vertical_scroll = 0;
+    }
+
     fn scroll_to_bottom(&mut self) {
         if self.output.len() > self.output_area_viewport() {
             self.vertical_scroll = self.max_scroll();
@@ -180,6 +184,14 @@ fn handle_global_input(
             }
             KeyCode::Down if kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat => {
                 () = tui_main.scroll_down();
+                **dirty = true;
+            }
+            KeyCode::PageUp => {
+                () = tui_main.scroll_to_top();
+                **dirty = true;
+            }
+            KeyCode::PageDown => {
+                () = tui_main.scroll_to_bottom();
                 **dirty = true;
             }
             _ => (),
