@@ -22,7 +22,7 @@ use {
         layout::{Constraint, Layout, Rect},
         style::Style,
         text::Line,
-        widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+        widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     },
     std::{
         iter::{DoubleEndedIterator, ExactSizeIterator, Iterator},
@@ -102,7 +102,7 @@ impl<'a> TuiMain<'a> {
 
         self.output_area = output_area;
 
-        let mut text: &Vec<Line<'_>> = &self.output;
+        let text: &Vec<Line<'_>> = &self.output;
         let output: Paragraph<'_> = Paragraph::<'_>::new::<Vec<Line<'_>>>(text.clone())
             .style::<Style>(Style::default())
             .block(Block::<'_>::bordered().title::<&str>("Output"))
