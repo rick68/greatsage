@@ -1,5 +1,6 @@
 use {
     super::RenderNeeded,
+    crate::coding_agent::AgentRequest,
     bevy::{
         app::{App, AppExit, PreUpdate, Update},
         ecs::{
@@ -21,7 +22,7 @@ use {
         layout::{Constraint, Layout, Rect},
         style::Style,
         text::Line,
-        widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+        widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     },
     std::{
         iter::{DoubleEndedIterator, ExactSizeIterator, Iterator},
@@ -69,10 +70,10 @@ impl DoubleEndedIterator for TuiMainFocus {
 }
 
 #[derive(Default)]
-struct TuiMain<'a> {
+pub struct TuiMain<'a> {
     input: String,
     character_index: usize,
-    output: Vec<Line<'a>>,
+    pub output: Vec<Line<'a>>,
     output_area: Rect,
     show_cursor: bool,
     focused: TuiMainFocus,
@@ -104,6 +105,7 @@ impl<'a> TuiMain<'a> {
         let text: &Vec<Line<'_>> = &self.output;
         let output: Paragraph<'_> = Paragraph::<'_>::new::<Vec<Line<'_>>>(text.clone())
             .style::<Style>(Style::default())
+            .wrap(Wrap { trim: true })
             .block(Block::<'_>::bordered().title::<&str>("Output"))
             .scroll((self.vertical_scroll as u16, 0));
         self.vertical_scroll_state = self
@@ -189,6 +191,7 @@ fn handle_input_area_input(
     mut messages: MessageReader<'_, '_, KeyMessage>,
     mut tui_main: NonSendMut<'_, TuiMain<'_>>,
     mut dirty: ResMut<'_, RenderNeeded>,
+    mut agent_request_writer: MessageWriter<'_, AgentRequest>,
 ) {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
@@ -214,10 +217,15 @@ fn handle_input_area_input(
             KeyCode::Enter if kind == &KeyEventKind::Press => {
                 if !tui_main.input.is_empty() {
                     let input: String = tui_main.input.clone();
-                    () = tui_main.output.push(Line::<'_>::raw::<String>(input));
+                    () = tui_main
+                        .output
+                        .push(Line::<'_>::raw::<String>(input.clone()));
                     () = tui_main.input.clear();
                     tui_main.character_index = 0;
                     () = tui_main.scroll_to_bottom();
+
+                    let _: MessageId<AgentRequest> =
+                        agent_request_writer.write(AgentRequest(input));
                 }
                 **dirty = true;
             }

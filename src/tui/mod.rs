@@ -1,4 +1,5 @@
 mod tui_main;
+pub use tui_main::TuiMain;
 
 use {
     bevy::{
@@ -23,9 +24,8 @@ fn handle_resize(
     mut messages: MessageReader<'_, '_, ResizeMessage>,
     mut dirty: ResMut<'_, RenderNeeded>,
 ) {
-    for ResizeMessage(_size) in messages.read() {
+    if let Some(ResizeMessage(_size)) = messages.read().next() {
         **dirty = true;
-        break;
     }
 }
 

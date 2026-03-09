@@ -1,17 +1,29 @@
 [dependencies]
+ansi-to-tui = "8.0.1"
+anyhow = "1.0.102"
+autoagents = { version = "0.3.5", features = ["openai"] }
+autoagents-derive = "0.3.5"
+autoagents-toolkit = { version = "0.3.5", features = ["filesystem"] }
 bevy = { version = "0.18.1", default-features = false, features = [
     "bevy_state",
     "std",
 ] }
 bevy_ratatui = "0.11.1"
 bevy-tokio-tasks = "0.18.0"
+dotenvy = "0.15.7"
+glob = "0.3.3"
 ratatui = "0.30.0"
+regex = "1.12.3"
+serde = "1.0.228"
+serde_json = "1.0.149"
 signal-hook = "0.4.3"
 signal-hook-tokio = { version = "0.4.0", features = ["futures-v0_3"] }
 strum = { version = "0.28.0", features = ["derive"] }
+termimad = "0.34.1"
 tokio = { version = "1.50.0", features = ["macros", "rt"] }
 tokio-util = "0.7.18"
 unicode-width = "0.2.2"
+walkdir = "2.5.0"
 
 [features]
 default = []
@@ -28,3 +40,6 @@ categories = []
 description = "Rimuru's Unique Skill, you know the one."
 keywords = []
 license = "MIT OR Apache-2.0"
+
+[profile.dev.package.backtrace]
+opt-level = 3

@@ -46,7 +46,7 @@ fn setup_signal_handles(runtime: ResMut<'_, TokioTasksRuntime>, cancel: Res<'_, 
                         }).await;
                     }
                     _ = cancel.cancelled() => break,
-                    else => break,
+                    else => unreachable!(),
                 }
             }
         });
