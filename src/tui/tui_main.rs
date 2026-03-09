@@ -82,15 +82,13 @@ pub struct TuiMain<'a> {
 }
 
 impl<'a> TuiMain<'a> {
-    fn output_area_viewport(&self) -> usize {
+    fn output_area_height(&self) -> usize {
         const BORDER: u16 = 2;
         self.output_area.height.saturating_sub(BORDER) as usize
     }
 
     fn max_scroll(&self) -> usize {
-        self.output
-            .len()
-            .saturating_sub(self.output_area_viewport())
+        self.output.len().saturating_sub(self.output_area_height())
     }
 
     fn draw(&mut self, frame: &mut Frame<'_>) {
@@ -145,12 +143,23 @@ impl<'a> TuiMain<'a> {
         }
     }
 
+    fn scroll_page_up(&mut self) {
+        self.vertical_scroll = self
+            .vertical_scroll
+            .saturating_sub(self.output_area_height());
+    }
+
+    fn scroll_page_down(&mut self) {
+        self.vertical_scroll =
+            (self.vertical_scroll + self.output_area_height()).min(self.max_scroll());
+    }
+
     fn scroll_to_top(&mut self) {
         self.vertical_scroll = 0;
     }
 
     fn scroll_to_bottom(&mut self) {
-        if self.output.len() > self.output_area_viewport() {
+        if self.output.len() > self.output_area_height() {
             self.vertical_scroll = self.max_scroll();
         }
     }
@@ -187,10 +196,18 @@ fn handle_global_input(
                 **dirty = true;
             }
             KeyCode::PageUp => {
-                () = tui_main.scroll_to_top();
+                () = tui_main.scroll_page_up();
                 **dirty = true;
             }
             KeyCode::PageDown => {
+                () = tui_main.scroll_page_down();
+                **dirty = true;
+            }
+            KeyCode::Home => {
+                () = tui_main.scroll_to_top();
+                **dirty = true;
+            }
+            KeyCode::End => {
                 () = tui_main.scroll_to_bottom();
                 **dirty = true;
             }
@@ -246,6 +263,26 @@ fn handle_input_area_input(
     }
 }
 
+fn handle_output_area_input(
+    mut messages: MessageReader<'_, '_, KeyMessage>,
+    mut tui_main: NonSendMut<'_, TuiMain<'_>>,
+    mut dirty: ResMut<'_, RenderNeeded>,
+) {
+    use crossterm::event::{KeyCode, KeyEvent};
+
+    for message in messages.read() {
+        let KeyEvent { code, .. } = &**message;
+
+        match code {
+            KeyCode::Char(' ') => {
+                () = tui_main.scroll_page_down();
+                **dirty = true;
+            }
+            _ => (),
+        }
+    }
+}
+
 fn draw_scene_system(
     mut context: ResMut<'_, RatatuiContext>,
     mut tui: NonSendMut<'_, TuiMain<'_>>,
@@ -293,6 +330,16 @@ pub fn plugin(app: &mut App) {
                     ) -> bool,
                 )>(in_state::<TuiMainFocus>(
                     TuiMainFocus::InputArea,
+                )),
+                handle_output_area_input.run_if::<(
+                    IsFunctionSystem,
+                    fn(
+                        Option<
+                            _, // Res<'_, State<TuiMainFocus>>
+                        >,
+                    ) -> bool,
+                )>(in_state::<TuiMainFocus>(
+                    TuiMainFocus::OutputArea,
                 )),
             )
                 .chain(),
