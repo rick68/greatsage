@@ -3,7 +3,10 @@ ansi-to-tui = "8.0.1"
 anyhow = "1.0.102"
 autoagents = { version = "0.3.5", features = ["openai"] }
 autoagents-derive = "0.3.5"
-autoagents-toolkit = { version = "0.3.5", features = ["filesystem"] }
+autoagents-toolkit = { version = "0.3.5", features = [
+    "document-parsing",
+    "filesystem",
+] }
 bevy = { version = "0.18.1", default-features = false, features = [
     "bevy_state",
     "std",

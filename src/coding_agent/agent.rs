@@ -1,8 +1,11 @@
 use {
     super::tools::{AnalyzeCodeTool, GrepTool},
     autoagents_derive::{AgentHooks, agent},
-    autoagents_toolkit::tools::filesystem::{
-        CopyFile, CreateDir, DeleteFile, ListDir, MoveFile, ReadFile, SearchFile, WriteFile,
+    autoagents_toolkit::tools::{
+        document_parsing::DocumentParser,
+        filesystem::{
+            CopyFile, CreateDir, DeleteFile, ListDir, MoveFile, ReadFile, SearchFile, WriteFile,
+        },
     },
 };
 
@@ -59,7 +62,8 @@ Remember: You are a systematic problem solver. Think through each step, use your
         ReadFile::new(),
         SearchFile::new(100),
         WriteFile::new(),
-        AnalyzeCodeTool
+        AnalyzeCodeTool,
+        DocumentParser,
     ],
 )]
 #[derive(AgentHooks, Clone)]
