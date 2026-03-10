@@ -33,7 +33,6 @@ pub struct GrepTool {}
 impl ToolRuntime for GrepTool {
     async fn execute(&self, args: Value) -> Result<Value, ToolCallError> {
         let args: GrepArgs = serde_json::from_value::<GrepArgs>(args)?;
-        println!("🔎 Grepping for: {} in {}", args.pattern, args.file_pattern);
 
         let regex: Regex = Regex::new(&args.pattern)
             .map_err::<ToolCallError, fn(regex::Error) -> ToolCallError>(
