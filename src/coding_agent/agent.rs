@@ -1,5 +1,5 @@
 use {
-    super::tools::{AnalyzeCodeTool, GrepTool},
+    super::tools::{AnalyzeCodeTool, DateTimeTool, GrepTool},
     autoagents_derive::{AgentHooks, agent},
     autoagents_toolkit::tools::{
         document_parsing::DocumentParser,
@@ -63,6 +63,7 @@ Remember: You are a systematic problem solver. Think through each step, use your
         SearchFile::new(100),
         WriteFile::new(),
         AnalyzeCodeTool,
+        DateTimeTool,
         DocumentParser,
     ],
 )]
