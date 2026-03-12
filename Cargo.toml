@@ -1,9 +1,9 @@
 [dependencies]
 ansi-to-tui = "8.0.1"
 anyhow = "1.0.102"
-autoagents = { version = "0.3.5", features = ["openai"] }
-autoagents-derive = "0.3.5"
-autoagents-toolkit = { version = "0.3.5", features = [
+autoagents = { version = "0.3.6", features = ["openai"] }
+autoagents-derive = "0.3.6"
+autoagents-toolkit = { version = "0.3.6", features = [
     "document-parsing",
     "filesystem",
 ] }
