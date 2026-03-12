@@ -28,9 +28,10 @@ use {
         ecs::{
             change_detection::{NonSendMut, Res, ResMut},
             error::BevyError,
-            message::{Message, MessageId, MessageReader},
+            message::{Message, MessageId, MessageReader, MessageWriter},
             resource::Resource,
-            schedule::ScheduleConfigTupleMarker,
+            schedule::common_conditions::{not, resource_exists},
+            schedule::{IntoScheduleConfigs, ScheduleConfigTupleMarker},
             system::{Commands, IsFunctionSystem},
         },
         prelude::{Deref, DerefMut},
@@ -49,6 +50,7 @@ use {
 
 const MAX_TOKENS: u32 = 131_072;
 const CODING_TASK_TOPIC: &str = "coding_task";
+const MAX_TURNS: usize = 10;
 
 #[derive(Default, Deref, Resource)]
 struct AgentCancelToken(Arc<CancellationToken>);
@@ -156,6 +158,9 @@ struct ProtocolEvent(Event);
 fn handle_protocol_events(
     mut messages: MessageReader<'_, '_, ProtocolEvent>,
     mut tui: NonSendMut<'_, TuiMain<'_>>,
+    mut commands: Commands<'_, '_>,
+    mut processing: Option<Res<'_, ProcessingTask>>,
+    mut agent_request_writer: MessageWriter<'_, AgentRequest>,
 ) -> bevy::ecs::error::Result {
     for message in messages.read() {
         match &**message {
@@ -165,11 +170,11 @@ fn handle_protocol_events(
                 ..
             } => {
                 let span: Span<'_> = format!("🎯 Task Started - Agent: {actor_id:?}").cyan();
-                let line: Line<'_> = Line::from(span);
+                let line: Line<'_> = Line::<'_>::from(span);
                 () = tui.output.push(line);
 
                 let span: Span<'_> = format!("   📝 Task: {task_description}").cyan();
-                let line: Line<'_> = Line::from(span);
+                let line: Line<'_> = Line::<'_>::from(span);
                 () = tui.output.push(line);
 
                 () = tui.scroll_to_bottom();
@@ -254,6 +259,17 @@ fn handle_protocol_events(
                 let line: Line<'_> = Line::<'_>::from(span);
                 () = tui.output.push(line);
                 () = tui.scroll_to_bottom();
+
+                if *final_turn {
+                    () = commands.remove_resource::<ProcessingTask>();
+                } else if turn_number + 1 >= MAX_TURNS
+                    && let Some(processing) = processing.take()
+                {
+                    let ProcessingTask(task) = processing.into_inner();
+                    let _: MessageId<AgentRequest> =
+                        agent_request_writer.write(AgentRequest(task.prompt.clone()));
+                    () = commands.remove_resource::<ProcessingTask>()
+                }
             }
             _ => {
                 // Handle other events silently or with debug output
@@ -267,10 +283,14 @@ fn handle_protocol_events(
 #[derive(Deref, DerefMut, Message)]
 pub struct AgentRequest(pub String);
 
+#[derive(Deref, Resource)]
+struct ProcessingTask(Task);
+
 fn spawn_agent_task(
     runtime: ResMut<'_, TokioTasksRuntime>,
     mut messages: MessageReader<'_, '_, AgentRequest>,
     mut tui: NonSendMut<'_, TuiMain<'_>>,
+    mut commands: Commands<'_, '_>,
     agent_runtime: Res<'_, AgentRuntime>,
     coding_topic: Res<'_, CodingTopic>,
 ) {
@@ -286,6 +306,7 @@ fn spawn_agent_task(
         () = output.push(line);
 
         let task: Task = Task::new(input);
+        () = commands.insert_resource::<ProcessingTask>(ProcessingTask(task.clone()));
 
         let agent_runtime: Arc<SingleThreadedRuntime> = agent_runtime.clone();
         let coding_topic: Topic<Task> = coding_topic.clone();
@@ -333,18 +354,12 @@ pub fn coding_agent_plugin(app: &mut App) {
                 fn(
                     _, // MessageReader<'_, '_, ProtocolEvent>
                     _, // NonSendMut<'_, TuiMain<'_>>
+                    _, // Commands<'_, '_>
+                    _, // Option<Res<'_, ProcessingTask>>
+                    _, // MessageWriter<'_, AgentRequest>
                 ) -> bevy::ecs::error::Result,
             ),
-            (
-                IsFunctionSystem,
-                fn(
-                    _, // ResMut<'_, TokioTasksRuntime>
-                    _, // MessageReader<'_, '_, AgentRequest>
-                    _, // NonSendMut<'_, TuiMain<'_>>
-                    _, // Res<'_, AgentRuntime>
-                    _, // Res<'_, CodingTopic>
-                ) -> (),
-            ),
+            (),
             (
                 IsFunctionSystem,
                 fn(
@@ -356,7 +371,7 @@ pub fn coding_agent_plugin(app: &mut App) {
             Update,
             (
                 handle_protocol_events,
-                spawn_agent_task,
+                spawn_agent_task.run_if::<_>(not(resource_exists::<ProcessingTask>)),
                 shutdown_agent_environment_on_exit,
             ),
         );
