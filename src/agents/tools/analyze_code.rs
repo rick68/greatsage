@@ -65,7 +65,6 @@ fn analyze_structure(path: &Path) -> Result<String, ToolCallError> {
 }
 
 fn analyze_complexity(_path: &Path) -> Result<String, ToolCallError> {
-    // Simplified complexity analysis
     Ok(String::from(
         "Complexity analysis: This is a placeholder. In a real implementation, \
         this would calculate cyclomatic complexity, function lengths, and other metrics.",

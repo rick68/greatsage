@@ -1,6 +1,6 @@
 use {
     super::RenderNeeded,
-    crate::coding_agent::AgentRequest,
+    crate::agents::CodingAgentRequest,
     bevy::{
         app::{App, AppExit, PreUpdate, Update},
         ecs::{
@@ -222,7 +222,7 @@ fn handle_input_area_input(
     mut messages: MessageReader<'_, '_, KeyMessage>,
     mut tui_main: NonSendMut<'_, TuiMain<'_>>,
     mut dirty: ResMut<'_, RenderNeeded>,
-    mut agent_request_writer: MessageWriter<'_, AgentRequest>,
+    mut agent_request_writer: MessageWriter<'_, CodingAgentRequest>,
 ) {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
@@ -255,8 +255,8 @@ fn handle_input_area_input(
                     tui_main.character_index = 0;
                     () = tui_main.scroll_to_bottom();
 
-                    let _: MessageId<AgentRequest> =
-                        agent_request_writer.write(AgentRequest(input));
+                    let _: MessageId<CodingAgentRequest> =
+                        agent_request_writer.write(CodingAgentRequest(input));
                 }
                 **dirty = true;
             }

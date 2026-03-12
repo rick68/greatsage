@@ -1,9 +1,8 @@
-mod agent;
-
+mod coding;
 mod tools;
 
 use {
-    self::agent::CodingAgent,
+    self::coding::CodingAgent,
     crate::{tokio::AppCancelToken, tui::TuiMain},
     ansi_to_tui::IntoText,
     autoagents::{
@@ -98,7 +97,7 @@ fn setup(
     ));
 
     let memory: Box<SlidingWindowMemory> =
-        Box::<SlidingWindowMemory>::new(SlidingWindowMemory::new(30));
+        Box::<SlidingWindowMemory>::new(SlidingWindowMemory::new(300));
 
     let runtime: Arc<SingleThreadedRuntime> = SingleThreadedRuntime::new(None);
     () = commands.insert_resource::<AgentRuntime>(AgentRuntime(runtime.clone()));
@@ -160,7 +159,7 @@ fn handle_protocol_events(
     mut tui: NonSendMut<'_, TuiMain<'_>>,
     mut commands: Commands<'_, '_>,
     mut processing: Option<Res<'_, ProcessingTask>>,
-    mut agent_request_writer: MessageWriter<'_, AgentRequest>,
+    mut agent_request_writer: MessageWriter<'_, CodingAgentRequest>,
 ) -> bevy::ecs::error::Result {
     for message in messages.read() {
         match &**message {
@@ -266,8 +265,8 @@ fn handle_protocol_events(
                     && let Some(processing) = processing.take()
                 {
                     let ProcessingTask(task) = processing.into_inner();
-                    let _: MessageId<AgentRequest> =
-                        agent_request_writer.write(AgentRequest(task.prompt.clone()));
+                    let _: MessageId<CodingAgentRequest> =
+                        agent_request_writer.write(CodingAgentRequest(task.prompt.clone()));
                     () = commands.remove_resource::<ProcessingTask>()
                 }
             }
@@ -281,20 +280,20 @@ fn handle_protocol_events(
 }
 
 #[derive(Deref, DerefMut, Message)]
-pub struct AgentRequest(pub String);
+pub struct CodingAgentRequest(pub String);
 
 #[derive(Deref, Resource)]
 struct ProcessingTask(Task);
 
 fn spawn_agent_task(
     runtime: ResMut<'_, TokioTasksRuntime>,
-    mut messages: MessageReader<'_, '_, AgentRequest>,
+    mut messages: MessageReader<'_, '_, CodingAgentRequest>,
     mut tui: NonSendMut<'_, TuiMain<'_>>,
     mut commands: Commands<'_, '_>,
     agent_runtime: Res<'_, AgentRuntime>,
     coding_topic: Res<'_, CodingTopic>,
 ) {
-    for AgentRequest(input) in messages.read() {
+    for CodingAgentRequest(input) in messages.read() {
         let output: &mut Vec<Line<'_>> = tui.output.as_mut();
 
         let span: Span<'_> = Span::<'_>::raw("");
@@ -332,11 +331,11 @@ fn shutdown_agent_environment_on_exit(
     }
 }
 
-pub fn coding_agent_plugin(app: &mut App) {
+pub fn agents_plugin(app: &mut App) {
     let _: &mut App = app
         .init_resource::<AgentCancelToken>()
         .add_message::<ProtocolEvent>()
-        .add_message::<AgentRequest>()
+        .add_message::<CodingAgentRequest>()
         .add_systems::<(
             IsFunctionSystem,
             fn(
@@ -356,7 +355,7 @@ pub fn coding_agent_plugin(app: &mut App) {
                     _, // NonSendMut<'_, TuiMain<'_>>
                     _, // Commands<'_, '_>
                     _, // Option<Res<'_, ProcessingTask>>
-                    _, // MessageWriter<'_, AgentRequest>
+                    _, // MessageWriter<'_, CodingAgentRequest>
                 ) -> bevy::ecs::error::Result,
             ),
             (),
