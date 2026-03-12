@@ -8,15 +8,25 @@ use {
     autoagents::llm::LLMProvider,
     bevy::{
         app::App,
-        ecs::resource::Resource,
+        ecs::{message::Message, resource::Resource},
         prelude::{Deref, DerefMut},
     },
     std::sync::Arc,
     tokio_util::sync::CancellationToken,
 };
 
+const MAX_TOKENS: u32 = 131_072;
+const SLIDING_WINDOW_MEMORY: usize = 300;
+const MAX_TURNS: usize = 10;
+
 #[derive(Deref, DerefMut, Resource)]
 struct Llm(Arc<dyn LLMProvider>);
+
+#[derive(Deref, DerefMut, Resource)]
+struct GlobalAgentRuntime(Arc<SingleThreadedRuntime>);
+
+#[derive(Deref, DerefMut, Message)]
+struct ProtocolEvent(Event);
 
 #[derive(Default, Deref, Resource)]
 struct AgentsCancelToken(Arc<CancellationToken>);

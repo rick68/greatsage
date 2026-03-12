@@ -1,7 +1,8 @@
 use {
     crate::{
         agents::{
-            AgentsCancelToken, Llm,
+            AgentsCancelToken, GlobalAgentRuntime, Llm, MAX_TOKENS, MAX_TURNS, ProtocolEvent,
+            SLIDING_WINDOW_MEMORY,
             tools::{AnalyzeCodeTool, DateTimeTool, GrepTool},
         },
         tokio::AppCancelToken,
@@ -57,9 +58,6 @@ use {
     tokio_util::sync::CancellationToken,
 };
 
-const MAX_TOKENS: u32 = 131_072;
-const SLIDING_WINDOW_MEMORY: usize = 300;
-const MAX_TURNS: usize = 10;
 const CODING_TASK_TOPIC: &str = "coding_task";
 
 #[agent(
@@ -159,7 +157,7 @@ fn llm_setup(mut commands: Commands<'_, '_>) -> bevy::ecs::error::Result<()> {
 
 fn runtime_setup(mut commands: Commands<'_, '_>) {
     let runtime: Arc<SingleThreadedRuntime> = SingleThreadedRuntime::new(None);
-    () = commands.insert_resource::<CodingAgentRuntime>(CodingAgentRuntime(runtime));
+    () = commands.insert_resource::<GlobalAgentRuntime>(GlobalAgentRuntime(runtime));
 }
 
 fn topic_setup(mut commands: Commands<'_, '_>) {
@@ -167,16 +165,13 @@ fn topic_setup(mut commands: Commands<'_, '_>) {
     () = commands.insert_resource::<CodingTopic>(CodingTopic(coding_topic));
 }
 
-#[derive(Deref, DerefMut, Resource)]
-struct CodingAgentRuntime(Arc<SingleThreadedRuntime>);
-
 fn setup(
     tokio_runtime: ResMut<'_, TokioTasksRuntime>,
     mut tui: NonSendMut<TuiMain<'_>>,
     app_cancel: Res<'_, AppCancelToken>,
     agent_cancel: Res<'_, AgentsCancelToken>,
     llm: Res<'_, Llm>,
-    agent_runtime: Res<'_, CodingAgentRuntime>,
+    agent_runtime: Res<'_, GlobalAgentRuntime>,
     topic: Res<'_, CodingTopic>,
 ) -> bevy::ecs::error::Result<()> {
     () = tui.output.push(Line::<'_>::from(
@@ -235,9 +230,6 @@ fn setup(
 
     Ok(())
 }
-
-#[derive(Deref, DerefMut, Message)]
-struct ProtocolEvent(Event);
 
 #[derive(Deref, Resource)]
 struct ProcessingTask(Task);
@@ -375,7 +367,7 @@ fn spawn_agent_task(
     mut messages: MessageReader<'_, '_, CodingAgentRequest>,
     mut tui: NonSendMut<'_, TuiMain<'_>>,
     mut commands: Commands<'_, '_>,
-    agent_runtime: Res<'_, CodingAgentRuntime>,
+    agent_runtime: Res<'_, GlobalAgentRuntime>,
     coding_topic: Res<'_, CodingTopic>,
 ) {
     for CodingAgentRequest(input) in messages.read() {
