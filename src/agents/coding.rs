@@ -157,16 +157,27 @@ fn llm_setup(mut commands: Commands<'_, '_>) -> bevy::ecs::error::Result<()> {
     Ok(())
 }
 
+fn runtime_setup(mut commands: Commands<'_, '_>) {
+    let runtime: Arc<SingleThreadedRuntime> = SingleThreadedRuntime::new(None);
+    () = commands.insert_resource::<CodingAgentRuntime>(CodingAgentRuntime(runtime));
+}
+
+fn topic_setup(mut commands: Commands<'_, '_>) {
+    let coding_topic: Topic<Task> = Topic::<Task>::new(CODING_TASK_TOPIC);
+    () = commands.insert_resource::<CodingTopic>(CodingTopic(coding_topic));
+}
+
 #[derive(Deref, DerefMut, Resource)]
 struct CodingAgentRuntime(Arc<SingleThreadedRuntime>);
 
 fn setup(
-    mut commands: Commands<'_, '_>,
     tokio_runtime: ResMut<'_, TokioTasksRuntime>,
     mut tui: NonSendMut<TuiMain<'_>>,
     app_cancel: Res<'_, AppCancelToken>,
     agent_cancel: Res<'_, AgentsCancelToken>,
     llm: Res<'_, Llm>,
+    agent_runtime: Res<'_, CodingAgentRuntime>,
+    topic: Res<'_, CodingTopic>,
 ) -> bevy::ecs::error::Result<()> {
     () = tui.output.push(Line::<'_>::from(
         "🚀 Starting Interactive Coding Agent Session",
@@ -175,13 +186,9 @@ fn setup(
     let memory: Box<SlidingWindowMemory> =
         Box::<SlidingWindowMemory>::new(SlidingWindowMemory::new(SLIDING_WINDOW_MEMORY));
 
-    let runtime: Arc<SingleThreadedRuntime> = SingleThreadedRuntime::new(None);
-    () = commands.insert_resource::<CodingAgentRuntime>(CodingAgentRuntime(runtime.clone()));
-
-    let coding_topic: Topic<Task> = Topic::<Task>::new(CODING_TASK_TOPIC);
-    () = commands.insert_resource::<CodingTopic>(CodingTopic(coding_topic.clone()));
-
     let coding_agent: ReActAgent<CodingAgent> = ReActAgent::<CodingAgent>::new(CodingAgent {});
+    let agent_runtime: Arc<SingleThreadedRuntime> = agent_runtime.clone();
+    let coding_topic: Topic<Task> = topic.clone();
 
     let app_cancel: Arc<CancellationToken> = app_cancel.clone();
     let agent_cancel: Arc<CancellationToken> = agent_cancel.clone();
@@ -192,14 +199,14 @@ fn setup(
             |mut ctx: TaskContext| async move {
                 let _: ActorAgentHandle<ReActAgent<CodingAgent>> = AgentBuilder::new(coding_agent)
                     .llm(llm)
-                    .runtime(runtime.clone())
+                    .runtime(agent_runtime.clone())
                     .subscribe(coding_topic.clone())
                     .memory(memory)
                     .build()
                     .await?;
 
                 let mut environment: Environment = Environment::new(None);
-                () = environment.register_runtime(runtime.clone()).await?;
+                () = environment.register_runtime(agent_runtime.clone()).await?;
 
                 let _handle: JoinHandle<Result<(), RuntimeError>> = environment.run();
 
@@ -413,7 +420,10 @@ pub fn coding_agent_plugin(app: &mut App) {
     let _: &mut App = app
         .add_message::<CodingAgentRequest>()
         .add_message::<ProtocolEvent>()
-        .add_systems::<()>(Startup, (llm_setup, setup).chain())
+        .add_systems::<()>(
+            Startup,
+            (llm_setup, runtime_setup, topic_setup, setup).chain(),
+        )
         .add_systems::<(
             ScheduleConfigTupleMarker,
             (
