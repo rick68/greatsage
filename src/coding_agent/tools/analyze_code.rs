@@ -99,7 +99,6 @@ pub struct AnalyzeCodeTool {}
 impl ToolRuntime for AnalyzeCodeTool {
     async fn execute(&self, args: Value) -> Result<Value, ToolCallError> {
         let args: AnalyzeCodeArgs = serde_json::from_value(args)?;
-        println!("🔬 Analyzing code: {} ({})", args.path, args.analysis_type);
 
         let path: &Path = Path::new(&args.path);
         if !path.exists() {
