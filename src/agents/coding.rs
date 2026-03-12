@@ -1,8 +1,7 @@
 use {
     crate::{
         agents::{
-            AgentsCancelToken, GlobalAgentRuntime, Llm, MAX_TOKENS, MAX_TURNS, ProtocolEvent,
-            SLIDING_WINDOW_MEMORY,
+            AgentsCancelToken, GlobalAgentRuntime, Llm, MAX_TURNS, SLIDING_WINDOW_MEMORY,
             tools::{AnalyzeCodeTool, DateTimeTool, GrepTool},
         },
         tokio::AppCancelToken,
@@ -22,8 +21,7 @@ use {
             runtime::{RuntimeError, SingleThreadedRuntime, TypedRuntime},
             utils::BoxEventStream,
         },
-        llm::{LLMProvider, backends::openai::OpenAI, builder::LLMBuilder},
-        llm_error::LLMError,
+        llm::LLMProvider,
         protocol::Event,
     },
     autoagents_derive::{AgentHooks, agent},
@@ -37,7 +35,6 @@ use {
         app::{App, AppExit, Startup, Update},
         ecs::{
             change_detection::{NonSendMut, Res, ResMut},
-            error::BevyError,
             message::{Message, MessageId, MessageReader, MessageWriter},
             resource::Resource,
             schedule::common_conditions::{not, resource_exists},
@@ -124,46 +121,13 @@ pub struct CodingAgent {}
 #[derive(Deref, DerefMut, Message)]
 pub struct CodingAgentRequest(pub String);
 
-fn llm_setup(mut commands: Commands<'_, '_>) -> bevy::ecs::error::Result<()> {
-    let api_key: String = dotenvy::var("OPENAI_API_KEY")
-        .map_err::<BevyError, fn(dotenvy::Error) -> BevyError>(
-            |_: dotenvy::Error| -> BevyError { BevyError::from("OPENAI_API_KEY must be set") },
-        )?;
-    let base_url: String = dotenvy::var::<&str>("BASE_URL").unwrap_or_default();
-    let model: String = dotenvy::var::<&str>("MODEL").unwrap_or(String::from("gpt-4o"));
-
-    let llm: Arc<dyn LLMProvider> = {
-        let mut builder: LLMBuilder<OpenAI> = LLMBuilder::<OpenAI>::new()
-            .api_key(&api_key)
-            .model(&model)
-            .max_tokens(MAX_TOKENS)
-            .temperature(0.1);
-
-        if !base_url.is_empty() {
-            builder = builder.base_url(&base_url);
-        }
-
-        builder
-            .build()
-            .map_err::<BevyError, fn(LLMError) -> BevyError>(|_: LLMError| -> BevyError {
-                BevyError::from("Failed to build LLM")
-            })?
-    };
-
-    () = commands.insert_resource::<Llm>(Llm(llm));
-
-    Ok(())
-}
-
-fn runtime_setup(mut commands: Commands<'_, '_>) {
-    let runtime: Arc<SingleThreadedRuntime> = SingleThreadedRuntime::new(None);
-    () = commands.insert_resource::<GlobalAgentRuntime>(GlobalAgentRuntime(runtime));
-}
-
 fn topic_setup(mut commands: Commands<'_, '_>) {
     let coding_topic: Topic<Task> = Topic::<Task>::new(CODING_TASK_TOPIC);
     () = commands.insert_resource::<CodingTopic>(CodingTopic(coding_topic));
 }
+
+#[derive(Deref, DerefMut, Message)]
+struct ProtocolEvent(Event);
 
 fn setup(
     tokio_runtime: ResMut<'_, TokioTasksRuntime>,
@@ -412,10 +376,7 @@ pub fn coding_agent_plugin(app: &mut App) {
     let _: &mut App = app
         .add_message::<CodingAgentRequest>()
         .add_message::<ProtocolEvent>()
-        .add_systems::<()>(
-            Startup,
-            (llm_setup, runtime_setup, topic_setup, setup).chain(),
-        )
+        .add_systems::<()>(Startup, (topic_setup, setup).chain())
         .add_systems::<(
             ScheduleConfigTupleMarker,
             (
