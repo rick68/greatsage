@@ -1,7 +1,7 @@
 use {
     crate::{
         agents::{
-            AgentsCancelToken, GlobalAgentRuntime, Llm, MAX_TURNS, SLIDING_WINDOW_MEMORY,
+            AgentsCancelToken, GlobalAgentRuntime, Llm, MAX_TURNS,
             tools::{AnalyzeCodeTool, DateTimeTool, GrepTool},
         },
         tokio::AppCancelToken,
@@ -56,6 +56,7 @@ use {
 };
 
 const CODING_TASK_TOPIC: &str = "coding_task";
+const SLIDING_WINDOW_MEMORY: usize = 300;
 
 #[agent(
     name = "coding_agent",
@@ -118,8 +119,8 @@ Remember: You are a systematic problem solver. Think through each step, use your
 #[derive(AgentHooks, Clone)]
 pub struct CodingAgent {}
 
-#[derive(Deref, DerefMut, Message)]
-pub struct CodingAgentRequest(pub String);
+#[derive(Deref, DerefMut, Resource)]
+struct CodingTopic(Topic<Task>);
 
 fn topic_setup(mut commands: Commands<'_, '_>) {
     let coding_topic: Topic<Task> = Topic::<Task>::new(CODING_TASK_TOPIC);
@@ -127,32 +128,30 @@ fn topic_setup(mut commands: Commands<'_, '_>) {
 }
 
 #[derive(Deref, DerefMut, Message)]
-struct ProtocolEvent(Event);
+struct CodingAgentProtocolEvent(Event);
 
 fn setup(
     tokio_runtime: ResMut<'_, TokioTasksRuntime>,
     mut tui: NonSendMut<TuiMain<'_>>,
-    app_cancel: Res<'_, AppCancelToken>,
-    agent_cancel: Res<'_, AgentsCancelToken>,
     llm: Res<'_, Llm>,
     agent_runtime: Res<'_, GlobalAgentRuntime>,
-    topic: Res<'_, CodingTopic>,
+    app_cancel: Res<'_, AppCancelToken>,
+    agents_cancel: Res<'_, AgentsCancelToken>,
+    coding_topic: Res<'_, CodingTopic>,
 ) -> bevy::ecs::error::Result<()> {
     () = tui.output.push(Line::<'_>::from(
         "🚀 Starting Interactive Coding Agent Session",
     ));
 
+    let coding_agent: ReActAgent<CodingAgent> = ReActAgent::<CodingAgent>::new(CodingAgent {});
+    let llm: Arc<dyn LLMProvider> = llm.clone();
+    let agent_runtime: Arc<SingleThreadedRuntime> = agent_runtime.clone();
+    let coding_topic: Topic<Task> = coding_topic.clone();
     let memory: Box<SlidingWindowMemory> =
         Box::<SlidingWindowMemory>::new(SlidingWindowMemory::new(SLIDING_WINDOW_MEMORY));
-
-    let coding_agent: ReActAgent<CodingAgent> = ReActAgent::<CodingAgent>::new(CodingAgent {});
-    let agent_runtime: Arc<SingleThreadedRuntime> = agent_runtime.clone();
-    let coding_topic: Topic<Task> = topic.clone();
-
     let app_cancel: Arc<CancellationToken> = app_cancel.clone();
-    let agent_cancel: Arc<CancellationToken> = agent_cancel.clone();
+    let agents_cancel: Arc<CancellationToken> = agents_cancel.clone();
 
-    let llm: Arc<dyn LLMProvider> = llm.clone();
     let _: JoinHandle<Result<(), autoagents::core_error::Error>> = tokio_runtime
         .spawn_background_task::<_, Result<(), autoagents::core_error::Error>, _>(
             |mut ctx: TaskContext| async move {
@@ -176,12 +175,12 @@ fn setup(
                     tokio::select! {
                         Some(event) = receiver.next() => {
                             () = ctx.run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
-                                let _: Option<MessageId<ProtocolEvent>> = ctx.world
-                                    .write_message::<ProtocolEvent>(ProtocolEvent(event));
+                                let _: Option<MessageId<CodingAgentProtocolEvent >> = ctx.world
+                                    .write_message::<CodingAgentProtocolEvent>(CodingAgentProtocolEvent(event));
                             }).await;
                         }
                         _ = app_cancel.cancelled() => break,
-                        _ = agent_cancel.cancelled() => break,
+                        _ = agents_cancel.cancelled() => break,
                         else => unreachable!(),
                     }
                 }
@@ -192,17 +191,20 @@ fn setup(
             },
         );
 
-    Ok(())
+    Ok::<(), bevy::ecs::error::BevyError>(())
 }
 
 #[derive(Deref, Resource)]
-struct ProcessingTask(Task);
+struct ProcessingCodingTask(Task);
+
+#[derive(Deref, DerefMut, Message)]
+pub struct CodingAgentRequest(pub String);
 
 fn handle_protocol_events(
-    mut messages: MessageReader<'_, '_, ProtocolEvent>,
+    mut messages: MessageReader<'_, '_, CodingAgentProtocolEvent>,
     mut tui: NonSendMut<'_, TuiMain<'_>>,
     mut commands: Commands<'_, '_>,
-    mut processing: Option<Res<'_, ProcessingTask>>,
+    mut processing: Option<Res<'_, ProcessingCodingTask>>,
     mut agent_request_writer: MessageWriter<'_, CodingAgentRequest>,
 ) -> bevy::ecs::error::Result {
     for message in messages.read() {
@@ -273,7 +275,7 @@ fn handle_protocol_events(
                         () = tui.scroll_to_bottom();
                     }
                     Err(_) => {
-                        //Do Nothing
+                        // Do Nothing
                     }
                 }
             }
@@ -304,14 +306,14 @@ fn handle_protocol_events(
                 () = tui.scroll_to_bottom();
 
                 if *final_turn {
-                    () = commands.remove_resource::<ProcessingTask>();
+                    () = commands.remove_resource::<ProcessingCodingTask>();
                 } else if turn_number + 1 >= MAX_TURNS
                     && let Some(processing) = processing.take()
                 {
-                    let ProcessingTask(task) = processing.into_inner();
+                    let ProcessingCodingTask(task) = processing.into_inner();
                     let _: MessageId<CodingAgentRequest> =
                         agent_request_writer.write(CodingAgentRequest(task.prompt.clone()));
-                    () = commands.remove_resource::<ProcessingTask>()
+                    () = commands.remove_resource::<ProcessingCodingTask>()
                 }
             }
             _ => {
@@ -320,11 +322,8 @@ fn handle_protocol_events(
         }
     }
 
-    Ok(())
+    Ok::<(), bevy::ecs::error::BevyError>(())
 }
-
-#[derive(Deref, DerefMut, Resource)]
-struct CodingTopic(Topic<Task>);
 
 fn spawn_agent_task(
     runtime: ResMut<'_, TokioTasksRuntime>,
@@ -346,7 +345,7 @@ fn spawn_agent_task(
         () = output.push(line);
 
         let task: Task = Task::new(input);
-        () = commands.insert_resource::<ProcessingTask>(ProcessingTask(task.clone()));
+        () = commands.insert_resource::<ProcessingCodingTask>(ProcessingCodingTask(task.clone()));
 
         let agent_runtime: Arc<SingleThreadedRuntime> = agent_runtime.clone();
         let coding_topic: Topic<Task> = coding_topic.clone();
@@ -375,17 +374,17 @@ fn shutdown_coding_agent_environment_on_exit(
 pub fn coding_agent_plugin(app: &mut App) {
     let _: &mut App = app
         .add_message::<CodingAgentRequest>()
-        .add_message::<ProtocolEvent>()
+        .add_message::<CodingAgentProtocolEvent>()
         .add_systems::<()>(Startup, (topic_setup, setup).chain())
         .add_systems::<(
             ScheduleConfigTupleMarker,
             (
                 IsFunctionSystem,
                 fn(
-                    _, // MessageReader<'_, '_, ProtocolEvent>
+                    _, // MessageReader<'_, '_, CodingAgentProtocolEvent>
                     _, // NonSendMut<'_, TuiMain<'_>>
                     _, // Commands<'_, '_>
-                    _, // Option<Res<'_, ProcessingTask>>
+                    _, // Option<Res<'_, ProcessingCodingTask>>
                     _, // MessageWriter<'_, CodingAgentRequest>
                 ) -> bevy::ecs::error::Result,
             ),
@@ -401,7 +400,7 @@ pub fn coding_agent_plugin(app: &mut App) {
             Update,
             (
                 handle_protocol_events,
-                spawn_agent_task.run_if::<_>(not(resource_exists::<ProcessingTask>)),
+                spawn_agent_task.run_if::<_>(not(resource_exists::<ProcessingCodingTask>)),
                 shutdown_coding_agent_environment_on_exit,
             ),
         );

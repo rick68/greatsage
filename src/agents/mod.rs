@@ -22,7 +22,6 @@ use {
 };
 
 const MAX_TOKENS: u32 = 131_072;
-const SLIDING_WINDOW_MEMORY: usize = 300;
 const MAX_TURNS: usize = 10;
 
 #[derive(Deref, DerefMut, Resource)]
