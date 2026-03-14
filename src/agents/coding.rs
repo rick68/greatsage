@@ -1,7 +1,7 @@
 use {
     crate::{
         agents::{
-            AgentsCancelToken, GlobalAgentRuntime, Llm, MAX_TURNS,
+            AgentsCancelToken, GlobalAgentEnvironoment, GlobalAgentRuntime, Llm, MAX_TURNS,
             tools::{AnalyzeCodeTool, DateTimeTool, GrepTool},
         },
         tokio::AppCancelToken,
@@ -32,7 +32,7 @@ use {
         },
     },
     bevy::{
-        app::{App, AppExit, Startup, Update},
+        app::{App, AppExit, PostStartup, PostUpdate, Update},
         ecs::{
             change_detection::{NonSendMut, Res, ResMut},
             message::{Message, MessageId, MessageReader, MessageWriter},
@@ -51,7 +51,7 @@ use {
     },
     std::sync::Arc,
     termimad::MadSkin,
-    tokio::task::JoinHandle,
+    tokio::{sync::Mutex, task::JoinHandle},
     tokio_util::sync::CancellationToken,
 };
 
@@ -122,7 +122,7 @@ pub struct CodingAgent {}
 #[derive(Deref, DerefMut, Resource)]
 struct CodingTopic(Topic<Task>);
 
-fn topic_setup(mut commands: Commands<'_, '_>) {
+fn coding_topic_setup(mut commands: Commands<'_, '_>) {
     let coding_topic: Topic<Task> = Topic::<Task>::new(CODING_TASK_TOPIC);
     () = commands.insert_resource::<CodingTopic>(CodingTopic(coding_topic));
 }
@@ -131,13 +131,14 @@ fn topic_setup(mut commands: Commands<'_, '_>) {
 struct CodingAgentProtocolEvent(Event);
 
 fn setup(
-    tokio_runtime: ResMut<'_, TokioTasksRuntime>,
     mut tui: NonSendMut<TuiMain<'_>>,
     llm: Res<'_, Llm>,
     agent_runtime: Res<'_, GlobalAgentRuntime>,
+    coding_topic: Res<'_, CodingTopic>,
     app_cancel: Res<'_, AppCancelToken>,
     agents_cancel: Res<'_, AgentsCancelToken>,
-    coding_topic: Res<'_, CodingTopic>,
+    global_agent_environment: Res<'_, GlobalAgentEnvironoment>,
+    tokio_runtime: ResMut<'_, TokioTasksRuntime>,
 ) -> bevy::ecs::error::Result<()> {
     () = tui.output.push(Line::<'_>::from(
         "🚀 Starting Interactive Coding Agent Session",
@@ -151,45 +152,40 @@ fn setup(
         Box::<SlidingWindowMemory>::new(SlidingWindowMemory::new(SLIDING_WINDOW_MEMORY));
     let app_cancel: Arc<CancellationToken> = app_cancel.clone();
     let agents_cancel: Arc<CancellationToken> = agents_cancel.clone();
+    let global_agent_environment: Arc<Mutex<Environment>> = global_agent_environment.clone();
 
-    let _: JoinHandle<Result<(), autoagents::core_error::Error>> = tokio_runtime
-        .spawn_background_task::<_, Result<(), autoagents::core_error::Error>, _>(
-            |mut ctx: TaskContext| async move {
-                let _: ActorAgentHandle<ReActAgent<CodingAgent>> = AgentBuilder::new(coding_agent)
-                    .llm(llm)
-                    .runtime(agent_runtime.clone())
-                    .subscribe(coding_topic.clone())
-                    .memory(memory)
-                    .build()
-                    .await?;
+    let _: JoinHandle<_> =
+        tokio_runtime.spawn_background_task::<_, _, _>(|mut ctx: TaskContext| async move {
+            let _: ActorAgentHandle<ReActAgent<CodingAgent>> = AgentBuilder::new(coding_agent)
+                .llm(llm)
+                .runtime(agent_runtime.clone())
+                .subscribe(coding_topic.clone())
+                .memory(memory)
+                .build()
+                .await?;
 
-                let mut environment: Environment = Environment::new(None);
-                () = environment.register_runtime(agent_runtime.clone()).await?;
+            let mut receiver: BoxEventStream<Event> = global_agent_environment
+                .lock()
+                .await
+                .take_event_receiver(None)
+                .await?;
 
-                let _handle: JoinHandle<Result<(), RuntimeError>> = environment.run();
-
-                let mut receiver: BoxEventStream<Event> =
-                    environment.take_event_receiver(None).await?;
-
-                loop {
-                    tokio::select! {
-                        Some(event) = receiver.next() => {
-                            () = ctx.run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
-                                let _: Option<MessageId<CodingAgentProtocolEvent >> = ctx.world
-                                    .write_message::<CodingAgentProtocolEvent>(CodingAgentProtocolEvent(event));
-                            }).await;
-                        }
-                        _ = app_cancel.cancelled() => break,
-                        _ = agents_cancel.cancelled() => break,
-                        else => unreachable!(),
+            loop {
+                tokio::select! {
+                    Some(event) = receiver.next() => {
+                        () = ctx.run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
+                            let _: Option<MessageId<CodingAgentProtocolEvent >> = ctx.world
+                                .write_message::<CodingAgentProtocolEvent>(CodingAgentProtocolEvent(event));
+                        }).await;
                     }
+                    _ = app_cancel.cancelled() => break,
+                    _ = agents_cancel.cancelled() => break,
+                    else => unreachable!(),
                 }
+            }
 
-                () = environment.shutdown().await;
-
-                Ok::<(), autoagents::core_error::Error>(())
-            },
-        );
+            Ok::<(), autoagents::core_error::Error>(())
+        });
 
     Ok::<(), bevy::ecs::error::BevyError>(())
 }
@@ -358,7 +354,7 @@ fn spawn_agent_task(
     }
 }
 
-fn shutdown_coding_agent_environment_on_exit(
+fn shutdown_coding_agent(
     mut messages: MessageReader<'_, '_, AppExit>,
     mut cancel: Option<Res<'_, AgentsCancelToken>>,
 ) {
@@ -375,7 +371,7 @@ pub fn coding_agent_plugin(app: &mut App) {
     let _: &mut App = app
         .add_message::<CodingAgentRequest>()
         .add_message::<CodingAgentProtocolEvent>()
-        .add_systems::<()>(Startup, (topic_setup, setup).chain())
+        .add_systems::<()>(PostStartup, (coding_topic_setup, setup).chain())
         .add_systems::<(
             ScheduleConfigTupleMarker,
             (
@@ -389,19 +385,29 @@ pub fn coding_agent_plugin(app: &mut App) {
                 ) -> bevy::ecs::error::Result,
             ),
             (),
-            (
-                IsFunctionSystem,
-                fn(
-                    _, // MessageReader<'_, '_, AppExit>
-                    _, // Option<Res<'_, AgentsCancelToken>>
-                ) -> (),
-            ),
         )>(
             Update,
             (
                 handle_protocol_events,
-                spawn_agent_task.run_if::<_>(not(resource_exists::<ProcessingCodingTask>)),
-                shutdown_coding_agent_environment_on_exit,
+                spawn_agent_task.run_if::<()>(not::<
+                    (
+                        IsFunctionSystem,
+                        fn(
+                            _, // Option<Res<'_, ProcessingCodingTask>>
+                        ) -> bool,
+                    ),
+                    bool,
+                    fn(Option<Res<'_, ProcessingCodingTask>>) -> bool,
+                >(
+                    resource_exists::<ProcessingCodingTask>
+                )),
             ),
-        );
+        )
+        .add_systems::<(
+            IsFunctionSystem,
+            fn(
+                _, // MessageReader<'_, '_, AppExit>
+                _, // Option<Res<'_, AgentsCancelToken>>
+            ) -> (),
+        )>(PostUpdate, shutdown_coding_agent);
 }
