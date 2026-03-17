@@ -117,7 +117,7 @@ Remember: You are a systematic problem solver. Think through each step, use your
     ],
 )]
 #[derive(AgentHooks, Clone)]
-pub struct CodingAgent {}
+struct CodingAgent {}
 
 #[derive(Deref, DerefMut, Resource)]
 struct CodingTopic(Topic<Task>);
@@ -131,7 +131,7 @@ fn coding_topic_setup(mut commands: Commands<'_, '_>) {
 struct CodingAgentProtocolEvent(Event);
 
 fn setup(
-    mut tui: NonSendMut<TuiMain<'_>>,
+    mut tui: NonSendMut<'_, TuiMain<'_>>,
     llm: Res<'_, Llm>,
     agent_runtime: Res<'_, GlobalAgentRuntime>,
     coding_topic: Res<'_, CodingTopic>,
@@ -306,10 +306,10 @@ fn handle_protocol_events(
                 } else if turn_number + 1 >= MAX_TURNS
                     && let Some(processing) = processing.take()
                 {
+                    () = commands.remove_resource::<ProcessingCodingTask>();
                     let ProcessingCodingTask(task) = processing.into_inner();
                     let _: MessageId<CodingAgentRequest> =
                         agent_request_writer.write(CodingAgentRequest(task.prompt.clone()));
-                    () = commands.remove_resource::<ProcessingCodingTask>()
                 }
             }
             _ => {
@@ -393,7 +393,9 @@ pub fn coding_agent_plugin(app: &mut App) {
                     (
                         IsFunctionSystem,
                         fn(
-                            _, // Option<Res<'_, ProcessingCodingTask>>
+                            Option<
+                                _, // Res<'_, ProcessingCodingTask>
+                            >,
                         ) -> bool,
                     ),
                     bool,
