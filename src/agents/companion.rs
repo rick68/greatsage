@@ -1,3 +1,4 @@
+use crate::agents::SharedSlidingWindowMemory;
 use {
     crate::{
         agents::{
@@ -13,7 +14,6 @@ use {
             actor::Topic,
             agent::{
                 ActorAgentHandle, AgentBuilder,
-                memory::SlidingWindowMemory,
                 prebuilt::executor::{ReActAgent, ReActAgentOutput},
                 task::Task,
             },
@@ -50,7 +50,6 @@ use {
 };
 
 const COMPANION_TASK_TOPIC: &str = "companion_task";
-const SLIDING_WINDOW_MEMORY: usize = 100;
 
 #[derive(Deref, DerefMut, Message)]
 pub struct CompanionAgentRequest(pub String);
@@ -104,6 +103,7 @@ fn setup(
     llm: Res<'_, Llm>,
     agent_runtime: Res<'_, GlobalAgentRuntime>,
     companion_topic: Res<'_, CompanionTopic>,
+    shared_memory: Res<'_, SharedSlidingWindowMemory>,
     app_cancel: Res<'_, AppCancelToken>,
     agents_cancel: Res<'_, AgentsCancelToken>,
     global_agent_environment: Res<'_, GlobalAgentEnvironoment>,
@@ -118,8 +118,7 @@ fn setup(
     let llm: Arc<dyn LLMProvider> = llm.clone();
     let agent_runtime: Arc<SingleThreadedRuntime> = agent_runtime.clone();
     let companion_topic: Topic<Task> = companion_topic.clone();
-    let memory: Box<SlidingWindowMemory> =
-        Box::<SlidingWindowMemory>::new(SlidingWindowMemory::new(SLIDING_WINDOW_MEMORY));
+    let shared_memory: Box<SharedSlidingWindowMemory> = Box::new(shared_memory.clone());
     let app_cancel: Arc<CancellationToken> = app_cancel.clone();
     let agents_cancel: Arc<CancellationToken> = agents_cancel.clone();
     let global_agent_environment: Arc<Mutex<Environment>> = global_agent_environment.clone();
@@ -130,7 +129,7 @@ fn setup(
                 .llm(llm)
                 .runtime(agent_runtime.clone())
                 .subscribe(companion_topic.clone())
-                .memory(memory)
+                .memory(shared_memory)
                 .build()
                 .await?;
 

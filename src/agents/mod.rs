@@ -1,7 +1,11 @@
 mod coding;
 mod companion;
+
 mod routing;
 pub use routing::RoutingAgentRequest;
+
+mod shared_memory;
+pub use shared_memory::SharedSlidingWindowMemory;
 
 mod tools;
 
@@ -139,6 +143,7 @@ pub fn agents_plugin(app: &mut App) {
     let _: &mut App = app
         .init_resource::<AgentsCancelToken>()
         .init_resource::<GlobalAgentEnvironoment>()
+        .init_resource::<SharedSlidingWindowMemory>()
         .add_plugins::<(_, _, _, _)>((
             coding_agent_plugin,
             companion_agent_plugin,
