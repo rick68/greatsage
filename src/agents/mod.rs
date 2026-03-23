@@ -1,10 +1,15 @@
 mod coding;
-pub use coding::CodingAgentRequest;
+mod companion;
+mod routing;
+pub use routing::RoutingAgentRequest;
 
 mod tools;
 
 use {
-    self::coding::coding_agent_plugin,
+    self::{
+        coding::coding_agent_plugin, companion::companion_agent_plugin,
+        routing::routing_agent_plugin,
+    },
     crate::tokio::AppCancelToken,
     autoagents::{
         core::{environment::Environment, runtime::RuntimeError, runtime::SingleThreadedRuntime},
@@ -134,8 +139,12 @@ pub fn agents_plugin(app: &mut App) {
     let _: &mut App = app
         .init_resource::<AgentsCancelToken>()
         .init_resource::<GlobalAgentEnvironoment>()
-        .add_plugins::<_>(coding_agent_plugin)
-        .add_systems::<_>(PreStartup, (llm_setup, runtime_setup).chain())
+        .add_plugins::<(_, _, _, _)>((
+            coding_agent_plugin,
+            companion_agent_plugin,
+            routing_agent_plugin,
+        ))
+        .add_systems::<()>(PreStartup, (llm_setup, runtime_setup).chain())
         .add_systems::<(
             IsFunctionSystem,
             fn(
