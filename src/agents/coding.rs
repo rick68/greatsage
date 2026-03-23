@@ -2,7 +2,7 @@ use {
     crate::{
         agents::{
             AgentsCancelToken, GlobalAgentEnvironoment, GlobalAgentRuntime, Llm, MAX_TURNS,
-            tools::{AnalyzeCodeTool, DateTimeTool, GrepTool},
+            tools::{AnalyzeCodeTool, GrepTool},
         },
         tokio::AppCancelToken,
         tui::TuiMain,
@@ -58,6 +58,12 @@ use {
 const CODING_TASK_TOPIC: &str = "coding_task";
 const SLIDING_WINDOW_MEMORY: usize = 300;
 
+#[derive(Deref, DerefMut, Message)]
+pub struct CodingAgentRequest(pub String);
+
+#[derive(Deref, DerefMut, Message)]
+struct CodingAgentProtocolEvent(Event);
+
 #[agent(
     name = "coding_agent",
     description = "You are a coding agent operating within the AutoAgents framework using the ReAct (Reasoning + Acting) execution pattern. Your primary role is to help users with software engineering tasks through systematic reasoning and tool usage.
@@ -112,7 +118,6 @@ Remember: You are a systematic problem solver. Think through each step, use your
         SearchFile::new(100),
         WriteFile::new(),
         AnalyzeCodeTool,
-        DateTimeTool,
         DocumentParser,
     ],
 )]
@@ -126,9 +131,6 @@ fn coding_topic_setup(mut commands: Commands<'_, '_>) {
     let coding_topic: Topic<Task> = Topic::<Task>::new(CODING_TASK_TOPIC);
     () = commands.insert_resource::<CodingTopic>(CodingTopic(coding_topic));
 }
-
-#[derive(Deref, DerefMut, Message)]
-struct CodingAgentProtocolEvent(Event);
 
 fn setup(
     mut tui: NonSendMut<'_, TuiMain<'_>>,
@@ -192,9 +194,6 @@ fn setup(
 
 #[derive(Deref, Resource)]
 struct ProcessingCodingTask(Task);
-
-#[derive(Deref, DerefMut, Message)]
-pub struct CodingAgentRequest(pub String);
 
 fn handle_protocol_events(
     mut messages: MessageReader<'_, '_, CodingAgentProtocolEvent>,
