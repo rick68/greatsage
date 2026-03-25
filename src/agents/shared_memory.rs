@@ -17,59 +17,64 @@ pub struct SharedSlidingWindowMemory {
     inner: Arc<Mutex<SlidingWindowMemory>>,
 }
 
-impl Default for SharedSlidingWindowMemory {
-    fn default() -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(SlidingWindowMemory::new(
-                SLIDING_WINDOW_MEMORY_SIZE,
-            ))),
-        }
-    }
-}
-
 #[allow(dead_code)]
 impl SharedSlidingWindowMemory {
-    pub async fn new(window_size: usize) -> Self {
+    pub fn new(window_size: usize) -> Self {
         Self {
             inner: Arc::new(Mutex::new(SlidingWindowMemory::new(window_size))),
         }
     }
 
     pub fn window_size(&self) -> usize {
-        tokio::runtime::Handle::current()
-            .block_on::<_>(async { self.inner.lock().await.window_size() })
+        tokio::task::block_in_place::<_, usize>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.window_size() })
+        })
     }
 
     pub fn messages(&self) -> Vec<ChatMessage> {
-        tokio::runtime::Handle::current()
-            .block_on::<_>(async { self.inner.lock().await.messages() })
+        tokio::task::block_in_place::<_, Vec<ChatMessage>>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.messages() })
+        })
     }
 
     pub fn recent_messages(&self, limit: usize) -> Vec<ChatMessage> {
-        tokio::runtime::Handle::current()
-            .block_on::<_>(async { self.inner.lock().await.recent_messages(limit) })
+        tokio::task::block_in_place::<_, Vec<ChatMessage>>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.recent_messages(limit) })
+        })
     }
 
     pub fn needs_summary(&self) -> bool {
-        tokio::runtime::Handle::current()
-            .block_on::<_>(async { self.inner.lock().await.needs_summary() })
+        tokio::task::block_in_place::<_, bool>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.needs_summary() })
+        })
     }
 
     pub fn mark_for_summary(&mut self) {
-        tokio::runtime::Handle::current()
-            .block_on::<_>(async { self.inner.lock().await.mark_for_summary() })
+        () = tokio::task::block_in_place::<_, ()>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.mark_for_summary() })
+        });
     }
 
     pub fn replace_with_summary(&mut self, summary: String) {
-        tokio::runtime::Handle::current()
-            .block_on::<_>(async { self.inner.lock().await.replace_with_summary(summary) })
+        () = tokio::task::block_in_place::<_, ()>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.replace_with_summary(summary) })
+        });
     }
 }
 
 #[async_trait]
 impl MemoryProvider for SharedSlidingWindowMemory {
     async fn remember(&mut self, message: &ChatMessage) -> Result<(), LLMError> {
-        self.inner.lock().await.remember(message).await
+        tokio::task::block_in_place::<_, Result<(), LLMError>>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.remember(message).await })
+        })
     }
 
     async fn recall(
@@ -77,11 +82,17 @@ impl MemoryProvider for SharedSlidingWindowMemory {
         query: &str,
         limit: Option<usize>,
     ) -> Result<Vec<ChatMessage>, LLMError> {
-        self.inner.lock().await.recall(query, limit).await
+        tokio::task::block_in_place::<_, Result<Vec<ChatMessage>, LLMError>>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.recall(query, limit).await })
+        })
     }
 
     async fn clear(&mut self) -> Result<(), LLMError> {
-        self.inner.lock().await.clear().await
+        tokio::task::block_in_place::<_, Result<(), LLMError>>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.clear().await })
+        })
     }
 
     fn memory_type(&self) -> MemoryType {
@@ -89,7 +100,10 @@ impl MemoryProvider for SharedSlidingWindowMemory {
     }
 
     fn size(&self) -> usize {
-        tokio::runtime::Handle::current().block_on::<_>(async { self.inner.lock().await.size() })
+        tokio::task::block_in_place::<_, usize>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.size() })
+        })
     }
 
     fn clone_box(&self) -> Box<dyn MemoryProvider> {
@@ -97,26 +111,47 @@ impl MemoryProvider for SharedSlidingWindowMemory {
     }
 
     fn needs_summary(&self) -> bool {
-        tokio::runtime::Handle::current()
-            .block_on::<_>(async { self.inner.lock().await.needs_summary() })
+        tokio::task::block_in_place::<_, bool>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.needs_summary() })
+        })
     }
 
     fn mark_for_summary(&mut self) {
-        tokio::runtime::Handle::current()
-            .block_on::<_>(async { self.inner.lock().await.mark_for_summary() })
+        () = tokio::task::block_in_place::<_, ()>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.mark_for_summary() })
+        });
     }
 
     fn replace_with_summary(&mut self, summary: String) {
-        tokio::runtime::Handle::current()
-            .block_on::<_>(async { self.inner.lock().await.replace_with_summary(summary) })
+        () = tokio::task::block_in_place::<_, ()>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.replace_with_summary(summary) })
+        });
     }
 
     fn preload(&mut self, data: Vec<ChatMessage>) -> bool {
-        tokio::runtime::Handle::current()
-            .block_on::<_>(async { self.inner.lock().await.preload(data) })
+        tokio::task::block_in_place::<_, bool>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.preload(data) })
+        })
     }
 
     fn export(&self) -> Vec<ChatMessage> {
-        tokio::runtime::Handle::current().block_on::<_>(async { self.inner.lock().await.export() })
+        tokio::task::block_in_place::<_, Vec<ChatMessage>>(|| {
+            tokio::runtime::Handle::current()
+                .block_on::<_>(async { self.inner.lock().await.export() })
+        })
+    }
+}
+
+impl Default for SharedSlidingWindowMemory {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(SlidingWindowMemory::new(
+                SLIDING_WINDOW_MEMORY_SIZE,
+            ))),
+        }
     }
 }
