@@ -80,11 +80,6 @@ fn llm_setup(mut commands: Commands<'_, '_>) -> bevy::ecs::error::Result<()> {
     Ok(())
 }
 
-fn runtime_setup(mut commands: Commands<'_, '_>) {
-    let runtime: Arc<SingleThreadedRuntime> = SingleThreadedRuntime::new(None);
-    () = commands.insert_resource::<GlobalAgentRuntime>(GlobalAgentRuntime(runtime));
-}
-
 #[derive(Deref, DerefMut, Resource)]
 pub struct GlobalAgentEnvironoment(Arc<Mutex<Environment>>);
 
@@ -96,37 +91,37 @@ impl Default for GlobalAgentEnvironoment {
 }
 
 fn global_agent_environment_setup(
-    global_agent_environoment: Res<'_, GlobalAgentEnvironoment>,
+    global_agent_environment: Res<'_, GlobalAgentEnvironoment>,
     global_agent_runtime: Res<'_, GlobalAgentRuntime>,
     tokio_runtime: ResMut<'_, TokioTasksRuntime>,
     app_cancel: Res<'_, AppCancelToken>,
     agents_cancel: Res<'_, AgentsCancelToken>,
 ) {
-    let global_agent_environoment: Arc<Mutex<Environment>> = global_agent_environoment.clone();
+    let global_agent_environment: Arc<Mutex<Environment>> = global_agent_environment.clone();
     let global_agent_runtime: Arc<SingleThreadedRuntime> = global_agent_runtime.clone();
     let app_cancel: Arc<CancellationToken> = app_cancel.clone();
     let agents_cancel: Arc<CancellationToken> = agents_cancel.clone();
     let _: JoinHandle<Result<(), autoagents::core_error::Error>> = tokio_runtime
         .spawn_background_task::<_, Result<(), autoagents::core_error::Error>, _>(
             |_ctx: TaskContext| async move {
-                () = global_agent_environoment
+                () = global_agent_environment
                     .lock()
                     .await
                     .register_runtime(global_agent_runtime)
                     .await?;
 
                 let _: JoinHandle<Result<(), RuntimeError>> =
-                    global_agent_environoment.lock().await.run();
+                    global_agent_environment.lock().await.run();
 
                 let _: JoinHandle<()> = tokio::spawn::<_>(async move {
                     loop {
                         tokio::select! {
                             _ = app_cancel.cancelled() => {
-                                () = global_agent_environoment.lock().await.shutdown().await;
+                                () = global_agent_environment.lock().await.shutdown().await;
                                 break;
                             },
                             _ = agents_cancel.cancelled() => {
-                                () = global_agent_environoment.lock().await.shutdown().await;
+                                () = global_agent_environment.lock().await.shutdown().await;
                                 break;
                             },
                             else => unreachable!(),
@@ -144,12 +139,18 @@ pub fn agents_plugin(app: &mut App) {
         .init_resource::<AgentsCancelToken>()
         .init_resource::<GlobalAgentEnvironoment>()
         .init_resource::<SharedSlidingWindowMemory>()
+        .insert_resource::<GlobalAgentRuntime>(GlobalAgentRuntime(SingleThreadedRuntime::new(None)))
         .add_plugins::<(_, _, _, _)>((
             coding_agent_plugin,
             companion_agent_plugin,
             routing_agent_plugin,
         ))
-        .add_systems::<()>(PreStartup, (llm_setup, runtime_setup).chain())
+        .add_systems::<(
+            IsFunctionSystem,
+            fn(
+                _, // Commands<'_, '_>
+            ) -> bevy::ecs::error::Result<()>,
+        )>(PreStartup, llm_setup)
         .add_systems::<(
             IsFunctionSystem,
             fn(
