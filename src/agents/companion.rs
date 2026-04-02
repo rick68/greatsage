@@ -1,11 +1,9 @@
-use crate::agents::SharedSlidingWindowMemory;
 use {
     crate::{
         agents::{
-            AgentsCancelToken, GlobalAgentEnvironoment, GlobalAgentRuntime, Llm, MAX_TURNS,
-            tools::DateTimeTool,
+            AgentsCancelToken, GlobalAgentRuntime, Llm, MAX_TURNS, ProtocolEvent,
+            SharedSlidingWindowMemory, routing::RouteTo, tools::DateTimeTool,
         },
-        tokio::AppCancelToken,
         tui::TuiMain,
     },
     ansi_to_tui::IntoText,
@@ -17,9 +15,7 @@ use {
                 prebuilt::executor::{ReActAgent, ReActAgentOutput},
                 task::Task,
             },
-            environment::Environment,
             runtime::{RuntimeError, SingleThreadedRuntime, TypedRuntime},
-            utils::BoxEventStream,
         },
         llm::LLMProvider,
         protocol::Event,
@@ -31,22 +27,21 @@ use {
             change_detection::{NonSendMut, Res, ResMut},
             message::{Message, MessageId, MessageReader, MessageWriter},
             resource::Resource,
+            schedule::IntoScheduleConfigs,
             schedule::common_conditions::{not, resource_exists},
-            schedule::{IntoScheduleConfigs, ScheduleConfigTupleMarker},
             system::{Commands, IsFunctionSystem},
         },
         prelude::{Deref, DerefMut},
-        tasks::futures_lite::StreamExt,
+        state::condition::in_state,
     },
-    bevy_tokio_tasks::{MainThreadContext, TaskContext, TokioTasksRuntime},
+    bevy_tokio_tasks::{TaskContext, TokioTasksRuntime},
     ratatui::{
         style::Stylize,
         text::{Line, Span, Text},
     },
     std::sync::Arc,
     termimad::MadSkin,
-    tokio::{sync::Mutex, task::JoinHandle},
-    tokio_util::sync::CancellationToken,
+    tokio::task::JoinHandle,
 };
 
 const COMPANION_TASK_TOPIC: &str = "companion_task";
@@ -96,7 +91,7 @@ fn companion_topic_setup(mut commands: Commands<'_, '_>) {
 }
 
 #[derive(Deref, DerefMut, Message)]
-struct CompanionAgentProtocolEvent(Event);
+pub struct CompanionAgentProtocolEvent(Event);
 
 fn setup(
     mut tui: NonSendMut<'_, TuiMain<'_>>,
@@ -104,9 +99,6 @@ fn setup(
     agent_runtime: Res<'_, GlobalAgentRuntime>,
     companion_topic: Res<'_, CompanionTopic>,
     shared_memory: Res<'_, SharedSlidingWindowMemory>,
-    app_cancel: Res<'_, AppCancelToken>,
-    agents_cancel: Res<'_, AgentsCancelToken>,
-    global_agent_environment: Res<'_, GlobalAgentEnvironoment>,
     tokio_runtime: ResMut<'_, TokioTasksRuntime>,
 ) -> bevy::ecs::error::Result<()> {
     () = tui.output.push(Line::<'_>::from(
@@ -119,39 +111,17 @@ fn setup(
     let agent_runtime: Arc<SingleThreadedRuntime> = agent_runtime.clone();
     let companion_topic: Topic<Task> = companion_topic.clone();
     let shared_memory: Box<SharedSlidingWindowMemory> = Box::new(shared_memory.clone());
-    let app_cancel: Arc<CancellationToken> = app_cancel.clone();
-    let agents_cancel: Arc<CancellationToken> = agents_cancel.clone();
-    let global_agent_environment: Arc<Mutex<Environment>> = global_agent_environment.clone();
 
-    let _: JoinHandle<_> =
-        tokio_runtime.spawn_background_task::<_, _, _>(|mut ctx: TaskContext| async move {
-            let _: ActorAgentHandle<ReActAgent<CompanionAgent>> = AgentBuilder::new(companion_agent)
-                .llm(llm)
-                .runtime(agent_runtime.clone())
-                .subscribe(companion_topic.clone())
-                .memory(shared_memory)
-                .build()
-                .await?;
-
-            let mut receiver: BoxEventStream<Event> = global_agent_environment
-                .lock()
-                .await
-                .take_event_receiver(None)
-                .await?;
-
-            loop {
-                tokio::select! {
-                    Some(event) = receiver.next() => {
-                        () = ctx.run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
-                            let _: Option<MessageId<CompanionAgentProtocolEvent >> = ctx.world
-                                .write_message::<CompanionAgentProtocolEvent>(CompanionAgentProtocolEvent(event));
-                        }).await;
-                    }
-                    _ = app_cancel.cancelled() => break,
-                    _ = agents_cancel.cancelled() => break,
-                    else => unreachable!(),
-                }
-            }
+    let _: JoinHandle<Result<(), autoagents::core_error::Error>> = tokio_runtime
+        .spawn_background_task::<_, _, _>(|_ctx: TaskContext| async move {
+            let _: ActorAgentHandle<ReActAgent<CompanionAgent>> =
+                AgentBuilder::new(companion_agent)
+                    .llm(llm)
+                    .runtime(agent_runtime.clone())
+                    .subscribe(companion_topic.clone())
+                    .memory(shared_memory)
+                    .build()
+                    .await?;
 
             Ok::<(), autoagents::core_error::Error>(())
         });
@@ -163,7 +133,7 @@ fn setup(
 struct ProcessingCompanionTask(Task);
 
 fn handle_protocol_events(
-    mut messages: MessageReader<'_, '_, CompanionAgentProtocolEvent>,
+    mut messages: MessageReader<'_, '_, ProtocolEvent>,
     mut tui: NonSendMut<'_, TuiMain<'_>>,
     mut commands: Commands<'_, '_>,
     mut processing: Option<Res<'_, ProcessingCompanionTask>>,
@@ -209,6 +179,7 @@ fn handle_protocol_events(
                 () = tui.scroll_to_bottom();
             }
             Event::TaskComplete { result, .. } => {
+                () = commands.remove_resource::<ProcessingCompanionTask>();
                 match serde_json::from_str::<ReActAgentOutput>(result.as_str()) {
                     Ok(agent_out) => {
                         let skin: MadSkin = MadSkin::default();
@@ -339,20 +310,7 @@ pub fn companion_agent_plugin(app: &mut App) {
         .add_message::<CompanionAgentRequest>()
         .add_message::<CompanionAgentProtocolEvent>()
         .add_systems::<()>(PostStartup, (companion_topic_setup, setup).chain())
-        .add_systems::<(
-            ScheduleConfigTupleMarker,
-            (
-                IsFunctionSystem,
-                fn(
-                    _, // MessageReader<'_, '_, CodingAgentProtocolEvent>
-                    _, // NonSendMut<'_, TuiMain<'_>>
-                    _, // Commands<'_, '_>
-                    _, // Option<Res<'_, ProcessingCodingTask>>
-                    _, // MessageWriter<'_, CodingAgentRequest>
-                ) -> bevy::ecs::error::Result,
-            ),
-            (),
-        )>(
+        .add_systems::<()>(
             Update,
             (
                 handle_protocol_events,
@@ -370,7 +328,15 @@ pub fn companion_agent_plugin(app: &mut App) {
                 >(
                     resource_exists::<ProcessingCompanionTask>
                 )),
-            ),
+            )
+                .run_if::<(
+                    IsFunctionSystem,
+                    fn(
+                        Option<
+                            _, // Res<'_, RouteTo>
+                        >,
+                    ) -> bool,
+                )>(in_state::<RouteTo>(RouteTo::Companion)),
         )
         .add_systems::<(
             IsFunctionSystem,

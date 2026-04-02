@@ -26,6 +26,10 @@ use {
             system::{Commands, IsFunctionSystem},
         },
         prelude::Deref,
+        state::{
+            app::AppExtStates,
+            state::{NextState, States},
+        },
     },
     bevy_tokio_tasks::{MainThreadContext, TaskContext, TokioTasksRuntime},
     ratatui::{style::Stylize, text::Line},
@@ -91,18 +95,27 @@ fn setup(
 #[derive(Deref, Message)]
 pub struct RoutingAgentRequest(pub String);
 
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, States)]
+pub enum RouteTo {
+    Coder,
+    Companion,
+    #[default]
+    None,
+}
+
 #[derive(Deref, Resource)]
 struct ProcessingRoutingTask(Task);
 
 fn handle_routing(
     mut messages: MessageReader<'_, '_, RoutingAgentRequest>,
+    mut commands: Commands<'_, '_>,
     processing: Res<'_, Router>,
     runtime: ResMut<'_, TokioTasksRuntime>,
-    mut commands: Commands<'_, '_>,
 ) {
     for RoutingAgentRequest(input) in messages.read() {
         let task: Task = Task::new(input.clone());
         () = commands.insert_resource::<ProcessingRoutingTask>(ProcessingRoutingTask(task.clone()));
+
         let orchestrator: Arc<Mutex<DirectAgentHandle<BasicAgent<RoutingAgent>>>> =
             processing.clone();
         let _: JoinHandle<
@@ -128,15 +141,37 @@ fn handle_routing(
 
                     match decision.as_str() {
                         "coder" => {
-                            let _: Option<MessageId<CodingAgentRequest> >=
-                                ctx.world.write_message::<CodingAgentRequest>(CodingAgentRequest(input));
+                            let _: Option<MessageId<CodingAgentRequest>> =
+                                ctx
+                                    .world
+                                    .write_message::<CodingAgentRequest>(CodingAgentRequest(input));
+                            () =
+                                ctx
+                                    .world
+                                    .get_resource_mut::<NextState<RouteTo>>()
+                                    .unwrap()
+                                    .set(RouteTo::Coder);
                         }
                         "companion" => {
                             let _: Option<MessageId<CompanionAgentRequest> >=
-                                ctx.world.write_message::<CompanionAgentRequest>(CompanionAgentRequest(input));
+                                ctx
+                                    .world
+                                    .write_message::<CompanionAgentRequest>(CompanionAgentRequest(input));
+                            () = ctx
+                                .world
+                                .get_resource_mut::<NextState<RouteTo>>()
+                                .unwrap()
+                                .set(RouteTo::Companion);
                         }
-                        _ => (),
+                        _ => {
+                            () = ctx.
+                                world
+                                .get_resource_mut::<NextState<RouteTo>>()
+                                .unwrap()
+                                .set(RouteTo::None);
+                        },
                     }
+
                     let _: Option<ProcessingRoutingTask> = ctx.world.remove_resource::<ProcessingRoutingTask>();
                 }).await;
 
@@ -160,9 +195,10 @@ fn shutdown_routing_agent(
 
 pub fn routing_agent_plugin(app: &mut App) {
     let _: &mut App = app
-        .add_message::<RoutingAgentRequest>()
         .add_systems::<_>(Startup, setup)
-        .add_systems(
+        .add_message::<RoutingAgentRequest>()
+        .init_state::<RouteTo>()
+        .add_systems::<_>(
             Update,
             (
                 handle_routing.run_if::<()>(

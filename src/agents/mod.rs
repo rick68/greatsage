@@ -16,22 +16,29 @@ use {
     },
     crate::tokio::AppCancelToken,
     autoagents::{
-        core::{environment::Environment, runtime::RuntimeError, runtime::SingleThreadedRuntime},
+        core::{
+            environment::Environment,
+            runtime::{RuntimeError, SingleThreadedRuntime},
+            utils::BoxEventStream,
+        },
         llm::{LLMProvider, backends::openai::OpenAI, builder::LLMBuilder},
         llm_error::LLMError,
+        protocol::Event,
     },
     bevy::{
         app::{App, PreStartup, Startup},
         ecs::{
             change_detection::{Res, ResMut},
             error::BevyError,
+            message::{Message, MessageId},
             resource::Resource,
             schedule::IntoScheduleConfigs,
             system::{Commands, IsFunctionSystem},
         },
         prelude::{Deref, DerefMut},
+        tasks::futures_lite::StreamExt,
     },
-    bevy_tokio_tasks::{TaskContext, TokioTasksRuntime},
+    bevy_tokio_tasks::{MainThreadContext, TaskContext, TokioTasksRuntime},
     std::sync::Arc,
     tokio::{sync::Mutex, task::JoinHandle},
     tokio_util::sync::CancellationToken,
@@ -42,9 +49,6 @@ const MAX_TURNS: usize = 10;
 
 #[derive(Deref, DerefMut, Resource)]
 struct Llm(Arc<dyn LLMProvider>);
-
-#[derive(Deref, DerefMut, Resource)]
-struct GlobalAgentRuntime(Arc<SingleThreadedRuntime>);
 
 #[derive(Default, Deref, Resource)]
 struct AgentsCancelToken(Arc<CancellationToken>);
@@ -81,17 +85,20 @@ fn llm_setup(mut commands: Commands<'_, '_>) -> bevy::ecs::error::Result<()> {
 }
 
 #[derive(Deref, DerefMut, Resource)]
-pub struct GlobalAgentEnvironoment(Arc<Mutex<Environment>>);
+pub struct GlobalAgentEnvironment(Arc<Mutex<Environment>>);
 
-impl Default for GlobalAgentEnvironoment {
+impl Default for GlobalAgentEnvironment {
     fn default() -> Self {
         let environment: Environment = Environment::new(None);
-        GlobalAgentEnvironoment(Arc::new(Mutex::new(environment)))
+        GlobalAgentEnvironment(Arc::new(Mutex::new(environment)))
     }
 }
 
+#[derive(Deref, DerefMut, Resource)]
+struct GlobalAgentRuntime(Arc<SingleThreadedRuntime>);
+
 fn global_agent_environment_setup(
-    global_agent_environment: Res<'_, GlobalAgentEnvironoment>,
+    global_agent_environment: Res<'_, GlobalAgentEnvironment>,
     global_agent_runtime: Res<'_, GlobalAgentRuntime>,
     tokio_runtime: ResMut<'_, TokioTasksRuntime>,
     app_cancel: Res<'_, AppCancelToken>,
@@ -101,6 +108,7 @@ fn global_agent_environment_setup(
     let global_agent_runtime: Arc<SingleThreadedRuntime> = global_agent_runtime.clone();
     let app_cancel: Arc<CancellationToken> = app_cancel.clone();
     let agents_cancel: Arc<CancellationToken> = agents_cancel.clone();
+
     let _: JoinHandle<Result<(), autoagents::core_error::Error>> = tokio_runtime
         .spawn_background_task::<_, Result<(), autoagents::core_error::Error>, _>(
             |_ctx: TaskContext| async move {
@@ -134,12 +142,51 @@ fn global_agent_environment_setup(
         );
 }
 
+#[derive(Deref, DerefMut, Message)]
+pub struct ProtocolEvent(Event);
+
+fn protocol_event_forward_setup(
+    global_agent_environment: Res<'_, GlobalAgentEnvironment>,
+    app_cancel: Res<'_, AppCancelToken>,
+    tokio_runtime: ResMut<'_, TokioTasksRuntime>,
+) {
+    let global_agent_environment: Arc<Mutex<Environment>> = global_agent_environment.clone();
+    let app_cancel: Arc<CancellationToken> = app_cancel.clone();
+
+    let _: JoinHandle<Result<(), autoagents::core_error::Error>> = tokio_runtime
+        .spawn_background_task::<_, Result<(), autoagents::core_error::Error>, _>(
+            |mut ctx: TaskContext| async move {
+                let mut receiver: BoxEventStream<Event> = global_agent_environment
+                    .lock()
+                    .await
+                    .take_event_receiver(None)
+                    .await?;
+
+                loop {
+                    tokio::select! {
+                        Some(event) = receiver.next() => {
+                            () = ctx.run_on_main_thread::<_, ()>(move |ctx:  MainThreadContext<'_>| {
+                                let _: Option<MessageId<ProtocolEvent>> =
+                                    ctx.world.write_message::<ProtocolEvent>(ProtocolEvent(event));
+                            }).await;
+                        }
+                        _ = app_cancel.cancelled() => break,
+                        else => unreachable!(),
+                    }
+                }
+
+                Ok::<(), autoagents::core_error::Error>(())
+            },
+        );
+}
+
 pub fn agents_plugin(app: &mut App) {
     let _: &mut App = app
         .init_resource::<AgentsCancelToken>()
-        .init_resource::<GlobalAgentEnvironoment>()
+        .init_resource::<GlobalAgentEnvironment>()
         .init_resource::<SharedSlidingWindowMemory>()
         .insert_resource::<GlobalAgentRuntime>(GlobalAgentRuntime(SingleThreadedRuntime::new(None)))
+        .add_message::<ProtocolEvent>()
         .add_plugins::<(_, _, _, _)>((
             coding_agent_plugin,
             companion_agent_plugin,
@@ -151,14 +198,8 @@ pub fn agents_plugin(app: &mut App) {
                 _, // Commands<'_, '_>
             ) -> bevy::ecs::error::Result<()>,
         )>(PreStartup, llm_setup)
-        .add_systems::<(
-            IsFunctionSystem,
-            fn(
-                _, // Res<'_, GlobalAgentEnvironoment>
-                _, // Res<'_, GlobalAgentRuntime>
-                _, // ResMut<'_, TokioTasksRuntime>
-                _, // Res<'_, AppCancelToken>
-                _, // Res<'_, AgentsCancelToken>
-            ) -> (),
-        )>(Startup, global_agent_environment_setup);
+        .add_systems::<()>(
+            Startup,
+            (global_agent_environment_setup, protocol_event_forward_setup).chain(),
+        );
 }
