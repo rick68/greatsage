@@ -15,7 +15,7 @@ use {
                 IntoScheduleConfigs, NotSystem, ScheduleConfigTupleMarker, SystemCondition,
                 common_conditions::{not, resource_exists},
             },
-            system::{AdapterSystem, Commands, FunctionSystem, IsFunctionSystem},
+            system::{Commands, FunctionSystem, IsFunctionSystem},
             world::World,
         },
         prelude::{Deref, DerefMut},
@@ -46,7 +46,7 @@ use {
         provider::{ModelConfig, openai_compat::OpenAiCompatProvider},
         skills::SkillSet,
         tools::default_tools,
-        types::{AgentEvent, AgentMessage, Content, StreamDelta, Usage},
+        types::{AgentEvent, AgentMessage, StreamDelta, Usage},
     },
 };
 
@@ -136,6 +136,8 @@ enum CodingAgentState {
 pub struct CodingAgentTask {
     last_usage: Usage,
     in_text: bool,
+    tui_output_index: usize,
+    buffer: String,
 }
 
 #[derive(Debug, Deref, DerefMut, Message)]
@@ -201,6 +203,8 @@ fn handle_coding_agent_events(
         let CodingAgentTask {
             last_usage,
             in_text,
+            tui_output_index,
+            buffer: buf,
         } = coding_agent_task.as_mut();
 
         match event {
@@ -209,6 +213,9 @@ fn handle_coding_agent_events(
             } => {
                 if *in_text {
                     if let Some(tui) = tui.as_mut() {
+                        let span: Span<'_> =
+                            format!("🔧 Tool Call: {tool_name} with args: {args}").yellow();
+                        () = tui.output.push(Line::<'_>::from(span));
                         () = tui.output.push(Line::<'_>::from(""));
                     }
                     *in_text = false;
@@ -274,11 +281,22 @@ fn handle_coding_agent_events(
                     () = tui.scroll_to_bottom();
                 }
             }
-            AgentEvent::ToolExecutionEnd { is_error, .. } => {
+            AgentEvent::ToolExecutionEnd {
+                tool_name,
+                result,
+                is_error,
+                ..
+            } => {
                 let line: Line<'_> = if *is_error {
-                    Line::from("x").red()
+                    Line::from(format!(
+                        "❌ Tool Incompleted: {tool_name} - Result: {result:?}"
+                    ))
+                    .red()
                 } else {
-                    Line::from("✓").green()
+                    Line::from(format!(
+                        "✅ Tool Completed: {tool_name} - Result: {result:?}"
+                    ))
+                    .yellow()
                 };
 
                 if let Some(tui) = tui.as_mut() {
@@ -291,36 +309,51 @@ fn handle_coding_agent_events(
                 ..
             } => {
                 if !*in_text {
+                    () = buf.clear();
                     if let Some(tui) = tui.as_mut() {
                         () = tui.output.push(Line::<'_>::from(""));
+                        let line: Line<'_> = Line::<'_>::from("📝 Agent Response:");
+                        () = tui.output.push(Line::<'_>::from(line));
+                        let span: Span<'_> = "─".repeat(50).blue();
+                        let line: Line<'_> = Line::<'_>::from(span);
+                        () = tui.output.push(line);
+                        () = tui.output.push(Line::<'_>::from(""));
                     }
+                    *tui_output_index = 0;
                     *in_text = true;
                 }
 
-                if let Some(tui) = tui.as_mut() {
-                    if let Some(line) = tui.output.last_mut() {
-                        () = line.push_span(delta.clone());
+                if tui.is_none() {
+                    print!("{delta}");
+                    () = stdout().flush().unwrap();
+                } else if let Some(tui) = tui.as_mut() {
+                    () = buf.push_str(&delta);
+
+                    let skin: MadSkin = MadSkin::default();
+
+                    let output_len: usize = tui.output.len();
+                    () = tui.output.truncate(output_len - 1 - *tui_output_index);
+
+                    let mut out: String = String::new();
+                    let _ = skin
+                        .write_text_on::<Vec<u8>>(unsafe { out.as_mut_vec() }, &buf)
+                        .unwrap();
+
+                    let text: Text<'_> = out.into_text().unwrap();
+                    *tui_output_index = text.lines.len();
+                    for line in text.lines {
+                        () = tui.output.push(line);
                     }
+
+                    let span: Span<'_> = "─".repeat(50).blue();
+                    let line: Line<'_> = Line::<'_>::from(span);
+                    () = tui.output.push(line);
+
+                    () = tui.scroll_to_bottom();
                 }
             }
             AgentEvent::AgentEnd { messages } => {
                 for msg in messages.iter().rev() {
-                    if tui.is_none()
-                        && let AgentMessage::Llm(yoagent::types::Message::Assistant {
-                            content, ..
-                        }) = msg
-                    {
-                        for ctn in content.iter() {
-                            match ctn {
-                                Content::Text { text } => {
-                                    print!("{text}");
-                                    () = stdout().flush().unwrap();
-                                }
-                                _ => continue,
-                            }
-                        }
-                    }
-
                     if let AgentMessage::Llm(yoagent::types::Message::Assistant { usage, .. }) = msg
                     {
                         *last_usage = usage.clone();
