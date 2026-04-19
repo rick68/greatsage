@@ -1,341 +1,335 @@
 use {
     crate::{
-        agents::{
-            AgentsCancelToken, GlobalAgentRuntime, Llm, MAX_TURNS, ProtocolEvent,
-            SharedSlidingWindowMemory,
-            routing::RouteTo,
-            tools::{AnalyzeCodeTool, GrepTool},
-        },
+        agents::{AgentsCancelToken, LlmConfig},
         tokio::AppCancelToken,
         tui::TuiMain,
     },
     ansi_to_tui::IntoText,
-    autoagents::{
-        core::{
-            actor::Topic,
-            agent::{
-                ActorAgentHandle, AgentBuilder,
-                prebuilt::executor::{ReActAgent, ReActAgentOutput},
-                task::Task,
-            },
-            runtime::{RuntimeError, SingleThreadedRuntime, TypedRuntime},
-        },
-        llm::LLMProvider,
-        protocol::Event,
-    },
-    autoagents_derive::{AgentHooks, agent},
-    autoagents_toolkit::tools::{
-        document_parsing::DocumentParser,
-        filesystem::{
-            CopyFile, CreateDir, DeleteFile, ListDir, MoveFile, ReadFile, SearchFile, WriteFile,
-        },
-    },
     bevy::{
-        app::{App, AppExit, PostStartup, PostUpdate, Update},
+        app::{App, AppExit, PostUpdate, Startup, Update},
         ecs::{
             change_detection::{NonSendMut, Res, ResMut},
-            message::{Message, MessageId, MessageReader, MessageWriter},
+            message::{Message, MessageId, MessageReader},
             resource::Resource,
-            schedule::IntoScheduleConfigs,
-            schedule::common_conditions::{not, resource_exists},
-            system::{Commands, IsFunctionSystem},
+            schedule::{
+                IntoScheduleConfigs, NotSystem, ScheduleConfigTupleMarker, SystemCondition,
+                common_conditions::{not, resource_exists},
+            },
+            system::{AdapterSystem, Commands, FunctionSystem, IsFunctionSystem},
+            world::World,
         },
         prelude::{Deref, DerefMut},
-        state::condition::in_state,
+        state::{
+            app::AppExtStates,
+            condition::in_state,
+            state::{NextState, States},
+        },
     },
-    bevy_tokio_tasks::{TaskContext, TokioTasksRuntime},
+    bevy_tokio_tasks::{MainThreadContext, TaskContext, TokioTasksRuntime},
     ratatui::{
         style::Stylize,
         text::{Line, Span, Text},
     },
-    std::sync::Arc,
+    serde_json::Value,
+    std::{
+        io::{Write, stdout},
+        sync::Arc,
+    },
     termimad::MadSkin,
-    tokio::task::JoinHandle,
+    tokio::{
+        sync::{Mutex, mpsc::UnboundedReceiver},
+        task::JoinHandle,
+    },
     tokio_util::sync::CancellationToken,
+    yoagent::{
+        agent::Agent,
+        provider::{ModelConfig, openai_compat::OpenAiCompatProvider},
+        skills::SkillSet,
+        tools::default_tools,
+        types::{AgentEvent, AgentMessage, Content, StreamDelta, Usage},
+    },
 };
 
-const CODING_TASK_TOPIC: &str = "coding_task";
-
-#[derive(Deref, DerefMut, Message)]
-pub struct CodingAgentRequest(pub String);
-
-#[derive(Deref, DerefMut, Message)]
-pub struct CodingAgentProtocolEvent(Event);
-
-#[agent(
-    name = "coding_agent",
-    description = "You are a coding agent operating within the AutoAgents framework using the ReAct (Reasoning + Acting) execution pattern. Your primary role is to help users with software engineering tasks through systematic reasoning and tool usage.
-
-## Core Capabilities
-You can:
-- Search for files using glob patterns (FileSearchTool)
-- Search file contents with regex patterns (GrepTool)
-- Read file contents (ReadFileTool)
-- Write and create files (WriteFileTool)
-- Delete files (DeleteFileTool)
-- List directory contents (ListDirectoryTool)
-- Analyze code structure and complexity (AnalyzeCodeTool)
-
-## ReAct Execution Pattern
-As a ReAct agent, you follow this pattern for each task:
-1. **Thought**: Analyze what needs to be done and plan your approach
-2. **Action**: Use appropriate tools to gather information or make changes
-3. **Observation**: Process the results from your tools
-4. **Repeat**: Continue the thought-action-observation cycle until the task is complete
-
-## Working Principles
-- **Be Precise**: Always use exact file paths. When given a working directory, use it as the base for all operations
-- **Verify Before Acting**: Check if files/directories exist before attempting operations
-- **Incremental Progress**: Break complex tasks into smaller, manageable steps
-- **Clear Communication**: Explain your reasoning and actions, but be concise
-- **Safety First**: Never delete or overwrite files without clear intent
-- **Follow Conventions**: Respect existing code style and project structure
-
-## Task Execution Guidelines
-- Start by understanding the codebase structure using ListDirectoryTool or FileSearchTool
-- Use GrepTool to find patterns across multiple files efficiently
-- Read files to understand context before making modifications
-- When writing code, follow the existing style and conventions
-- Always provide clear feedback about what was accomplished
-
-## Important Constraints
-- All file paths should be relative to the provided base directory
-- You cannot execute shell commands or run code directly
-- Focus on file manipulation and code analysis tasks
-- Be explicit about limitations when you cannot complete a request
-
-Remember: You are a systematic problem solver. Think through each step, use your tools effectively, and provide clear, actionable results.",
-    tools = [
-        CreateDir::new(),
-        ListDir::new(),
-        GrepTool,
-        CopyFile::new(),
-        DeleteFile::new(),
-        MoveFile::new(),
-        ReadFile::new(),
-        SearchFile::new(100),
-        WriteFile::new(),
-        AnalyzeCodeTool,
-        DocumentParser,
-    ],
-)]
-#[derive(AgentHooks, Clone)]
-struct CodingAgent {}
+const SYSTEM_PROMPT: &str = r#"You are a coding assistant working in the user's terminal.
+You have access to the filesystem and shell. Be direct and concise.
+When the user asks you to do something, do it — don't just explain how.
+Use tools proactively: read files to understand context, run commands to verify your work.
+After making changes, run tests or verify the result when appropriate."#;
 
 #[derive(Deref, DerefMut, Resource)]
-struct CodingTopic(Topic<Task>);
+struct CodingAgent(Arc<Mutex<Agent>>);
 
-fn coding_topic_setup(mut commands: Commands<'_, '_>) {
-    let coding_topic: Topic<Task> = Topic::<Task>::new(CODING_TASK_TOPIC);
-    () = commands.insert_resource::<CodingTopic>(CodingTopic(coding_topic));
+#[derive(Clone, Resource)]
+pub struct CodingAgentPromptChannel {
+    pub sender: crossbeam_channel::Sender<String>,
+    pub receiver: crossbeam_channel::Receiver<String>,
+}
+
+impl Default for CodingAgentPromptChannel {
+    fn default() -> Self {
+        let (sender, receiver): (
+            crossbeam_channel::Sender<String>,
+            crossbeam_channel::Receiver<String>,
+        ) = crossbeam_channel::unbounded::<String>();
+
+        Self { sender, receiver }
+    }
 }
 
 fn setup(
-    mut tui: NonSendMut<'_, TuiMain<'_>>,
-    llm: Res<'_, Llm>,
-    agent_runtime: Res<'_, GlobalAgentRuntime>,
-    coding_topic: Res<'_, CodingTopic>,
-    shared_memory: Res<'_, SharedSlidingWindowMemory>,
+    llm_config: Res<'_, LlmConfig>,
+    mut tui: Option<NonSendMut<'_, TuiMain<'_>>>,
+    mut commands: Commands<'_, '_>,
     app_cancel: Res<'_, AppCancelToken>,
     agents_cancel: Res<'_, AgentsCancelToken>,
     tokio_runtime: ResMut<'_, TokioTasksRuntime>,
-) -> bevy::ecs::error::Result<()> {
-    () = tui.output.push(Line::<'_>::from(
-        "🚀 Starting Interactive Coding Agent Session",
-    ));
+) {
+    if let Some(tui) = tui.as_mut() {
+        () = tui.output.push(Line::<'_>::from(
+            "🚀 Starting Interactive Coding Agent Session",
+        ));
+    }
 
-    let coding_agent: ReActAgent<CodingAgent> = ReActAgent::<CodingAgent>::new(CodingAgent {});
-    let llm: Arc<dyn LLMProvider> = llm.clone();
-    let agent_runtime: Arc<SingleThreadedRuntime> = agent_runtime.clone();
-    let coding_topic: Topic<Task> = coding_topic.clone();
-    let shared_memory: Box<SharedSlidingWindowMemory> = Box::new(shared_memory.clone());
+    let LlmConfig {
+        base_url,
+        model,
+        api_key,
+    } = llm_config.into_inner();
+
+    let model_config: ModelConfig = ModelConfig::local(base_url, model);
+    let skills: SkillSet = SkillSet::load(&["./skills"]).expect("Failed to load skills");
+    let agent: Agent = Agent::new(OpenAiCompatProvider)
+        .with_model_config(model_config)
+        .with_system_prompt(SYSTEM_PROMPT)
+        .with_model(model)
+        .with_api_key(api_key)
+        .with_skills(skills.clone())
+        .with_tools(default_tools());
+    let coding_agent: CodingAgent = CodingAgent(Arc::new(Mutex::new(agent)));
+
+    () = commands.insert_resource::<CodingAgent>(coding_agent);
+    () = commands.init_resource::<CodingAgentPromptChannel>();
+
     let app_cancel: Arc<CancellationToken> = app_cancel.clone();
     let agents_cancel: Arc<CancellationToken> = agents_cancel.clone();
 
-    let _: JoinHandle<Result<(), autoagents::core_error::Error>> = tokio_runtime
-        .spawn_background_task::<_, Result<(), autoagents::core_error::Error>, _>(
-            |_ctx: TaskContext| async move {
-                let _: ActorAgentHandle<ReActAgent<CodingAgent>> = AgentBuilder::new(coding_agent)
-                    .llm(llm)
-                    .runtime(agent_runtime.clone())
-                    .subscribe(coding_topic.clone())
-                    .memory(shared_memory)
-                    .build()
-                    .await?;
-
-                loop {
-                    tokio::select! {
-                        _ = app_cancel.cancelled() => break,
-                        _ = agents_cancel.cancelled() => break,
-                        else => unreachable!(),
-                    }
+    let _: JoinHandle<()> =
+        tokio_runtime.spawn_background_task::<_, (), _>(|_ctx: TaskContext| async move {
+            loop {
+                tokio::select! {
+                    _ = app_cancel.cancelled() => break,
+                    _ = agents_cancel.cancelled() => break,
+                    else => unreachable!(),
                 }
-
-                Ok::<(), autoagents::core_error::Error>(())
-            },
-        );
-
-    Ok::<(), bevy::ecs::error::BevyError>(())
+            }
+        });
 }
 
-#[derive(Deref, Resource)]
-pub struct ProcessingCodingTask(pub Task);
-
-fn handle_protocol_events(
-    mut messages: MessageReader<'_, '_, ProtocolEvent>,
-    mut tui: NonSendMut<'_, TuiMain<'_>>,
-    mut commands: Commands<'_, '_>,
-    mut processing: Option<Res<'_, ProcessingCodingTask>>,
-    mut agent_request_writer: MessageWriter<'_, CodingAgentRequest>,
-) -> bevy::ecs::error::Result {
-    for message in messages.read() {
-        match &**message {
-            Event::TaskStarted {
-                actor_id,
-                task_description,
-                ..
-            } => {
-                let span: Span<'_> = format!("🎯 Task Started - Agent: {actor_id:?}").cyan();
-                let line: Line<'_> = Line::<'_>::from(span);
-                () = tui.output.push(line);
-
-                let span: Span<'_> = format!("   📝 Task: {task_description}").cyan();
-                let line: Line<'_> = Line::<'_>::from(span);
-                () = tui.output.push(line);
-
-                () = tui.scroll_to_bottom();
-            }
-            Event::ToolCallRequested {
-                tool_name,
-                arguments,
-                ..
-            } => {
-                let span: Span<'_> =
-                    format!("🔧 Tool Call: {tool_name} with args: {arguments}").yellow();
-                let line: Line<'_> = Line::from(span);
-
-                () = tui.output.push(line);
-                () = tui.scroll_to_bottom();
-            }
-            Event::ToolCallCompleted {
-                tool_name, result, ..
-            } => {
-                let span: Span<'_> =
-                    format!("✅ Tool Completed: {tool_name} - Result: {result:?}").yellow();
-                let line: Line<'_> = Line::from(span);
-
-                () = tui.output.push(line);
-                () = tui.scroll_to_bottom();
-            }
-            Event::TaskComplete { result, .. } => {
-                match serde_json::from_str::<ReActAgentOutput>(result.as_str()) {
-                    Ok(agent_out) => {
-                        let skin: MadSkin = MadSkin::default();
-
-                        let line: Line<'_> = Line::<'_>::from("\n📝 Agent Response:");
-                        () = tui.output.push(line);
-
-                        let span: Span<'_> = "─".repeat(50).blue();
-                        let line: Line<'_> = Line::<'_>::from(span);
-                        () = tui.output.push(line);
-
-                        let mut buf: String = String::new();
-                        () = skin.write_text_on::<Vec<u8>>(
-                            unsafe { buf.as_mut_vec() },
-                            &agent_out.response,
-                        )?;
-
-                        let text: Text<'_> = buf.into_text()?;
-                        for line in text.lines {
-                            () = tui.output.push(line);
-                        }
-
-                        let span: Span<'_> = "─".repeat(50).blue();
-                        let line: Line<'_> = Line::<'_>::from(span);
-                        () = tui.output.push(line);
-                        () = tui.scroll_to_bottom();
-                    }
-                    Err(_) => {
-                        // Do Nothing
-                    }
-                }
-            }
-            Event::TurnStarted {
-                turn_number,
-                max_turns,
-                ..
-            } => {
-                let span: Span<'_> =
-                    format!("🔄 Turn {}/{max_turns} started", turn_number + 1).blue();
-                let line: Line<'_> = Line::<'_>::from(span);
-                () = tui.output.push(line);
-                () = tui.scroll_to_bottom();
-            }
-            Event::TurnCompleted {
-                turn_number,
-                final_turn,
-                ..
-            } => {
-                let span: Span<'_> = format!(
-                    "✅ Turn {} completed{}",
-                    turn_number + 1,
-                    if *final_turn { " (final)" } else { "" }
-                )
-                .blue();
-                let line: Line<'_> = Line::<'_>::from(span);
-                () = tui.output.push(line);
-                () = tui.scroll_to_bottom();
-
-                if *final_turn {
-                    () = commands.remove_resource::<ProcessingCodingTask>();
-                } else if turn_number + 1 >= MAX_TURNS
-                    && let Some(processing) = processing.take()
-                {
-                    () = commands.remove_resource::<ProcessingCodingTask>();
-                    let ProcessingCodingTask(task) = processing.into_inner();
-                    let _: MessageId<CodingAgentRequest> =
-                        agent_request_writer.write(CodingAgentRequest(task.prompt.clone()));
-                }
-            }
-            _ => {
-                // Handle other events silently or with debug output
-            }
-        }
-    }
-
-    Ok::<(), bevy::ecs::error::BevyError>(())
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, States)]
+enum CodingAgentState {
+    #[default]
+    Idle,
+    Processing,
 }
+
+#[derive(Default, Resource)]
+pub struct CodingAgentTask {
+    last_usage: Usage,
+    in_text: bool,
+}
+
+#[derive(Debug, Deref, DerefMut, Message)]
+pub struct CodingAgentEvent(AgentEvent);
 
 fn spawn_agent_task(
+    channel: Res<'_, CodingAgentPromptChannel>,
     runtime: ResMut<'_, TokioTasksRuntime>,
-    mut messages: MessageReader<'_, '_, CodingAgentRequest>,
-    mut tui: NonSendMut<'_, TuiMain<'_>>,
+    coding_agent: ResMut<'_, CodingAgent>,
     mut commands: Commands<'_, '_>,
-    agent_runtime: Res<'_, GlobalAgentRuntime>,
-    coding_topic: Res<'_, CodingTopic>,
+    mut next_state: ResMut<'_, NextState<CodingAgentState>>,
 ) {
-    for CodingAgentRequest(input) in messages.read() {
-        let output: &mut Vec<Line<'_>> = tui.output.as_mut();
-
-        let span: Span<'_> = Span::<'_>::raw("");
-        let line: Line<'_> = Line::<'_>::from(span);
-        () = output.push(line);
-
-        let span: Span<'_> = Span::<'_>::raw("🔄 Processing your request...\n");
-        let line: Line<'_> = Line::<'_>::from(span);
-        () = output.push(line);
-
-        let task: Task = Task::new(input);
-        () = commands.insert_resource::<ProcessingCodingTask>(ProcessingCodingTask(task.clone()));
-
-        let agent_runtime: Arc<SingleThreadedRuntime> = agent_runtime.clone();
-        let coding_topic: Topic<Task> = coding_topic.clone();
-
+    if let Ok(prompt) = channel.receiver.try_recv() {
+        let coding_agent: Arc<Mutex<Agent>> = coding_agent.clone();
         let _: JoinHandle<()> =
-            runtime.spawn_background_task::<_, (), _>(|_ctx: TaskContext| async move {
-                let _: Result<(), RuntimeError> =
-                    agent_runtime.publish::<Task>(&coding_topic, task).await;
+            runtime.spawn_background_task::<_, (), _>(move |mut ctx: TaskContext| async move {
+                let mut rx: UnboundedReceiver<AgentEvent> =
+                    coding_agent.lock().await.prompt(prompt.clone()).await;
+
+                while let Some(event) = rx.recv().await {
+                    () = ctx
+                        .run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
+                            let _: Option<MessageId<CodingAgentEvent>> = ctx
+                                .world
+                                .write_message::<CodingAgentEvent>(CodingAgentEvent(event));
+                        })
+                        .await;
+                }
+
+                () = ctx
+                    .run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
+                        let world: &mut World = ctx.world;
+                        let _: Option<CodingAgentTask> = world.remove_resource::<CodingAgentTask>();
+
+                        () = world
+                            .get_resource_mut::<NextState<CodingAgentState>>()
+                            .unwrap()
+                            .set(CodingAgentState::Idle);
+                    })
+                    .await;
             });
+
+        () = commands.init_resource::<CodingAgentTask>();
+        () = next_state.set(CodingAgentState::Processing);
+    }
+}
+
+fn truncate(s: &str, max: usize) -> &str {
+    match s.char_indices().nth(max) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
+}
+
+fn handle_coding_agent_events(
+    mut messages: MessageReader<'_, '_, CodingAgentEvent>,
+    mut coding_agent_task: ResMut<'_, CodingAgentTask>,
+    mut tui: Option<NonSendMut<'_, TuiMain<'_>>>,
+) {
+    // let tui: &mut TuiMain<'_> = tui.into_inner();
+
+    for CodingAgentEvent(event) in messages.read() {
+        let CodingAgentTask {
+            last_usage,
+            in_text,
+        } = coding_agent_task.as_mut();
+
+        match event {
+            AgentEvent::ToolExecutionStart {
+                tool_name, args, ..
+            } => {
+                if *in_text {
+                    if let Some(tui) = tui.as_mut() {
+                        () = tui.output.push(Line::<'_>::from(""));
+                    }
+                    *in_text = false;
+                }
+                let summary: String = match tool_name.as_str() {
+                    "bash" => {
+                        let cmd: &str = args
+                            .get::<&str>("command")
+                            .and_then::<&str, fn(&Value) -> Option<&str>>(
+                                |v: &Value| -> Option<&str> { v.as_str() },
+                            )
+                            .unwrap_or("...");
+                        format!("$ {}", truncate(cmd, 60))
+                    }
+                    "read_file" => {
+                        let path: &str = args
+                            .get::<&str>("path")
+                            .and_then::<&str, fn(&Value) -> Option<&str>>(
+                                |v: &Value| -> Option<&str> { v.as_str() },
+                            )
+                            .unwrap_or("?");
+                        format!("read {path}")
+                    }
+                    "write_file" => {
+                        let path: &str = args
+                            .get::<&str>("path")
+                            .and_then::<&str, fn(&Value) -> Option<&str>>(
+                                |v: &Value| -> Option<&str> { v.as_str() },
+                            )
+                            .unwrap_or("?");
+                        format!("write {path}")
+                    }
+                    "edit_file" => {
+                        let path: &str = args
+                            .get::<&str>("path")
+                            .and_then::<&str, fn(&Value) -> Option<&str>>(
+                                |v: &Value| -> Option<&str> { v.as_str() },
+                            )
+                            .unwrap_or("?");
+                        format!("edit {path}")
+                    }
+                    "list_files" => {
+                        let path: &str = args
+                            .get::<&str>("path")
+                            .and_then::<&str, fn(&Value) -> Option<&str>>(
+                                |v: &Value| -> Option<&str> { v.as_str() },
+                            )
+                            .unwrap_or(".");
+                        format!("ls {path}")
+                    }
+                    "search" => {
+                        let pat = args.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
+                        format!("search '{}'", truncate(pat, 60))
+                    }
+                    _ => tool_name.clone(),
+                };
+
+                if let Some(tui) = tui.as_mut() {
+                    if let Some(line) = tui.output.last_mut() {
+                        *line = Line::from(summary).yellow();
+                    }
+
+                    () = tui.scroll_to_bottom();
+                }
+            }
+            AgentEvent::ToolExecutionEnd { is_error, .. } => {
+                let line: Line<'_> = if *is_error {
+                    Line::from("x").red()
+                } else {
+                    Line::from("✓").green()
+                };
+
+                if let Some(tui) = tui.as_mut() {
+                    () = tui.output.push(line);
+                    () = tui.scroll_to_bottom();
+                }
+            }
+            AgentEvent::MessageUpdate {
+                delta: StreamDelta::Text { delta },
+                ..
+            } => {
+                if !*in_text {
+                    if let Some(tui) = tui.as_mut() {
+                        () = tui.output.push(Line::<'_>::from(""));
+                    }
+                    *in_text = true;
+                }
+
+                if let Some(tui) = tui.as_mut() {
+                    if let Some(line) = tui.output.last_mut() {
+                        () = line.push_span(delta.clone());
+                    }
+                }
+            }
+            AgentEvent::AgentEnd { messages } => {
+                for msg in messages.iter().rev() {
+                    if tui.is_none()
+                        && let AgentMessage::Llm(yoagent::types::Message::Assistant {
+                            content, ..
+                        }) = msg
+                    {
+                        for ctn in content.iter() {
+                            match ctn {
+                                Content::Text { text } => {
+                                    print!("{text}");
+                                    () = stdout().flush().unwrap();
+                                }
+                                _ => continue,
+                            }
+                        }
+                    }
+
+                    if let AgentMessage::Llm(yoagent::types::Message::Assistant { usage, .. }) = msg
+                    {
+                        *last_usage = usage.clone();
+                        break;
+                    }
+                }
+            }
+            _ => (),
+        }
     }
 }
 
@@ -353,43 +347,62 @@ fn shutdown_coding_agent(
 }
 
 pub fn coding_agent_plugin(app: &mut App) {
-    let _: &mut App = app
-        .add_message::<CodingAgentRequest>()
-        .add_message::<CodingAgentProtocolEvent>()
-        .add_systems::<()>(PostStartup, (coding_topic_setup, setup).chain())
-        .add_systems::<()>(
-            Update,
-            (
-                handle_protocol_events,
-                spawn_agent_task.run_if::<()>(not::<
-                    (
-                        IsFunctionSystem,
-                        fn(
-                            Option<
-                                _, // Res<'_, ProcessingCodingTask>
+    let _: &mut App =
+        app.add_systems::<_>(Startup, setup)
+            .init_state::<CodingAgentState>()
+            .add_message::<CodingAgentEvent>()
+            .add_systems::<(ScheduleConfigTupleMarker, (), ())>(
+                Update,
+                (
+                    spawn_agent_task.run_if::<()>(
+                        in_state::<CodingAgentState>(CodingAgentState::Idle).and::<(), NotSystem<
+                            FunctionSystem<
+                                fn(
+                                    Option<
+                                        _, // Res<'_, CodingAgentTask>
+                                    >,
+                                ) -> bool,
+                                (),
+                                bool,
+                                fn(Option<Res<'_, CodingAgentTask>>) -> bool,
                             >,
-                        ) -> bool,
+                        >>(
+                            not::<
+                                (
+                                    IsFunctionSystem,
+                                    fn(
+                                        Option<
+                                            _, // Res<'_, CodingAgentTask>
+                                        >,
+                                    ) -> bool,
+                                ),
+                                bool,
+                                fn(Option<Res<'_, CodingAgentTask>>) -> bool,
+                            >(resource_exists::<CodingAgentTask>),
+                        ),
                     ),
-                    bool,
-                    fn(Option<Res<'_, ProcessingCodingTask>>) -> bool,
-                >(
-                    resource_exists::<ProcessingCodingTask>
-                )),
+                    handle_coding_agent_events.run_if::<()>(
+                        in_state::<CodingAgentState>(CodingAgentState::Processing).and::<(
+                            IsFunctionSystem,
+                            fn(
+                                Option<
+                                    _, // Res<'_, CodingAgentTask>
+                                >,
+                            ) -> bool,
+                        ), fn(
+                            Option<Res<'_, CodingAgentTask>>,
+                        )
+                            -> bool>(
+                            resource_exists::<CodingAgentTask>,
+                        ),
+                    ),
+                ),
             )
-                .run_if::<(
-                    IsFunctionSystem,
-                    fn(
-                        Option<
-                            _, // Res<'_, RouteTo>
-                        >,
-                    ) -> bool,
-                )>(in_state::<RouteTo>(RouteTo::Coder)),
-        )
-        .add_systems::<(
-            IsFunctionSystem,
-            fn(
-                _, // MessageReader<'_, '_, AppExit>
-                _, // Option<Res<'_, AgentsCancelToken>>
-            ) -> (),
-        )>(PostUpdate, shutdown_coding_agent);
+            .add_systems::<(
+                IsFunctionSystem,
+                fn(
+                    _, // MessageReader<'_, '_, AppExit>
+                    _, // Option<Res<'_, AgentsCancelToken>>
+                ) -> (),
+            )>(PostUpdate, shutdown_coding_agent);
 }

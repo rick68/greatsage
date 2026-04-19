@@ -1,6 +1,6 @@
 use {
     super::RenderNeeded,
-    crate::agents::RoutingAgentRequest,
+    crate::agents::CodingAgentPromptChannel,
     bevy::{
         app::{App, AppExit, PreUpdate, Update},
         ecs::{
@@ -222,7 +222,8 @@ fn handle_input_area_input(
     mut messages: MessageReader<'_, '_, KeyMessage>,
     mut tui_main: NonSendMut<'_, TuiMain<'_>>,
     mut dirty: ResMut<'_, RenderNeeded>,
-    mut orchestrator_agent_request_writer: MessageWriter<'_, RoutingAgentRequest>,
+    mut exit: MessageWriter<'_, AppExit>,
+    channel: Res<'_, CodingAgentPromptChannel>,
 ) {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
@@ -249,6 +250,13 @@ fn handle_input_area_input(
                 if !tui_main.input.is_empty() {
                     let input: String = tui_main.input.clone();
 
+                    match input.as_str() {
+                        "/exit" | "/quit" => {
+                            let _: MessageId<AppExit> = exit.write_default();
+                        }
+                        _ => (),
+                    }
+
                     () = tui_main
                         .output
                         .push(Line::<'_>::raw::<String>(input.clone()));
@@ -256,8 +264,7 @@ fn handle_input_area_input(
                     tui_main.character_index = 0;
                     () = tui_main.scroll_to_bottom();
 
-                    let _: MessageId<RoutingAgentRequest> =
-                        orchestrator_agent_request_writer.write(RoutingAgentRequest(input));
+                    () = channel.sender.send(input).unwrap();
                 }
                 **dirty = true;
             }
