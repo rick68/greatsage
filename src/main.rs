@@ -24,7 +24,7 @@ use {
             system::{Commands, IsFunctionSystem},
         },
     },
-    clap::Parser,
+    clap::{Parser, ValueEnum},
     std::{
         io::{IsTerminal, Stdin, stdin},
         path::PathBuf,
@@ -34,12 +34,31 @@ use {
 
 const FRAMES_PER_SECOND: f32 = 30.0;
 
+/// Context management strategy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, ValueEnum)]
+pub enum ContextStrategy {
+    /// Default: auto-compact conversation when approaching context limit
+    #[default]
+    Compaction,
+    /// Write checkpoint file and exit with code 2 when approaching limit
+    Checkpoint,
+}
+
 #[derive(Clone, Debug, Parser, Resource)]
 #[command(version, about, long_about = None)]
 struct Args {
+    // Model to use
+    #[arg(long, value_name = "name", default_value = "claude-opus-4-7")]
+    model: Option<String>,
     /// Run a single prompt and exit (no REPL)
-    #[arg(short, long)]
+    #[arg(long, value_name = "t")]
     prompt: Option<String>,
+    /// Directory containing skill files
+    #[arg(long, value_name = "dir")]
+    skills: Option<Vec<PathBuf>>,
+    /// Context management: compaction or checkpoint
+    #[arg(long, value_name = "s", default_value = "compaction")]
+    context_strategy: ContextStrategy,
 }
 
 fn main() {

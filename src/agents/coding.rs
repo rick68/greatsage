@@ -1,5 +1,6 @@
 use {
     crate::{
+        Args,
         agents::{AgentsCancelToken, LlmConfig},
         tokio::AppCancelToken,
         tui::TuiMain,
@@ -78,6 +79,7 @@ impl Default for CodingAgentPromptChannel {
 
 fn setup(
     llm_config: Res<'_, LlmConfig>,
+    args: Res<'_, Args>,
     mut tui: Option<NonSendMut<'_, TuiMain<'_>>>,
     mut commands: Commands<'_, '_>,
     app_cancel: Res<'_, AppCancelToken>,
@@ -95,16 +97,21 @@ fn setup(
         model,
         api_key,
     } = llm_config.into_inner();
+    let args: &Args = args.into_inner();
 
     let model_config: ModelConfig = ModelConfig::local(base_url, model);
-    let skills: SkillSet = SkillSet::load(&["./skills"]).expect("Failed to load skills");
-    let agent: Agent = Agent::new(OpenAiCompatProvider)
+    let mut agent: Agent = Agent::new(OpenAiCompatProvider)
         .with_model_config(model_config)
         .with_system_prompt(SYSTEM_PROMPT)
         .with_model(model)
         .with_api_key(api_key)
-        .with_skills(skills.clone())
         .with_tools(default_tools());
+
+    if let Some(skills) = args.skills.clone() {
+        let skills: SkillSet = SkillSet::load(skills.as_slice()).expect("Failed to load skills");
+        agent = agent.with_skills(skills);
+    }
+
     let coding_agent: CodingAgent = CodingAgent(Arc::new(Mutex::new(agent)));
 
     () = commands.insert_resource::<CodingAgent>(coding_agent);
