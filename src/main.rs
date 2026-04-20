@@ -50,7 +50,7 @@ struct Args {
     #[arg(long, value_name = "name", default_value = "claude-opus-4-7")]
     model: Option<String>,
     /// Run a single prompt and exit (no REPL)
-    #[arg(long, value_name = "t")]
+    #[arg(short, long, value_name = "t")]
     prompt: Option<String>,
     /// Directory containing skill files
     #[arg(long, value_name = "dir")]
