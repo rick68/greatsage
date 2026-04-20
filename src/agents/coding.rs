@@ -122,12 +122,10 @@ fn setup(
 
     let _: JoinHandle<()> =
         tokio_runtime.spawn_background_task::<_, (), _>(|_ctx: TaskContext| async move {
-            loop {
-                tokio::select! {
-                    _ = app_cancel.cancelled() => break,
-                    _ = agents_cancel.cancelled() => break,
-                    else => unreachable!(),
-                }
+            tokio::select! {
+                _ = app_cancel.cancelled() => (),
+                _ = agents_cancel.cancelled() => (),
+                else => unreachable!(),
             }
         });
 }
@@ -320,7 +318,7 @@ fn handle_coding_agent_events(
                     if let Some(tui) = tui.as_mut() {
                         () = tui.output.push(Line::<'_>::from(""));
                         let line: Line<'_> = Line::<'_>::from("📝 Agent Response:");
-                        () = tui.output.push(Line::<'_>::from(line));
+                        () = tui.output.push(line);
                         let span: Span<'_> = "─".repeat(50).blue();
                         let line: Line<'_> = Line::<'_>::from(span);
                         () = tui.output.push(line);
@@ -334,7 +332,7 @@ fn handle_coding_agent_events(
                     print!("{delta}");
                     () = stdout().flush().unwrap();
                 } else if let Some(tui) = tui.as_mut() {
-                    () = buf.push_str(&delta);
+                    () = buf.push_str(delta);
 
                     let skin: MadSkin = MadSkin::default();
 
@@ -342,8 +340,8 @@ fn handle_coding_agent_events(
                     () = tui.output.truncate(output_len - 1 - *tui_output_index);
 
                     let mut out: String = String::new();
-                    let _ = skin
-                        .write_text_on::<Vec<u8>>(unsafe { out.as_mut_vec() }, &buf)
+                    () = skin
+                        .write_text_on::<Vec<u8>>(unsafe { out.as_mut_vec() }, buf)
                         .unwrap();
 
                     let text: Text<'_> = out.into_text().unwrap();
