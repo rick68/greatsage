@@ -25,3 +25,6 @@ target
 
 # Claude configuration files
 .claude/
+
+# Yoyo agent directory
+.yoyo/
