@@ -25,6 +25,16 @@ else
     echo "WARNING: IDENTITY.md not found at $_GREATSAGE_REPO/IDENTITY.md" >&2
 fi
 
+_VISION=""
+if [ -f "$_GREATSAGE_REPO/VISION.md" ]; then
+    _VISION=$(cat "$_GREATSAGE_REPO/VISION.md") || {
+        echo "WARNING: Failed to read VISION.md" >&2
+        _VISION=""
+    }
+else
+    echo "WARNING: VISION.md not found at $_GREATSAGE_REPO/VISION.md" >&2
+fi
+
 _PERSONALITY=""
 if [ -f "$_GREATSAGE_REPO/PERSONALITY.md" ]; then
     _PERSONALITY=$(cat "$_GREATSAGE_REPO/PERSONALITY.md") || {
@@ -72,6 +82,10 @@ fi
 GREATSAGE_CONTEXT="=== WHO YOU ARE ===
 
 ${_IDENTITY:-Read IDENTITY.md for your rules and constitution.}
+
+=== YOUR VISION ===
+
+${_VISION:-No long-term vision defined yet.}
 
 === YOUR VOICE ===
 
