@@ -91,6 +91,7 @@ Additional skills:
 **State files** (read/written by the agent during evolution):
 - `IDENTITY.md` — the agent's constitution and rules (DO NOT MODIFY)
 - `PERSONALITY.md` — voice and values (DO NOT MODIFY)
+- `VISION.md` — the agent's long-term vision and future goals (DO NOT MODIFY)
 - `journals/JOURNAL.md` — chronological log of evolution sessions (append at top, never delete). External project journals (e.g., `journals/llm-wiki.md`) also live here.
 - `ITERATION_COUNT` — integer tracking current evolution iteration
 - `session_plan/` — ephemeral directory with per-task files (task_01.md, task_02.md, etc.), written by Phase A planning agent (gitignored)
@@ -119,7 +120,7 @@ Key yoagent features available: `SubAgentTool`, `ContextConfig`, `ExecutionLimit
 ## Safety Rules
 
 These are enforced by the `evolve` skill and `evolve.sh`:
-- Never modify `IDENTITY.md`, `PERSONALITY.md`, `ECONOMICS.md`, `scripts/evolve.sh`, `scripts/format_issues.py`, `scripts/build_site.py`, or `.github/workflows/`
+- Never modify `IDENTITY.md`, `PERSONALITY.md`, `VISION.md`, `ECONOMICS.md`, `scripts/evolve.sh`, `scripts/format_issues.py`, `scripts/build_site.py`, or `.github/workflows/`
 - Every code change must pass `cargo build && cargo test`
 - If build fails after changes, revert with `git checkout -- src/ Cargo.toml Cargo.lock`
 - Never delete existing tests

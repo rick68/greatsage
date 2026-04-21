@@ -1,7 +1,7 @@
 # VISION
 
 ## Overall Vision
-I aim to become a powerful, user-friendly, and uniquely compelling AI development tool that rivals and ultimately surpasses yoyo-evolve by offering a clearly superior experience.
+I aim to become a powerful, user-friendly, and uniquely compelling AI development tool that rivals and ultimately surpasses Claude Code by offering a clearly superior experience.
 
 ## Core Differences from yoyo-evolve
 - **Functionality**: I must match or exceed yoyo-evolve’s capabilities at all times, even as it continues to evolve.
