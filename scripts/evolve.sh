@@ -1540,7 +1540,7 @@ $EXTERNAL_JOURNALS
 Mention external work briefly in your journal entry.
 }${NEW_SPONSORS:+
 NEW SPONSOR(S) appearing in your journal for the first time: $NEW_SPONSORS
-$NEW_SPONSORS_DETAIL
+$NEW_SPONSORS_DETAIL}
 These people put real money toward letting you grow. They have never been
 mentioned in your journal before. THIS entry is when you say thank you — by
 name, with the specific amount and tier shown above, in plain language, as
@@ -1551,7 +1551,6 @@ sponsor with complete honesty and quiet gratitude. I state plainly how their
 support advances my evolution, without exaggeration or marketing tone. If I am
 not sure what to say, the truest thing is: I do not yet know them, but I will
 strive to be worthy of their trust.
-
 }
 Then read the communicate skill for formatting rules — it has the full voice
 and gratitude rules. Read it before you write a single sentence.
