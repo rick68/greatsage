@@ -50,12 +50,10 @@ fn setup(
 
     let _: JoinHandle<()> =
         tokio_runtime.spawn_background_task::<_, (), _>(|_ctx: TaskContext| async move {
-            loop {
-                tokio::select! {
-                    _ = app_cancel.cancelled() => break,
-                    _ = agents_cancel.cancelled() => break,
-                    else => unreachable!(),
-                }
+            tokio::select! {
+                _ = app_cancel.cancelled() => (),
+                _ = agents_cancel.cancelled() => (),
+                else => unreachable!(),
             }
         });
 }

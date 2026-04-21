@@ -283,12 +283,9 @@ fn handle_output_area_input(
     for message in messages.read() {
         let KeyEvent { code, .. } = &**message;
 
-        match code {
-            KeyCode::Char(' ') => {
-                () = tui_main.scroll_page_down();
-                **dirty = true;
-            }
-            _ => (),
+        if let KeyCode::Char(' ') = code {
+            () = tui_main.scroll_page_down();
+            **dirty = true;
         }
     }
 }

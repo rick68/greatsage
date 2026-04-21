@@ -4,7 +4,6 @@ mod agents;
 mod tokio;
 mod tui;
 
-use std::io::BufRead;
 use {
     crate::{
         agents::{CodingAgentPromptChannel, CodingAgentTask, agents_plugin},
@@ -26,7 +25,7 @@ use {
     },
     clap::{Parser, ValueEnum},
     std::{
-        io::{IsTerminal, Stdin, stdin},
+        io::{IsTerminal, Read, Stdin, stdin},
         path::PathBuf,
         time::Duration,
     },
@@ -51,7 +50,7 @@ struct Args {
     #[arg(long, value_name = "name", default_value = "claude-opus-4-7")]
     model: Option<String>,
     /// Run a single prompt and exit (no REPL)
-    #[arg(long, value_name = "t")]
+    #[arg(short, long, value_name = "t")]
     prompt: Option<String>,
     /// Directory containing skill files
     #[arg(long, value_name = "dir")]
@@ -72,7 +71,7 @@ fn main() {
 
         if !stdin.is_terminal() && prompt_arg.is_none() {
             let mut buf: String = String::new();
-            let _: usize = stdin.lock().read_line(&mut buf).unwrap();
+            let _: usize = stdin.lock().read_to_string(&mut buf).unwrap();
             prompt_arg = Some(buf);
         }
     }
