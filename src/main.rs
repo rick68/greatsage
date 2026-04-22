@@ -74,7 +74,7 @@ pub fn validate_env_vars() -> Result<(), String> {
         {
             continue;
         }
-        missing.push(var);
+        () = missing.push(var);
     }
     if missing.is_empty() {
         Ok(())
