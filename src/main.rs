@@ -53,6 +53,9 @@ struct Args {
     /// Run a single prompt and exit (no REPL)
     #[arg(short, long, value_name = "t")]
     prompt: Option<String>,
+    /// Positional prompt argument (alternative to --prompt)
+    #[arg(value_name = "prompt", required = false)]
+    positional_prompt: Option<String>,
     /// Directory containing skill files
     #[arg(long, value_name = "dir")]
     skills: Option<Vec<PathBuf>>,
@@ -70,7 +73,7 @@ pub fn validate_env_vars() -> Result<(), String> {
         {
             continue;
         }
-        () = missing.push(*var)
+        missing.push(*var);
     }
     if missing.is_empty() {
         Ok(())
@@ -78,7 +81,7 @@ pub fn validate_env_vars() -> Result<(), String> {
         // Join missing variables with commas for a clear message.
         Err(format!(
             "Error: Missing required environment variables: {}",
-            missing.join::<&str>(", ")
+            missing.join(", ")
         ))
     }
 }
