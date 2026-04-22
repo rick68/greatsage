@@ -1694,6 +1694,7 @@ dependencies = [
  "signal-hook 0.4.4",
  "signal-hook-tokio",
  "strum 0.28.0",
+ "temp_env_vars",
  "tempfile",
  "termimad",
  "tokio",
@@ -3645,6 +3646,25 @@ checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "temp_env_vars"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d44eec4b6fb0b9a8853b7180c2124b03f062f971fe0aeb47838a7acb07b17b8"
+dependencies = [
+ "temp_env_vars_macro",
+]
+
+[[package]]
+name = "temp_env_vars_macro"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86e3381d9dcf425c55c450a365adb18de503f2a946f13eb05eb0402b53482484"
+dependencies = [
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
