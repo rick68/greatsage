@@ -66,13 +66,15 @@ struct Args {
 
 pub fn validate_env_vars() -> Result<(), String> {
     // Collect all missing or empty required environment variables.
-    let mut missing: Vec<&str> = Vec::new();
+    let mut missing: Vec<&str> = vec![];
     for &var in &["BASE_URL", "MODEL", "API_KEY"] {
         // Retrieve the variable; if missing or empty, record it.
-        match env::var(var) {
-            Ok(val) if !val.trim().is_empty() => {}
-            _ => missing.push(var),
+        if let Ok(val) = env::var(var)
+            && !val.trim().is_empty()
+        {
+            continue;
         }
+        () = missing.push(var);
     }
     if missing.is_empty() {
         Ok(())
@@ -80,7 +82,7 @@ pub fn validate_env_vars() -> Result<(), String> {
         // Join missing variables with commas for a clear message.
         Err(format!(
             "Error: Missing required environment variables: {}",
-            missing.join(", ")
+            missing.join::<&str>(", ")
         ))
     }
 }

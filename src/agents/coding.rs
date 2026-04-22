@@ -115,8 +115,6 @@ fn setup(
     let coding_agent: CodingAgent = CodingAgent(Arc::new(Mutex::new(agent)));
 
     () = commands.insert_resource::<CodingAgent>(coding_agent);
-    () = commands.init_resource::<CodingAgentPromptChannel>();
-    () = commands.init_resource::<TokenUsage>();
 
     let app_cancel: Arc<CancellationToken> = app_cancel.clone();
     let agents_cancel: Arc<CancellationToken> = agents_cancel.clone();
@@ -145,8 +143,9 @@ pub struct CodingAgentTask {
     tui_output_index: usize,
     buffer: String,
 }
-#[derive(Default, Resource)]
-pub struct TokenUsage(pub Usage);
+
+#[derive(Default, Deref, DerefMut, Resource)]
+pub struct CodingAgentTotalTokenUsage(pub Usage);
 
 #[derive(Debug, Deref, DerefMut, Message)]
 pub struct CodingAgentEvent(AgentEvent);
@@ -240,12 +239,10 @@ fn truncate(s: &str, max: usize) -> &str {
 fn handle_coding_agent_events(
     mut messages: MessageReader<'_, '_, CodingAgentEvent>,
     mut coding_agent_task: ResMut<'_, CodingAgentTask>,
-    mut token_usage: ResMut<'_, TokenUsage>,
+    mut token_usage: ResMut<'_, CodingAgentTotalTokenUsage>,
     mut tui: Option<NonSendMut<'_, TuiMain<'_>>>,
     permission: Res<'_, PermissionConfig>,
 ) {
-    // let tui: &mut TuiMain<'_> = tui.into_inner();
-
     for CodingAgentEvent(event) in messages.read() {
         let CodingAgentTask {
             last_usage,
@@ -425,7 +422,21 @@ fn handle_coding_agent_events(
                     if let AgentMessage::Llm(yoagent::types::Message::Assistant { usage, .. }) = msg
                     {
                         *last_usage = usage.clone();
-                        token_usage.0 = usage.clone();
+                        // token_usage. = usage.clone();
+                        let CodingAgentTotalTokenUsage(Usage {
+                            input: dst_input,
+                            output: dst_output,
+                            cache_read: dst_cache_read,
+                            cache_write: dst_cache_write,
+                            total_tokens: dst_total_tokens,
+                        }) = token_usage.as_mut();
+
+                        *dst_input += usage.input;
+                        *dst_output += usage.output;
+                        *dst_cache_read += usage.cache_read;
+                        *dst_cache_write += usage.cache_write;
+                        *dst_total_tokens += usage.total_tokens;
+
                         break;
                     }
                 }
@@ -450,7 +461,9 @@ fn shutdown_coding_agent(
 
 pub fn coding_agent_plugin(app: &mut App) {
     let _: &mut App =
-        app.add_systems::<_>(Startup, setup)
+        app.init_resource::<CodingAgentPromptChannel>()
+            .init_resource::<CodingAgentTotalTokenUsage>()
+            .add_systems::<_>(Startup, setup)
             .init_state::<CodingAgentState>()
             .add_message::<CodingAgentEvent>()
             .add_systems::<(ScheduleConfigTupleMarker, (), ())>(
