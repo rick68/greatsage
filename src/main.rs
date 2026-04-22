@@ -25,6 +25,7 @@ use {
     },
     clap::{Parser, ValueEnum},
     std::{
+        env,
         io::{IsTerminal, Read, Stdin, stdin},
         path::PathBuf,
         time::Duration,
@@ -62,12 +63,11 @@ struct Args {
 
 pub fn validate_env_vars() -> Result<(), String> {
     for var in &["BASE_URL", "MODEL", "API_KEY"] {
-        match std::env::var(var) {
+        match env::var(var) {
             Ok(val) if !val.trim().is_empty() => {}
             _ => {
                 return Err(format!(
-                    "Error: required environment variable `{}` is not set.",
-                    var
+                    "Error: required environment variable `{var}` is not set.",
                 ));
             }
         }
@@ -85,38 +85,6 @@ fn main() {
         std::process::exit(1);
     }
     let mut prompt_arg: Option<String> = args.prompt.clone();
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-        #[test]
-        fn test_validate_env_missing() {
-            unsafe {
-                std::env::remove_var("BASE_URL");
-            }
-            unsafe {
-                std::env::remove_var("MODEL");
-            }
-            unsafe {
-                std::env::remove_var("API_KEY");
-            }
-            let err = validate_env_vars().unwrap_err();
-            assert!(err.contains("BASE_URL") || err.contains("MODEL") || err.contains("API_KEY"));
-        }
-        #[test]
-        fn test_validate_env_present() {
-            unsafe {
-                std::env::set_var("BASE_URL", "http://example.com");
-            }
-            unsafe {
-                std::env::set_var("MODEL", "test-model");
-            }
-            unsafe {
-                std::env::set_var("API_KEY", "key123");
-            }
-            assert!(validate_env_vars().is_ok());
-        }
-    }
 
     {
         let stdin: Stdin = stdin();
@@ -177,5 +145,29 @@ fn main() {
 
     if let AppExit::Error(code) = app.run() {
         () = std::process::exit(code.get() as i32);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_validate_env_missing() {
+        unsafe {
+            () = env::remove_var::<&str>("API_KEY");
+            () = env::remove_var::<&str>("BASE_URL");
+            () = env::remove_var::<&str>("MODEL");
+        }
+        let err: String = validate_env_vars().unwrap_err();
+        assert!(err.contains("BASE_URL") || err.contains("MODEL") || err.contains("API_KEY"));
+    }
+    #[test]
+    fn test_validate_env_present() {
+        unsafe {
+            () = env::set_var::<&str, &str>("API_KEY", "daummy_key");
+            () = env::set_var::<&str, &str>("BASE_URL", "https://example.com");
+            () = env::set_var::<&str, &str>("MODEL", "test-model");
+        }
+        assert!(validate_env_vars().is_ok());
     }
 }
