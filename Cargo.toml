@@ -21,7 +21,7 @@ tokio-util = "0.7.18"
 unicode-width = "0.2.2"
 yoagent = { version = "0.7.5", features = ["openapi"] }
 
-[dev-dependencies]
+tempfile = "3.3.0"
 pretty_assertions = "1.4.1"
 
 [features]

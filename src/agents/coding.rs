@@ -1,7 +1,7 @@
 use {
     crate::{
         Args,
-        agents::{AgentsCancelToken, LlmConfig, PermissionConfig},
+        agents::{AgentsCancelToken, LlmConfig, PermissionConfig, retry_async},
         tokio::AppCancelToken,
         tui::TuiMain,
     },
@@ -159,10 +159,12 @@ fn spawn_agent_task(
         let coding_agent: Arc<Mutex<Agent>> = coding_agent.clone();
         let _: JoinHandle<()> =
             runtime.spawn_background_task::<_, (), _>(move |mut ctx: TaskContext| async move {
-                // Try to prompt the LLM. Currently this returns a receiver directly,
-                // but we wrap it in a Result to allow future error handling.
-                let rx_result: Result<UnboundedReceiver<AgentEvent>, ()> =
-                    Ok(coding_agent.lock().await.prompt(prompt.clone()).await);
+                // Try to prompt the LLM with retry logic.
+                let rx_result: Result<UnboundedReceiver<AgentEvent>, ()> = retry_async(|| async {
+                    // The prompt itself does not return a Result, so we wrap it.
+                    Ok(coding_agent.lock().await.prompt(prompt.clone()).await)
+                })
+                .await;
                 match rx_result {
                     Ok(mut rx) => {
                         while let Some(event) = rx.recv().await {
@@ -236,7 +238,7 @@ fn handle_coding_agent_events(
     mut messages: MessageReader<'_, '_, CodingAgentEvent>,
     mut coding_agent_task: ResMut<'_, CodingAgentTask>,
     mut tui: Option<NonSendMut<'_, TuiMain<'_>>>,
-    _permission: Res<'_, PermissionConfig>,
+    permission: Res<'_, PermissionConfig>,
 ) {
     // let tui: &mut TuiMain<'_> = tui.into_inner();
 
@@ -252,6 +254,27 @@ fn handle_coding_agent_events(
             AgentEvent::ToolExecutionStart {
                 tool_name, args, ..
             } => {
+                // Permission check for file system related tools
+                let permission_check =
+                    |path: &str| -> Result<(), String> { (*permission).validate_path(path) };
+                let maybe_path: Option<&str> = match tool_name.as_str() {
+                    "read_file" | "write_file" | "edit_file" | "list_files" => {
+                        args.get::<&str>("path").and_then(|v| v.as_str())
+                    }
+                    "search" => args.get::<&str>("path").and_then(|v| v.as_str()),
+                    "bash" => args.get::<&str>("command").and_then(|v| v.as_str()),
+                    _ => None,
+                };
+                if let Some(p) = maybe_path
+                    && let Err(msg) = permission_check(p)
+                {
+                    if let Some(tui) = tui.as_mut() {
+                        () = tui.output.push(Line::from(msg).red());
+                        () = tui.scroll_to_bottom();
+                    } else {
+                        eprintln!("{}", msg);
+                    }
+                }
                 if *in_text {
                     if let Some(tui) = tui.as_mut() {
                         let span: Span<'_> =

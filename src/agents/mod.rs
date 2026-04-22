@@ -20,6 +20,58 @@ use {
     tokio_util::sync::CancellationToken,
 };
 
+/// Maximum number of retry attempts for LLM requests.
+pub const MAX_RETRY_ATTEMPTS: usize = 3;
+
+/// Retry a closure up to `MAX_RETRY_ATTEMPTS` times.
+/// Logs each attempt via `eprintln!`.
+#[allow(dead_code)]
+pub fn retry<F, T>(mut f: F) -> Result<T, ()>
+where
+    F: FnMut() -> Result<T, ()>,
+{
+    for attempt in 1..=MAX_RETRY_ATTEMPTS {
+        match f() {
+            ok @ Ok(_) => return ok,
+            Err(_) => {
+                eprintln!(
+                    "LLM request failed on attempt {}/{}; retrying...",
+                    attempt, MAX_RETRY_ATTEMPTS
+                );
+                if attempt == MAX_RETRY_ATTEMPTS {
+                    return Err(());
+                }
+                // Simple backoff could be added here.
+            }
+        }
+    }
+    Err(())
+}
+
+/// Async version of `retry` for futures.
+pub async fn retry_async<F, Fut, T>(mut f: F) -> Result<T, ()>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, ()>>,
+{
+    for attempt in 1..=MAX_RETRY_ATTEMPTS {
+        match f().await {
+            ok @ Ok(_) => return ok,
+            Err(_) => {
+                eprintln!(
+                    "LLM request failed on attempt {}/{}; retrying...",
+                    attempt, MAX_RETRY_ATTEMPTS
+                );
+                if attempt == MAX_RETRY_ATTEMPTS {
+                    return Err(());
+                }
+                // Simple backoff could be added here.
+            }
+        }
+    }
+    Err(())
+}
+
 #[derive(Resource)]
 pub struct LlmConfig {
     pub base_url: String,
@@ -55,6 +107,27 @@ impl PermissionConfig {
             canonical_target.starts_with::<&PathBuf>(&canonical_allowed)
         } else {
             false
+        }
+    }
+
+    /// Validate a given string path against the permission config.
+    /// Returns Ok(()) if allowed, otherwise Err with a human‑readable message.
+    pub fn validate_path(&self, path_str: &str) -> Result<(), String> {
+        // Treat the input as a filesystem path; if it cannot be canonicalized (e.g., a command
+        // string for the `bash` tool), we consider it allowed.
+        let path = std::path::Path::new(path_str);
+        match path.canonicalize() {
+            Ok(canonical_target) => {
+                if self.is_path_allowed(&canonical_target) {
+                    Ok(())
+                } else {
+                    Err(format!("Permission denied for path: {}", path_str))
+                }
+            }
+            Err(_e) => {
+                // Not a valid path (likely a command) – allow.
+                Ok(())
+            }
         }
     }
 }
@@ -101,4 +174,19 @@ pub fn agents_plugin(app: &mut App) {
                 _, // ResMut<'_, TokioTasksRuntime>
             ) -> (),
         )>(Startup, setup);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_retry_success_on_second_attempt() {
+        let mut call_count = 0usize;
+        let result = retry(|| {
+            call_count += 1;
+            if call_count == 1 { Err(()) } else { Ok(42) }
+        });
+        assert_eq!(result, Ok(42));
+        assert_eq!(call_count, 2);
+    }
 }

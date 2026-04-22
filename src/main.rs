@@ -177,16 +177,18 @@ mod tests {
     #[test]
     fn test_validate_env_missing_all() {
         // Ensure all required vars are absent.
+        static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = TEST_MUTEX.lock().unwrap();
         unsafe {
-            () = env::remove_var::<&str>("API_KEY");
-            () = env::remove_var::<&str>("BASE_URL");
-            () = env::remove_var::<&str>("MODEL");
+            env::remove_var("API_KEY");
+            env::remove_var("BASE_URL");
+            env::remove_var("MODEL");
         }
         let err: String = validate_env_vars().unwrap_err();
         // The error should list all missing variables.
-        assert!(err.contains::<&str>("API_KEY"));
-        assert!(err.contains::<&str>("BASE_URL"));
-        assert!(err.contains::<&str>("MODEL"));
+        assert!(err.contains("API_KEY"));
+        assert!(err.contains("BASE_URL"));
+        assert!(err.contains("MODEL"));
     }
 
     #[test]
