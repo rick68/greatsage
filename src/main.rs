@@ -174,8 +174,10 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {super::*, temp_env_vars::temp_env_vars};
+
     #[test]
+    #[temp_env_vars]
     fn test_validate_env_missing_all() {
         // Ensure all required vars are absent.
         static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -193,6 +195,7 @@ mod tests {
     }
 
     #[test]
+    #[temp_env_vars]
     fn test_validate_env_missing_partial() {
         // Set only BASE_URL, leave others missing.
         unsafe {
@@ -208,6 +211,7 @@ mod tests {
     }
 
     #[test]
+    #[temp_env_vars]
     fn test_validate_env_present() {
         // All vars present.
         unsafe {
