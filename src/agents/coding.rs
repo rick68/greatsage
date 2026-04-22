@@ -116,6 +116,7 @@ fn setup(
 
     () = commands.insert_resource::<CodingAgent>(coding_agent);
     () = commands.init_resource::<CodingAgentPromptChannel>();
+    () = commands.init_resource::<TokenUsage>();
 
     let app_cancel: Arc<CancellationToken> = app_cancel.clone();
     let agents_cancel: Arc<CancellationToken> = agents_cancel.clone();
@@ -144,6 +145,8 @@ pub struct CodingAgentTask {
     tui_output_index: usize,
     buffer: String,
 }
+#[derive(Default, Resource)]
+pub struct TokenUsage(pub Usage);
 
 #[derive(Debug, Deref, DerefMut, Message)]
 pub struct CodingAgentEvent(AgentEvent);
@@ -237,6 +240,7 @@ fn truncate(s: &str, max: usize) -> &str {
 fn handle_coding_agent_events(
     mut messages: MessageReader<'_, '_, CodingAgentEvent>,
     mut coding_agent_task: ResMut<'_, CodingAgentTask>,
+    mut token_usage: ResMut<'_, TokenUsage>,
     mut tui: Option<NonSendMut<'_, TuiMain<'_>>>,
     permission: Res<'_, PermissionConfig>,
 ) {
@@ -421,6 +425,7 @@ fn handle_coding_agent_events(
                     if let AgentMessage::Llm(yoagent::types::Message::Assistant { usage, .. }) = msg
                     {
                         *last_usage = usage.clone();
+                        token_usage.0 = usage.clone();
                         break;
                     }
                 }
