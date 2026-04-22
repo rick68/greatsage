@@ -71,7 +71,7 @@ pub fn validate_env_vars() -> Result<(), String> {
         // Retrieve the variable; if it exists and is not empty, skip.
         match env::var(var) {
             Ok(val) if !val.trim().is_empty() => continue,
-            _ => missing.push(var),
+            _ => () = missing.push(var),
         }
     }
     if missing.is_empty() {
@@ -80,7 +80,7 @@ pub fn validate_env_vars() -> Result<(), String> {
         // Join missing variables with commas for a clear message.
         Err(format!(
             "Error: Missing required environment variables: {}",
-            missing.join(", ")
+            missing.join::<&str>(", ")
         ))
     }
 }
