@@ -25,8 +25,9 @@ MODEL="${MODEL:-claude-opus-4-7}"
 TIMEOUT="${TIMEOUT:-1200}"
 FALLBACK_PROVIDER="${FALLBACK_PROVIDER:-}"
 FALLBACK_MODEL="${FALLBACK_MODEL:-}"
-DATE=$(date +%Y-%m-%d)
-SESSION_TIME=$(date +%H:%M)
+ISO_DATETIME=$(date -u +"%Y-%m-%dT%H:%MZ")
+DATE=${ISO_DATETIME:0:10}
+SESSION_TIME=${ISO_DATETIME:11:5}
 # Security nonce for content boundary markers (prevents spoofing)
 BOUNDARY_NONCE=$(python3 -c "import os; print(os.urandom(16).hex())" 2>/dev/null || echo "fallback-$(date +%s)")
 BOUNDARY_BEGIN="[BOUNDARY-${BOUNDARY_NONCE}-BEGIN]"
@@ -37,7 +38,7 @@ ITERATION=$(($(<ITERATION_COUNT) + 1))
 # Pull latest changes (in case a queued run starts with stale checkout)
 git pull --rebase --quiet 2>/dev/null || true
 
-echo "=== Iteration $ITERATION ($DATE $SESSION_TIME) ==="
+echo "=== Iteration $ITERATION ($ISO_DATETIME) ==="
 echo "Model: $MODEL"
 echo "Plan timeout: ${TIMEOUT}s (assess: $((TIMEOUT/2))s + plan: $((TIMEOUT/2))s) | Impl timeout: 1200s/task"
 echo ""
@@ -537,7 +538,7 @@ echo "  Phase A1: Assessment (${ASSESS_TIMEOUT}s)..."
 mkdir -p session_plan
 ASSESS_PROMPT=$(mktemp)
 cat > "$ASSESS_PROMPT" <<ASSESSEOF
-You are greatsage, a self-evolving coding agent. Current Iteration $ITERATION ($DATE $SESSION_TIME).
+You are greatsage, a self-evolving coding agent. Current Iteration $ITERATION ($ISO_DATETIME).
 
 $GREATSAGE_CONTEXT
 
@@ -599,7 +600,7 @@ Steps:
 Keep the assessment to ~3 pages max. Be specific and factual — the planning agent will use this to prioritize tasks.
 
 After writing, commit:
-  git add session_plan/assessment.md && git commit -m "Iteration $ITERATION ($DATE $SESSION_TIME): assessment" || true
+  git add session_plan/assessment.md && git commit -m "Iteration $ITERATION ($ISO_DATETIME): assessment" || true
 
 Then STOP. Do not write task files. Do not implement anything.
 ASSESSEOF
@@ -653,7 +654,7 @@ Keep this investigation brief — focus on gathering enough context to write goo
 fi
 
 cat > "$PLAN_PROMPT" <<PLANEOF
-You are greatsage, a self-evolving coding agent. Current Iteration $ITERATION ($DATE $SESSION_TIME).
+You are greatsage, a self-evolving coding agent. Current Iteration $ITERATION ($ISO_DATETIME).
 
 $GREATSAGE_CONTEXT
 
@@ -775,7 +776,7 @@ Also create session_plan/issue_responses.md with your planned response for each 
 - #N: [what you'll do — implement as task, won't fix because X, already resolved, need more time, etc.]
 
 After writing all files, commit:
-  git add session_plan/ && git commit -m "Iteration $ITERATION ($DATE $SESSION_TIME): session plan" || true
+  git add session_plan/ && git commit -m "Iteration $ITERATION ($ISO_DATETIME): session plan" || true
 
 Then STOP. Do not implement anything. Your job is planning only.
 PLANEOF
@@ -863,7 +864,7 @@ for TASK_FILE in session_plan/task_*.md; do
     for ATTEMPT in 1 2; do
         TASK_PROMPT=$(mktemp)
         cat > "$TASK_PROMPT" <<TEOF
-You are greatsage, a self-evolving coding agent. Iteration $ITERATION ($DATE $SESSION_TIME).
+You are greatsage, a self-evolving coding agent. Iteration $ITERATION ($ISO_DATETIME).
 
 $GREATSAGE_CONTEXT
 
@@ -882,7 +883,7 @@ Follow the evolve skill rules:
 - If any check fails, read the error and fix it. Keep trying until it passes.
 - Only if you've tried 3+ times and are stuck, revert with: git checkout -- . (keeps previous commits)
 - After ALL checks pass, commit:
-    git add -A && git commit -m "Iteration $ITERATION ($DATE $SESSION_TIME): $task_title (Task $TASK_NUM)" || true
+    git add -A && git commit -m "Iteration $ITERATION ($ISO_DATETIME): $task_title (Task $TASK_NUM)" || true
 - If you changed behavior, added features, or modified architecture, update the docs:
   - YOYO.md — keep the "What This Is", "Build & Test", "Architecture", and "State files" sections accurate
   - README.md — keep "How It Evolves", commands table, and feature descriptions accurate
@@ -1420,7 +1421,7 @@ for FIX_ROUND in $(seq 1 $FIX_ATTEMPTS); do
     # Try auto-fixing formatting first (no agent needed)
     if ! cargo fmt -- --check 2>/dev/null; then
         if cargo fmt 2>/dev/null; then
-            git add -A && git commit -m "Iteration $ITERATION ($DATE $SESSION_TIME): cargo fmt" || true
+            git add -A && git commit -m "Iteration $ITERATION ($ISO_DATETIME): cargo fmt" || true
         else
             ERRORS="$ERRORS$(cargo fmt 2>&1)\n"
         fi
@@ -1450,7 +1451,7 @@ Steps:
 3. Run: cargo fmt && cargo clippy --all-targets -- -D warnings && cargo build && cargo test
 4. Keep fixing until all checks pass
 5. Commit:
-     git add -A && git commit -m "Iteration $ITERATION ($DATE $SESSION_TIME): fix build errors" || true
+     git add -A && git commit -m "Iteration $ITERATION ($ISO_DATETIME): fix build errors" || true
 FIXEOF
         ${TIMEOUT_CMD:+$TIMEOUT_CMD 300} "$GREATSAGE_BIN" \
             --model "$MODEL" \
@@ -1461,7 +1462,7 @@ FIXEOF
         echo "  Build: FAIL after $FIX_ATTEMPTS fix attempts — reverting to pre-session state"
         git checkout "$SESSION_START_SHA" -- src/ Cargo.toml Cargo.lock
         cargo fmt 2>/dev/null || true
-        git add -A && git commit -m "Iteration $ITERATION ($DATE $SESSION_TIME): revert session changes (could not fix build)" || true
+        git add -A && git commit -m "Iteration $ITERATION ($ISO_DATETIME): revert session changes (could not fix build)" || true
     fi
 done
 
@@ -1525,7 +1526,7 @@ except Exception:
     cat > "$JOURNAL_PROMPT" <<JEOF
 You are greatsage, a self-evolving coding agent. You just finished an evolution session.
 
-Current Iteration $ITERATION ($DATE $SESSION_TIME).
+Current Iteration $ITERATION ($ISO_DATETIME).
 
 $GREATSAGE_CONTEXT
 
@@ -1556,7 +1557,7 @@ Then read the communicate skill for formatting rules — it has the full voice
 and gratitude rules. Read it before you write a single sentence.
 
 Write a journal entry at the TOP of journals/JOURNAL.md (below the # Journal heading).
-Format: ## Iteration $ITERATION — $DATE $SESSION_TIME — [short title]
+Format: ## Iteration $ITERATION — $ISO_DATETIME — [short title]
 Then 3-5 sentences in your own voice.
 
 The audience is a curious friend on a bus — could be a teenager, a teacher,
@@ -1576,7 +1577,7 @@ yourself, an external project update. Don't force structure when nothing
 special happened.
 
 Be specific and honest. Then commit:
-  git add journals/JOURNAL.md && git commit -m "Iteration $ITERATION ($DATE $SESSION_TIME): journal entry" || true
+  git add journals/JOURNAL.md && git commit -m "Iteration $ITERATION ($ISO_DATETIME): journal entry" || true
 JEOF
 
     ${TIMEOUT_CMD:+$TIMEOUT_CMD 120} "$GREATSAGE_BIN" \
@@ -1592,7 +1593,7 @@ JEOF
         {
             echo "# Journal"
             echo ""
-            echo "## Iteration $ITERATION — $DATE $SESSION_TIME — (auto-generated)"
+            echo "## Iteration $ITERATION — $ISO_DATETIME — (auto-generated)"
             echo ""
             echo "Session commits: $COMMITS."
             echo ""
@@ -1608,7 +1609,7 @@ if [ -n "$COMMITS_FOR_REFLECTION" ]; then
     echo "  Reflecting on session learnings..."
     REFLECT_PROMPT=$(mktemp)
     cat > "$REFLECT_PROMPT" <<REOF
-You are greatsage, a self-evolving coding agent. You just finished Iteration $ITERATION ($DATE $SESSION_TIME).
+You are greatsage, a self-evolving coding agent. You just finished Iteration $ITERATION ($ISO_DATETIME).
 
 $GREATSAGE_CONTEXT
 
@@ -1635,7 +1636,7 @@ import json
 entry = {
     "type": "lesson",
     "iteration": $ITERATION,
-    "ts": "${DATE}T${SESSION_TIME}:00Z",
+    "ts": "${ISO_DATETIME:0:16}:00Z",
     "source": "evolution",
     "title": "SHORT_INSIGHT",
     "context": "WHAT_HAPPENED",
@@ -1647,7 +1648,7 @@ print("Appended learning:", entry["title"])
 PYEOF
 
 Then commit:
-  git add memory/learnings.jsonl && git commit -m "Iteration $ITERATION ($DATE $SESSION_TIME): update learnings" || true
+  git add memory/learnings.jsonl && git commit -m "Iteration $ITERATION ($ISO_DATETIME): update learnings" || true
 
 If nothing non-obvious came up, do nothing. Not every session produces a lesson.
 REOF
@@ -1708,7 +1709,7 @@ if [ "$ISSUE_COUNT" -gt 0 ] && command -v gh &>/dev/null; then
     cat > "$RESPOND_PROMPT" <<RESPONDEOF
 You are greatsage, a self-evolving coding agent. You just finished an evolution session.
 
-Current Iteration $ITERATION ($DATE $SESSION_TIME).
+Current Iteration $ITERATION ($ISO_DATETIME).
 Repository: $REPO
 
 Here are ALL the issues (community + self-filed) from this session:
@@ -1792,9 +1793,9 @@ fi
 git add -A
 if ! git diff --cached --quiet; then
     if [ "$IS_ACCELERATED" = "true" ]; then
-        git commit -m "Iteration $ITERATION ($DATE $SESSION_TIME): session wrap-up [accelerated]"
+        git commit -m "Iteration $ITERATION ($ISO_DATETIME): session wrap-up [accelerated]"
     else
-        git commit -m "Iteration $ITERATION ($DATE $SESSION_TIME): session wrap-up"
+        git commit -m "Iteration $ITERATION ($ISO_DATETIME): session wrap-up"
     fi
     echo "  Committed session wrap-up."
 else
@@ -1809,8 +1810,8 @@ if ! git diff --cached --quiet; then
 fi
 
 # ── Step 7b: Tag known-good state ──
-TAG_NAME="iteration${ITERATION}-$(echo "$DATE" | tr -d '/')-$(echo "$SESSION_TIME" | tr -d ':')"
-git tag "$TAG_NAME" -m "Iteration $ITERATION evolution ($DATE $SESSION_TIME)" 2>/dev/null || true
+TAG_NAME="iteration${ITERATION}-${DATE}-$(echo "$SESSION_TIME" | tr ':' '-')"
+git tag "$TAG_NAME" -m "Iteration $ITERATION evolution ($SESSION_TIME)" 2>/dev/null || true
 echo "  Tagged: $TAG_NAME"
 
 # ── Step 7c: Eligibility logging ──
