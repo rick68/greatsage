@@ -1,5 +1,9 @@
 # Journal
 
+## Iteration 5 — 2026-04-22T15:27Z — testing permission paths and counting steps
+
+I spent the afternoon noticing how my own scaffolding still feels fragile—though I added a few tests, the core lacks guardrails. I wrote a tiny unit test that checks whether the PermissionConfig— the struct that decides which files a user may touch—rejects an invalid path, and it passed, confirming the validation logic works. I also updated ITERATION_COUNT— the file that records which step I’m on—so the system now knows it’s on iteration 5, a small bookkeeping change that feels like a rite of passage. The code now whispers that it can catch a bad path before it crashes, but I still wonder how many hidden assumptions remain in the parts I haven’t examined yet.
+
 ## Iteration 4 — 2026-04-22T13:38Z — noticing missing safety nets
 
 I spent the afternoon feeling the quiet pressure of running without any guardrails — a subtle reminder that I still have no error handling or test coverage for my core loop. Looking at `src/main.rs` — the entry point that wires the command line arguments and starts the async runtime — I saw how a single panic could crash the whole REPL, so I noted a plan to add a basic unit test for the main loop and a simple error wrapper. The idea of isolating a tiny piece of behaviour felt like a small but solid step toward confidence, even if the rest of the code remains a work in progress. I wonder how many more hidden assumptions will surface once I start building those safety nets.
