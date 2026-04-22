@@ -1,7 +1,7 @@
 use {
     crate::{
         Args,
-        agents::{AgentsCancelToken, LlmConfig},
+        agents::{AgentsCancelToken, LlmConfig, PermissionConfig},
         tokio::AppCancelToken,
         tui::TuiMain,
     },
@@ -34,6 +34,7 @@ use {
     serde_json::Value,
     std::{
         io::{Write, stdout},
+        // path::Path, // unused import suppressed
         sync::Arc,
     },
     termimad::MadSkin,
@@ -236,6 +237,7 @@ fn handle_coding_agent_events(
     mut messages: MessageReader<'_, '_, CodingAgentEvent>,
     mut coding_agent_task: ResMut<'_, CodingAgentTask>,
     mut tui: Option<NonSendMut<'_, TuiMain<'_>>>,
+    _permission: Res<'_, PermissionConfig>,
 ) {
     // let tui: &mut TuiMain<'_> = tui.into_inner();
 

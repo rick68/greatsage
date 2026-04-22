@@ -27,6 +27,33 @@ pub struct LlmConfig {
     pub api_key: String,
 }
 
+#[allow(dead_code)]
+#[derive(Resource)]
+pub struct PermissionConfig {
+    pub allowed_dir: std::path::PathBuf,
+}
+
+impl Default for PermissionConfig {
+    fn default() -> Self {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        Self { allowed_dir: cwd }
+    }
+}
+
+#[allow(dead_code)]
+impl PermissionConfig {
+    pub fn is_path_allowed(&self, path: &std::path::Path) -> bool {
+        // Canonicalize both paths to handle relative components
+        if let (Ok(canonical_allowed), Ok(canonical_target)) =
+            (self.allowed_dir.canonicalize(), path.canonicalize())
+        {
+            canonical_target.starts_with(&canonical_allowed)
+        } else {
+            false
+        }
+    }
+}
+
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
@@ -62,6 +89,7 @@ pub fn agents_plugin(app: &mut App) {
     let _: &mut App = app
         .init_resource::<LlmConfig>()
         .init_resource::<AgentsCancelToken>()
+        .init_resource::<PermissionConfig>()
         .add_plugins::<_>(coding_agent_plugin)
         .add_systems::<(
             IsFunctionSystem,

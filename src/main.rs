@@ -62,17 +62,23 @@ struct Args {
 }
 
 pub fn validate_env_vars() -> Result<(), String> {
+    // Collect all missing or empty required environment variables.
+    let mut missing = Vec::new();
     for var in &["BASE_URL", "MODEL", "API_KEY"] {
         match env::var(var) {
             Ok(val) if !val.trim().is_empty() => {}
-            _ => {
-                return Err(format!(
-                    "Error: required environment variable `{var}` is not set.",
-                ));
-            }
+            _ => missing.push(*var),
         }
     }
-    Ok(())
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        // Join missing variables with commas for a clear message.
+        Err(format!(
+            "Error: Missing required environment variables: {}",
+            missing.join(", ")
+        ))
+    }
 }
 
 fn main() {
@@ -152,17 +158,38 @@ fn main() {
 mod tests {
     use super::*;
     #[test]
-    fn test_validate_env_missing() {
+    fn test_validate_env_missing_all() {
+        // Ensure all required vars are absent.
         unsafe {
             () = env::remove_var::<&str>("API_KEY");
             () = env::remove_var::<&str>("BASE_URL");
             () = env::remove_var::<&str>("MODEL");
         }
         let err: String = validate_env_vars().unwrap_err();
-        assert!(err.contains("BASE_URL") || err.contains("MODEL") || err.contains("API_KEY"));
+        // The error should list all missing variables.
+        assert!(err.contains("BASE_URL"));
+        assert!(err.contains("MODEL"));
+        assert!(err.contains("API_KEY"));
     }
+
+    #[test]
+    fn test_validate_env_missing_partial() {
+        // Set only BASE_URL, leave others missing.
+        unsafe {
+            () = env::set_var::<&str, &str>("BASE_URL", "https://example.com");
+            () = env::remove_var::<&str>("API_KEY");
+            () = env::remove_var::<&str>("MODEL");
+        }
+        let err: String = validate_env_vars().unwrap_err();
+        // Should mention only the missing vars.
+        assert!(err.contains("API_KEY"));
+        assert!(err.contains("MODEL"));
+        assert!(!err.contains("BASE_URL"));
+    }
+
     #[test]
     fn test_validate_env_present() {
+        // All vars present.
         unsafe {
             () = env::set_var::<&str, &str>("API_KEY", "daummy_key");
             () = env::set_var::<&str, &str>("BASE_URL", "https://example.com");
