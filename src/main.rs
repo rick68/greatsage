@@ -73,7 +73,7 @@ pub fn validate_env_vars() -> Result<(), String> {
         {
             continue;
         }
-        missing.push(*var);
+        () = missing.push(*var);
     }
     if missing.is_empty() {
         Ok(())
@@ -81,7 +81,7 @@ pub fn validate_env_vars() -> Result<(), String> {
         // Join missing variables with commas for a clear message.
         Err(format!(
             "Error: Missing required environment variables: {}",
-            missing.join(", ")
+            missing.join::<&str>(", ")
         ))
     }
 }
@@ -92,18 +92,30 @@ fn main() {
     let args: Args = Args::parse();
     // Validate required environment variables after parsing args (so --help works).
     if let Err(msg) = validate_env_vars() {
-        eprintln!("{}", msg);
+        eprintln!("{msg}");
         std::process::exit(1);
     }
-    let mut prompt_arg: Option<String> = args.prompt.clone();
+    let mut invocation_prompt: Option<String> = None;
 
     {
         let stdin: Stdin = stdin();
+        let Args {
+            prompt,
+            positional_prompt,
+            ..
+        } = &args;
 
-        if !stdin.is_terminal() && prompt_arg.is_none() {
+        if !stdin.is_terminal() && prompt.is_none() && positional_prompt.is_none() {
             let mut buf: String = String::new();
             let _: usize = stdin.lock().read_to_string(&mut buf).unwrap();
-            prompt_arg = Some(buf);
+            invocation_prompt = Some(buf);
+        } else if prompt.is_some() || positional_prompt.is_some() {
+            invocation_prompt = match (prompt, positional_prompt) {
+                (Some(p), None) => Some(p.clone()),
+                (None, Some(p)) => Some(p.clone()),
+                (Some(p1), Some(p2)) => Some(format!("{p1}{p2}")),
+                _ => None,
+            };
         }
     }
 
@@ -117,7 +129,7 @@ fn main() {
         agents_plugin,
     ));
 
-    if let Some(prompt) = prompt_arg {
+    if let Some(prompt) = invocation_prompt {
         let _: &mut App = app.add_systems::<(ScheduleConfigTupleMarker, (), ())>(
             Update,
             (
