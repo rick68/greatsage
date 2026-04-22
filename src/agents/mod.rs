@@ -15,7 +15,7 @@ use {
         prelude::Deref,
     },
     bevy_tokio_tasks::{TaskContext, TokioTasksRuntime},
-    std::sync::Arc,
+    std::{env, path::PathBuf, sync::Arc},
     tokio::task::JoinHandle,
     tokio_util::sync::CancellationToken,
 };
@@ -25,33 +25,6 @@ pub struct LlmConfig {
     pub base_url: String,
     pub model: String,
     pub api_key: String,
-}
-
-#[allow(dead_code)]
-#[derive(Resource)]
-pub struct PermissionConfig {
-    pub allowed_dir: std::path::PathBuf,
-}
-
-impl Default for PermissionConfig {
-    fn default() -> Self {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        Self { allowed_dir: cwd }
-    }
-}
-
-#[allow(dead_code)]
-impl PermissionConfig {
-    pub fn is_path_allowed(&self, path: &std::path::Path) -> bool {
-        // Canonicalize both paths to handle relative components
-        if let (Ok(canonical_allowed), Ok(canonical_target)) =
-            (self.allowed_dir.canonicalize(), path.canonicalize())
-        {
-            canonical_target.starts_with(&canonical_allowed)
-        } else {
-            false
-        }
-    }
 }
 
 impl Default for LlmConfig {
@@ -66,6 +39,35 @@ impl Default for LlmConfig {
 
 #[derive(Default, Deref, Resource)]
 struct AgentsCancelToken(Arc<CancellationToken>);
+
+#[derive(Resource)]
+pub struct PermissionConfig {
+    pub allowed_dir: PathBuf,
+}
+
+#[allow(dead_code)]
+impl PermissionConfig {
+    pub fn is_path_allowed(&self, path: &std::path::Path) -> bool {
+        // Canonicalize both paths to handle relative components
+        if let Ok(canonical_allowed) = self.allowed_dir.canonicalize()
+            && let Ok(canonical_target) = path.canonicalize()
+        {
+            canonical_target.starts_with::<&PathBuf>(&canonical_allowed)
+        } else {
+            false
+        }
+    }
+}
+
+impl Default for PermissionConfig {
+    fn default() -> Self {
+        let cwd: PathBuf = env::current_dir().unwrap_or_else::<fn(std::io::Error) -> PathBuf>(
+            |_: std::io::Error| -> PathBuf { PathBuf::from(".") },
+        );
+
+        Self { allowed_dir: cwd }
+    }
+}
 
 fn setup(
     app_cancel: Res<'_, AppCancelToken>,

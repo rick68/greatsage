@@ -34,7 +34,6 @@ use {
     serde_json::Value,
     std::{
         io::{Write, stdout},
-        // path::Path, // unused import suppressed
         sync::Arc,
     },
     termimad::MadSkin,

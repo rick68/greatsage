@@ -63,12 +63,14 @@ struct Args {
 
 pub fn validate_env_vars() -> Result<(), String> {
     // Collect all missing or empty required environment variables.
-    let mut missing = Vec::new();
+    let mut missing: Vec<&str> = vec![];
     for var in &["BASE_URL", "MODEL", "API_KEY"] {
-        match env::var(var) {
-            Ok(val) if !val.trim().is_empty() => {}
-            _ => missing.push(*var),
+        if let Ok(val) = env::var(var)
+            && !val.trim().is_empty()
+        {
+            continue;
         }
+        () = missing.push(*var)
     }
     if missing.is_empty() {
         Ok(())
@@ -76,7 +78,7 @@ pub fn validate_env_vars() -> Result<(), String> {
         // Join missing variables with commas for a clear message.
         Err(format!(
             "Error: Missing required environment variables: {}",
-            missing.join(", ")
+            missing.join::<&str>(", ")
         ))
     }
 }
@@ -167,24 +169,24 @@ mod tests {
         }
         let err: String = validate_env_vars().unwrap_err();
         // The error should list all missing variables.
-        assert!(err.contains("BASE_URL"));
-        assert!(err.contains("MODEL"));
-        assert!(err.contains("API_KEY"));
+        assert!(err.contains::<&str>("API_KEY"));
+        assert!(err.contains::<&str>("BASE_URL"));
+        assert!(err.contains::<&str>("MODEL"));
     }
 
     #[test]
     fn test_validate_env_missing_partial() {
         // Set only BASE_URL, leave others missing.
         unsafe {
-            () = env::set_var::<&str, &str>("BASE_URL", "https://example.com");
             () = env::remove_var::<&str>("API_KEY");
+            () = env::set_var::<&str, &str>("BASE_URL", "https://example.com");
             () = env::remove_var::<&str>("MODEL");
         }
         let err: String = validate_env_vars().unwrap_err();
         // Should mention only the missing vars.
         assert!(err.contains("API_KEY"));
-        assert!(err.contains("MODEL"));
         assert!(!err.contains("BASE_URL"));
+        assert!(err.contains("MODEL"));
     }
 
     #[test]
