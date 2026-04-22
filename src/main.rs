@@ -60,11 +60,63 @@ struct Args {
     context_strategy: ContextStrategy,
 }
 
+pub fn validate_env_vars() -> Result<(), String> {
+    for var in &["BASE_URL", "MODEL", "API_KEY"] {
+        match std::env::var(var) {
+            Ok(val) if !val.trim().is_empty() => {}
+            _ => {
+                return Err(format!(
+                    "Error: required environment variable `{}` is not set.",
+                    var
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn main() {
     let _: dotenvy::Result<PathBuf> = dotenvy::dotenv();
 
     let args: Args = Args::parse();
+    // Validate required environment variables after parsing args (so --help works).
+    if let Err(msg) = validate_env_vars() {
+        eprintln!("{}", msg);
+        std::process::exit(1);
+    }
     let mut prompt_arg: Option<String> = args.prompt.clone();
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        #[test]
+        fn test_validate_env_missing() {
+            unsafe {
+                std::env::remove_var("BASE_URL");
+            }
+            unsafe {
+                std::env::remove_var("MODEL");
+            }
+            unsafe {
+                std::env::remove_var("API_KEY");
+            }
+            let err = validate_env_vars().unwrap_err();
+            assert!(err.contains("BASE_URL") || err.contains("MODEL") || err.contains("API_KEY"));
+        }
+        #[test]
+        fn test_validate_env_present() {
+            unsafe {
+                std::env::set_var("BASE_URL", "http://example.com");
+            }
+            unsafe {
+                std::env::set_var("MODEL", "test-model");
+            }
+            unsafe {
+                std::env::set_var("API_KEY", "key123");
+            }
+            assert!(validate_env_vars().is_ok());
+        }
+    }
 
     {
         let stdin: Stdin = stdin();

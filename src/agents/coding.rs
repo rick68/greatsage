@@ -159,30 +159,54 @@ fn spawn_agent_task(
         let coding_agent: Arc<Mutex<Agent>> = coding_agent.clone();
         let _: JoinHandle<()> =
             runtime.spawn_background_task::<_, (), _>(move |mut ctx: TaskContext| async move {
-                let mut rx: UnboundedReceiver<AgentEvent> =
-                    coding_agent.lock().await.prompt(prompt.clone()).await;
-
-                while let Some(event) = rx.recv().await {
-                    () = ctx
-                        .run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
-                            let _: Option<MessageId<CodingAgentEvent>> = ctx
-                                .world
-                                .write_message::<CodingAgentEvent>(CodingAgentEvent(event));
-                        })
-                        .await;
+                // Try to prompt the LLM. Currently this returns a receiver directly,
+                // but we wrap it in a Result to allow future error handling.
+                let rx_result: Result<UnboundedReceiver<AgentEvent>, ()> =
+                    Ok(coding_agent.lock().await.prompt(prompt.clone()).await);
+                match rx_result {
+                    Ok(mut rx) => {
+                        while let Some(event) = rx.recv().await {
+                            () = ctx
+                                .run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
+                                    let _: Option<MessageId<CodingAgentEvent>> =
+                                        ctx.world.write_message::<CodingAgentEvent>(
+                                            CodingAgentEvent(event),
+                                        );
+                                })
+                                .await;
+                        }
+                        // When done, reset state to Idle
+                        () = ctx
+                            .run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
+                                let world: &mut World = ctx.world;
+                                let _: Option<CodingAgentTask> =
+                                    world.remove_resource::<CodingAgentTask>();
+                                () = world
+                                    .get_resource_mut::<NextState<CodingAgentState>>()
+                                    .unwrap()
+                                    .set(CodingAgentState::Idle);
+                            })
+                            .await;
+                    }
+                    Err(_e) => {
+                        // Log error to TUI output if available, then set state Idle.
+                        // Since we don't have direct TUI access here, we simply print.
+                        eprintln!("Error: LLM request failed");
+                        () = ctx
+                            .run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
+                                let world: &mut World = ctx.world;
+                                let _: Option<CodingAgentTask> =
+                                    world.remove_resource::<CodingAgentTask>();
+                                () = world
+                                    .get_resource_mut::<NextState<CodingAgentState>>()
+                                    .unwrap()
+                                    .set(CodingAgentState::Idle);
+                            })
+                            .await;
+                    }
                 }
 
-                () = ctx
-                    .run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
-                        let world: &mut World = ctx.world;
-                        let _: Option<CodingAgentTask> = world.remove_resource::<CodingAgentTask>();
-
-                        () = world
-                            .get_resource_mut::<NextState<CodingAgentState>>()
-                            .unwrap()
-                            .set(CodingAgentState::Idle);
-                    })
-                    .await;
+                // The event processing and cleanup is handled inside the match arms above.
             });
 
         () = commands.init_resource::<CodingAgentTask>();
@@ -194,6 +218,31 @@ fn truncate(s: &str, max: usize) -> &str {
     match s.char_indices().nth(max) {
         Some((idx, _)) => &s[..idx],
         None => s,
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncates_short_string() {
+        let s = "Hello";
+        assert_eq!(truncate(s, 10), "Hello");
+    }
+
+    #[test]
+    fn truncates_exact_length() {
+        let s = "Hello";
+        assert_eq!(truncate(s, 5), "Hello");
+    }
+
+    #[test]
+    fn truncates_unicode_without_splitting() {
+        let s = "🦀Rust";
+        // The crab emoji is a single Unicode scalar value.
+        assert_eq!(truncate(s, 1), "🦀");
     }
 }
 

@@ -1,1 +1,1 @@
-No issues available (gh CLI not installed).
+No community issues today.
