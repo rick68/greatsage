@@ -189,12 +189,23 @@ fn spawn_agent_task(
                             .await;
                     }
                     Err(_e) => {
-                        // Log error to TUI output if available, then set state Idle.
-                        // Since we don't have direct TUI access here, we simply print.
-                        eprintln!("Error: LLM request failed");
                         () = ctx
                             .run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
+                                let err_log: &str = "Error: LLM request failed";
+
                                 let world: &mut World = ctx.world;
+                                // Log error to TUI output if available, then set state Idle.
+                                if let Some(mut tui) =
+                                    world.get_non_send_resource_mut::<NonSendMut<'_, TuiMain<'_>>>()
+                                {
+                                    () = tui
+                                        .output
+                                        .push(Line::<'_>::from(String::from(err_log).red()));
+                                } else {
+                                    // Since we don't have direct TUI access here, we simply print.
+                                    eprintln!("{err_log}");
+                                }
+
                                 let _: Option<CodingAgentTask> =
                                     world.remove_resource::<CodingAgentTask>();
                                 () = world
@@ -218,31 +229,6 @@ fn truncate(s: &str, max: usize) -> &str {
     match s.char_indices().nth(max) {
         Some((idx, _)) => &s[..idx],
         None => s,
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::items_after_test_module)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn truncates_short_string() {
-        let s = "Hello";
-        assert_eq!(truncate(s, 10), "Hello");
-    }
-
-    #[test]
-    fn truncates_exact_length() {
-        let s = "Hello";
-        assert_eq!(truncate(s, 5), "Hello");
-    }
-
-    #[test]
-    fn truncates_unicode_without_splitting() {
-        let s = "🦀Rust";
-        // The crab emoji is a single Unicode scalar value.
-        assert_eq!(truncate(s, 1), "🦀");
     }
 }
 
@@ -492,4 +478,29 @@ pub fn coding_agent_plugin(app: &mut App) {
                     _, // Option<Res<'_, AgentsCancelToken>>
                 ) -> (),
             )>(PostUpdate, shutdown_coding_agent);
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use {super::*, pretty_assertions::assert_eq};
+
+    #[test]
+    fn truncates_short_string() {
+        let s: &str = "Hello";
+        assert_eq!(truncate(s, 10), "Hello");
+    }
+
+    #[test]
+    fn truncates_exact_length() {
+        let s: &str = "Hello";
+        assert_eq!(truncate(s, 5), "Hello");
+    }
+
+    #[test]
+    fn truncates_unicode_without_splitting() {
+        let s: &str = "🦀Rust";
+        // The crab emoji is a single Unicode scalar value.
+        assert_eq!(truncate(s, 1), "🦀");
+    }
 }
