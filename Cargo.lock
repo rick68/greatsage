@@ -1681,7 +1681,6 @@ name = "greatsage"
 version = "0.0.0"
 dependencies = [
  "ansi-to-tui",
- "anyhow",
  "backon",
  "bevy",
  "bevy-tokio-tasks",
