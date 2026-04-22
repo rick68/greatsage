@@ -179,6 +179,9 @@ pub fn agents_plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
     #[test]
     fn test_retry_success_on_second_attempt() {
         let mut call_count = 0usize;
@@ -188,5 +191,38 @@ mod tests {
         });
         assert_eq!(result, Ok(42));
         assert_eq!(call_count, 2);
+    }
+
+    #[test]
+    fn permission_allows_path_within_cwd() {
+        // Create a temporary directory that will serve as the allowed base.
+        let allowed_dir = tempdir().expect("failed to create temp dir");
+        let allowed_path = allowed_dir.path().to_path_buf();
+        // Create a sub-file inside the allowed directory.
+        let sub_path = allowed_path.join("sub.txt");
+        fs::write(&sub_path, b"test").expect("failed to write sub file");
+
+        let perm = PermissionConfig {
+            allowed_dir: allowed_path.clone(),
+        };
+        assert!(perm.validate_path(sub_path.to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn permission_denies_path_outside_cwd() {
+        // Allowed directory
+        let allowed_dir = tempdir().expect("failed to create allowed temp dir");
+        let allowed_path = allowed_dir.path().to_path_buf();
+        // Separate directory not allowed
+        let denied_dir = tempdir().expect("failed to create denied temp dir");
+        let denied_path = denied_dir.path().join("outside.txt");
+        fs::write(&denied_path, b"nope").expect("failed to write denied file");
+
+        let perm = PermissionConfig {
+            allowed_dir: allowed_path.clone(),
+        };
+        let result = perm.validate_path(denied_path.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Permission denied"));
     }
 }
