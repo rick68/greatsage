@@ -1,7 +1,6 @@
 #![windows_subsystem = "windows"]
 
 mod agents;
-mod git;
 mod tokio;
 mod tui;
 
