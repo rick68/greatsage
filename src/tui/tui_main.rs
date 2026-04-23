@@ -17,11 +17,10 @@ use {
         time::{Time, Timer, TimerMode},
     },
     bevy_ratatui::{RatatuiContext, crossterm, event::KeyMessage},
-    ratatui::prelude::Stylize,
     ratatui::{
         Frame,
         layout::{Constraint, Layout, Rect},
-        style::Style,
+        style::{Style, Stylize},
         text::Line,
         widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     },
