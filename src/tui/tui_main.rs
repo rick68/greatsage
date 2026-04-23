@@ -34,7 +34,6 @@ use {
 
 const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
 const PROMPT_PREFIX: &str = "🤖 > ";
-const PROMPT_SUFFIX_LENGTH: usize = 5;
 
 #[derive(Clone, Copy, Debug, Default, EnumCount, Eq, FromRepr, Hash, PartialEq, States)]
 #[repr(u8)]
@@ -105,7 +104,7 @@ impl<'a> TuiMain<'a> {
             .scroll((self.vertical_scroll as u16, 0));
         self.vertical_scroll_state = self
             .vertical_scroll_state
-            .content_length(self.max_scroll())
+            .content_length(self.output.len())
             .position(self.vertical_scroll);
 
         () = frame.render_widget(output, output_area);
@@ -123,8 +122,10 @@ impl<'a> TuiMain<'a> {
         () = frame.render_widget::<Paragraph<'_>>(input, input_area);
 
         if self.show_cursor && self.focused == TuiMainFocus::InputArea {
+            use unicode_width::UnicodeWidthStr;
+            let prefix_width = UnicodeWidthStr::width(PROMPT_PREFIX);
             () = frame.set_cursor_position((
-                input_area.left() + (self.character_index + PROMPT_SUFFIX_LENGTH) as u16 + 1,
+                input_area.left() + (self.character_index + prefix_width) as u16 + 1,
                 input_area.top() + 1,
             ));
         }
@@ -169,10 +170,15 @@ fn handle_global_input(
     mut next_tui_main_focus: ResMut<NextState<TuiMainFocus>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
     for message in messages.read() {
-        let KeyEvent { code, kind, .. } = &**message;
+        let KeyEvent {
+            code,
+            kind,
+            modifiers,
+            ..
+        } = &**message;
 
         match code {
             KeyCode::Tab => {
@@ -181,7 +187,10 @@ fn handle_global_input(
                 () = next_tui_main_focus.set(next);
                 **dirty = true;
             }
-            KeyCode::Esc => {
+            KeyCode::Char('c')
+                if matches!(kind, KeyEventKind::Press)
+                    && modifiers.contains(KeyModifiers::CONTROL) =>
+            {
                 _ = exit.write_default();
             }
             KeyCode::Up if kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat => {
@@ -248,16 +257,17 @@ fn handle_input_area_input(
                     match input.as_str() {
                         "/exit" | "/quit" => {
                             _ = exit.write_default();
+                            () = tui_main.input.clear();
+                            tui_main.character_index = 0;
                         }
-                        _ => (),
+                        _ => {
+                            () = tui_main.output.push(Line::raw(input.clone()));
+                            () = tui_main.input.clear();
+                            tui_main.character_index = 0;
+                            () = tui_main.scroll_to_bottom();
+                            () = channel.sender.send(input).unwrap();
+                        }
                     }
-
-                    () = tui_main.output.push(Line::raw(input.clone()));
-                    () = tui_main.input.clear();
-                    tui_main.character_index = 0;
-                    () = tui_main.scroll_to_bottom();
-
-                    () = channel.sender.send(input).unwrap();
                 }
                 **dirty = true;
             }
