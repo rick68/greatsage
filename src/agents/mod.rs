@@ -10,12 +10,11 @@ use {
         ecs::{
             change_detection::{Res, ResMut},
             resource::Resource,
-            system::IsFunctionSystem,
         },
         prelude::Deref,
     },
     bevy_tokio_tasks::{TaskContext, TokioTasksRuntime},
-    std::{cell::Cell, env, path::PathBuf, sync::Arc, time::Duration},
+    std::{cell::Cell, env, future::Future, path::PathBuf, sync::Arc, time::Duration},
     tokio::task::JoinHandle,
     tokio_util::sync::CancellationToken,
 };
@@ -30,18 +29,18 @@ pub fn retry<T, E, F>(mut f: F) -> Result<T, E>
 where
     F: FnMut() -> Result<T, E>,
 {
-    let builder: ConstantBuilder = ConstantBuilder::new()
+    let builder = ConstantBuilder::new()
         .with_delay(Duration::ZERO)
         .with_max_times(MAX_RETRY_ATTEMPTS);
     // Track attempt count using a `Cell` (interior mutable) without unsafe or Rc.
-    let attempt: Cell<usize> = Cell::new(0);
+    let attempt = Cell::new(0_usize);
     (|| -> Result<T, E> {
         // Increment attempt count before each try.
         attempt.set(attempt.get() + 1);
         f()
     })
     .retry(builder)
-    .notify::<_>(|_: &E, _: Duration| {
+    .notify(|_: &E, _: Duration| {
         eprintln!(
             "LLM request failed on attempt {}/{MAX_RETRY_ATTEMPTS}; retrying...",
             attempt.get()
@@ -54,15 +53,14 @@ where
 pub async fn retry_async<F, Fut, T>(mut f: F) -> Result<T, ()>
 where
     F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<T, ()>>,
+    Fut: Future<Output = Result<T, ()>>,
 {
     for attempt in 1..=MAX_RETRY_ATTEMPTS {
         match f().await {
             ok @ Ok(_) => return ok,
             Err(_) => {
                 eprintln!(
-                    "LLM request failed on attempt {}/{}; retrying...",
-                    attempt, MAX_RETRY_ATTEMPTS
+                    "LLM request failed on attempt {attempt}/{MAX_RETRY_ATTEMPTS}; retrying...",
                 );
                 if attempt == MAX_RETRY_ATTEMPTS {
                     return Err(());
@@ -84,9 +82,9 @@ pub struct LlmConfig {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            base_url: dotenvy::var::<&str>("BASE_URL").unwrap_or_default(),
-            model: dotenvy::var::<&str>("MODEL").unwrap_or_default(),
-            api_key: dotenvy::var::<&str>("API_KEY").unwrap_or_default(),
+            base_url: dotenvy::var("BASE_URL").unwrap_or_default(),
+            model: dotenvy::var("MODEL").unwrap_or_default(),
+            api_key: dotenvy::var("API_KEY").unwrap_or_default(),
         }
     }
 }
@@ -106,7 +104,7 @@ impl PermissionConfig {
         if let Ok(canonical_allowed) = self.allowed_dir.canonicalize()
             && let Ok(canonical_target) = path.canonicalize()
         {
-            canonical_target.starts_with::<&PathBuf>(&canonical_allowed)
+            canonical_target.starts_with(&canonical_allowed)
         } else {
             false
         }
@@ -123,7 +121,7 @@ impl PermissionConfig {
                 if self.is_path_allowed(&canonical_target) {
                     Ok(())
                 } else {
-                    Err(format!("Permission denied for path: {}", path_str))
+                    Err(format!("Permission denied for path: {path_str}",))
                 }
             }
             Err(_e) => {
@@ -136,46 +134,36 @@ impl PermissionConfig {
 
 impl Default for PermissionConfig {
     fn default() -> Self {
-        let cwd: PathBuf = env::current_dir().unwrap_or_else::<fn(std::io::Error) -> PathBuf>(
-            |_: std::io::Error| -> PathBuf { PathBuf::from(".") },
-        );
+        let cwd: PathBuf = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
         Self { allowed_dir: cwd }
     }
 }
 
 fn setup(
-    app_cancel: Res<'_, AppCancelToken>,
-    agents_cancel: Res<'_, AgentsCancelToken>,
-    tokio_runtime: ResMut<'_, TokioTasksRuntime>,
+    app_cancel: Res<AppCancelToken>,
+    agents_cancel: Res<AgentsCancelToken>,
+    tokio_runtime: ResMut<TokioTasksRuntime>,
 ) {
-    let app_cancel: Arc<CancellationToken> = app_cancel.clone();
-    let agents_cancel: Arc<CancellationToken> = agents_cancel.clone();
+    let app_cancel = app_cancel.clone();
+    let agents_cancel = agents_cancel.clone();
 
-    let _: JoinHandle<()> =
-        tokio_runtime.spawn_background_task::<_, (), _>(|_ctx: TaskContext| async move {
-            tokio::select! {
-                _ = app_cancel.cancelled() => (),
-                _ = agents_cancel.cancelled() => (),
-                else => unreachable!(),
-            }
-        });
+    let _: JoinHandle<()> = tokio_runtime.spawn_background_task(|_ctx: TaskContext| async move {
+        tokio::select! {
+            _ = app_cancel.cancelled() => (),
+            _ = agents_cancel.cancelled() => (),
+            else => unreachable!(),
+        }
+    });
 }
 
 pub fn agents_plugin(app: &mut App) {
-    let _: &mut App = app
+    _ = app
         .init_resource::<LlmConfig>()
         .init_resource::<AgentsCancelToken>()
         .init_resource::<PermissionConfig>()
-        .add_plugins::<_>(coding_agent_plugin)
-        .add_systems::<(
-            IsFunctionSystem,
-            fn(
-                _, // Res<'_, AppCancelToken>
-                _, // Res<'_, AgentsCancelToken>
-                _, // ResMut<'_, TokioTasksRuntime>
-            ) -> (),
-        )>(Startup, setup);
+        .add_plugins(coding_agent_plugin)
+        .add_systems(Startup, setup);
 }
 
 #[cfg(test)]
@@ -189,7 +177,7 @@ mod tests {
     #[test]
     fn test_retry_success_on_second_attempt() {
         let mut call_count: usize = 0;
-        let result: Result<i32, ()> = retry::<i32, (), _>(|| {
+        let result = retry(|| {
             call_count += 1;
             if call_count == 1 { Err(()) } else { Ok(42) }
         });
@@ -200,14 +188,13 @@ mod tests {
     #[test]
     fn permission_allows_path_within_cwd() {
         // Create a temporary directory that will serve as the allowed base.
-        let allowed_dir: TempDir = tempdir().expect("failed to create temp dir");
-        let allowed_path: PathBuf = allowed_dir.path().to_path_buf();
+        let allowed_dir = tempdir().expect("failed to create temp dir");
+        let allowed_path = allowed_dir.path().to_path_buf();
         // Create a sub-file inside the allowed directory.
-        let sub_path: PathBuf = allowed_path.join("sub.txt");
-        () = std::fs::write::<&PathBuf, &[u8]>(&sub_path, b"test")
-            .expect("failed to write sub file");
+        let sub_path = allowed_path.join("sub.txt");
+        () = std::fs::write(&sub_path, b"test").expect("failed to write sub file");
 
-        let perm: PermissionConfig = PermissionConfig {
+        let perm = PermissionConfig {
             allowed_dir: allowed_path.clone(),
         };
         assert!(perm.validate_path(sub_path.to_str().unwrap()).is_ok());
@@ -216,17 +203,17 @@ mod tests {
     #[test]
     fn permission_denies_path_outside_cwd() {
         // Allowed directory
-        let allowed_dir: TempDir = tempdir().expect("failed to create allowed temp dir");
-        let allowed_path: PathBuf = allowed_dir.path().to_path_buf();
+        let allowed_dir = tempdir().expect("failed to create allowed temp dir");
+        let allowed_path = allowed_dir.path().to_path_buf();
         // Separate directory not allowed
-        let denied_dir: TempDir = tempdir().expect("failed to create denied temp dir");
-        let denied_path: PathBuf = denied_dir.path().join("outside.txt");
+        let denied_dir = tempdir().expect("failed to create denied temp dir");
+        let denied_path = denied_dir.path().join("outside.txt");
         () = std::fs::write(&denied_path, b"nope").expect("failed to write denied file");
 
         let perm = PermissionConfig {
             allowed_dir: allowed_path.clone(),
         };
-        let result: Result<(), String> = perm.validate_path(denied_path.to_str().unwrap());
+        let result = perm.validate_path(denied_path.to_str().unwrap());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Permission denied"));
     }

@@ -10,13 +10,13 @@ use {
         app::{App, AppExit, PostUpdate, Startup, Update},
         ecs::{
             change_detection::{NonSendMut, Res, ResMut},
-            message::{Message, MessageId, MessageReader},
+            message::{Message, MessageReader},
             resource::Resource,
             schedule::{
-                IntoScheduleConfigs, NotSystem, ScheduleConfigTupleMarker, SystemCondition,
+                IntoScheduleConfigs, SystemCondition,
                 common_conditions::{not, resource_exists},
             },
-            system::{Commands, FunctionSystem, IsFunctionSystem},
+            system::Commands,
             world::World,
         },
         prelude::{Deref, DerefMut},
@@ -26,22 +26,17 @@ use {
             state::{NextState, States},
         },
     },
-    bevy_tokio_tasks::{MainThreadContext, TaskContext, TokioTasksRuntime},
+    bevy_tokio_tasks::{MainThreadContext, TokioTasksRuntime},
     ratatui::{
         style::Stylize,
         text::{Line, Span, Text},
     },
-    serde_json::Value,
     std::{
         io::{Write, stdout},
         sync::Arc,
     },
     termimad::MadSkin,
-    tokio::{
-        sync::{Mutex, mpsc::UnboundedReceiver},
-        task::JoinHandle,
-    },
-    tokio_util::sync::CancellationToken,
+    tokio::{sync::Mutex, task::JoinHandle},
     yoagent::{
         agent::Agent,
         provider::{ModelConfig, openai_compat::OpenAiCompatProvider},
@@ -78,18 +73,18 @@ impl Default for CodingAgentPromptChannel {
 }
 
 fn setup(
-    llm_config: Res<'_, LlmConfig>,
-    args: Res<'_, Args>,
-    mut tui: Option<NonSendMut<'_, TuiMain<'_>>>,
-    mut commands: Commands<'_, '_>,
-    app_cancel: Res<'_, AppCancelToken>,
-    agents_cancel: Res<'_, AgentsCancelToken>,
-    tokio_runtime: ResMut<'_, TokioTasksRuntime>,
+    llm_config: Res<LlmConfig>,
+    args: Res<Args>,
+    mut tui: Option<NonSendMut<TuiMain>>,
+    mut commands: Commands,
+    app_cancel: Res<AppCancelToken>,
+    agents_cancel: Res<AgentsCancelToken>,
+    tokio_runtime: ResMut<TokioTasksRuntime>,
 ) {
     if let Some(tui) = tui.as_mut() {
-        () = tui.output.push(Line::<'_>::from(
-            "🚀 Starting Interactive Coding Agent Session",
-        ));
+        () = tui
+            .output
+            .push(Line::from("🚀 Starting Interactive Coding Agent Session"));
     }
 
     let LlmConfig {
@@ -97,10 +92,10 @@ fn setup(
         model,
         api_key,
     } = llm_config.into_inner();
-    let args: &Args = args.into_inner();
+    let args = args.into_inner();
 
-    let model_config: ModelConfig = ModelConfig::local(base_url, model);
-    let mut agent: Agent = Agent::new(OpenAiCompatProvider)
+    let model_config = ModelConfig::local(base_url, model);
+    let mut agent = Agent::new(OpenAiCompatProvider)
         .with_model_config(model_config)
         .with_system_prompt(SYSTEM_PROMPT)
         .with_model(model)
@@ -108,25 +103,24 @@ fn setup(
         .with_tools(default_tools());
 
     if let Some(skills) = args.skills.clone() {
-        let skills: SkillSet = SkillSet::load(skills.as_slice()).expect("Failed to load skills");
+        let skills = SkillSet::load(skills.as_slice()).expect("Failed to load skills");
         agent = agent.with_skills(skills);
     }
 
-    let coding_agent: CodingAgent = CodingAgent(Arc::new(Mutex::new(agent)));
+    let coding_agent = CodingAgent(Arc::new(Mutex::new(agent)));
 
-    () = commands.insert_resource::<CodingAgent>(coding_agent);
+    () = commands.insert_resource(coding_agent);
 
-    let app_cancel: Arc<CancellationToken> = app_cancel.clone();
-    let agents_cancel: Arc<CancellationToken> = agents_cancel.clone();
+    let app_cancel = app_cancel.clone();
+    let agents_cancel = agents_cancel.clone();
 
-    let _: JoinHandle<()> =
-        tokio_runtime.spawn_background_task::<_, (), _>(|_ctx: TaskContext| async move {
-            tokio::select! {
-                _ = app_cancel.cancelled() => (),
-                _ = agents_cancel.cancelled() => (),
-                else => unreachable!(),
-            }
-        });
+    let _: JoinHandle<()> = tokio_runtime.spawn_background_task(|_ctx| async move {
+        tokio::select! {
+            _ = app_cancel.cancelled() => (),
+            _ = agents_cancel.cancelled() => (),
+            else => unreachable!(),
+        }
+    });
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, States)]
@@ -158,71 +152,65 @@ fn spawn_agent_task(
     mut next_state: ResMut<'_, NextState<CodingAgentState>>,
 ) {
     if let Ok(prompt) = channel.receiver.try_recv() {
-        let coding_agent: Arc<Mutex<Agent>> = coding_agent.clone();
-        let _: JoinHandle<()> =
-            runtime.spawn_background_task::<_, (), _>(move |mut ctx: TaskContext| async move {
-                // Try to prompt the LLM with retry logic.
-                let rx_result: Result<UnboundedReceiver<AgentEvent>, ()> = retry_async(|| async {
-                    // The prompt itself does not return a Result, so we wrap it.
-                    Ok(coding_agent.lock().await.prompt(prompt.clone()).await)
-                })
-                .await;
-                match rx_result {
-                    Ok(mut rx) => {
-                        while let Some(event) = rx.recv().await {
-                            () = ctx
-                                .run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
-                                    let _: Option<MessageId<CodingAgentEvent>> =
-                                        ctx.world.write_message::<CodingAgentEvent>(
-                                            CodingAgentEvent(event),
-                                        );
-                                })
-                                .await;
-                        }
-                        // When done, reset state to Idle
+        let coding_agent = coding_agent.clone();
+        _ = runtime.spawn_background_task(move |mut ctx| async move {
+            // Try to prompt the LLM with retry logic.
+            let rx_result = retry_async(|| async {
+                // The prompt itself does not return a Result, so we wrap it.
+                Ok(coding_agent.lock().await.prompt(prompt.clone()).await)
+            })
+            .await;
+            match rx_result {
+                Ok(mut rx) => {
+                    while let Some(event) = rx.recv().await {
                         () = ctx
-                            .run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
-                                let world: &mut World = ctx.world;
-                                let _: Option<CodingAgentTask> =
-                                    world.remove_resource::<CodingAgentTask>();
-                                () = world
-                                    .get_resource_mut::<NextState<CodingAgentState>>()
-                                    .unwrap()
-                                    .set(CodingAgentState::Idle);
+                            .run_on_main_thread(|ctx| {
+                                let _ = ctx
+                                    .world
+                                    .write_message::<CodingAgentEvent>(CodingAgentEvent(event));
                             })
                             .await;
                     }
-                    Err(_e) => {
-                        () = ctx
-                            .run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
-                                let err_log: &str = "Error: LLM request failed";
-
-                                let world: &mut World = ctx.world;
-                                // Log error to TUI output if available, then set state Idle.
-                                if let Some(mut tui) =
-                                    world.get_non_send_resource_mut::<NonSendMut<'_, TuiMain<'_>>>()
-                                {
-                                    () = tui
-                                        .output
-                                        .push(Line::<'_>::from(String::from(err_log).red()));
-                                } else {
-                                    // Since we don't have direct TUI access here, we simply print.
-                                    eprintln!("{err_log}");
-                                }
-
-                                let _: Option<CodingAgentTask> =
-                                    world.remove_resource::<CodingAgentTask>();
-                                () = world
-                                    .get_resource_mut::<NextState<CodingAgentState>>()
-                                    .unwrap()
-                                    .set(CodingAgentState::Idle);
-                            })
-                            .await;
-                    }
+                    // When done, reset state to Idle
+                    () = ctx
+                        .run_on_main_thread(|ctx| {
+                            let world: &mut World = ctx.world;
+                            _ = world.remove_resource::<CodingAgentTask>();
+                            () = world
+                                .get_resource_mut::<NextState<CodingAgentState>>()
+                                .unwrap()
+                                .set(CodingAgentState::Idle);
+                        })
+                        .await;
                 }
+                Err(_e) => {
+                    () = ctx
+                        .run_on_main_thread(|ctx: MainThreadContext| {
+                            let err_log = "Error: LLM request failed";
 
-                // The event processing and cleanup is handled inside the match arms above.
-            });
+                            let world = ctx.world;
+                            // Log error to TUI output if available, then set state Idle.
+                            if let Some(mut tui) =
+                                world.get_non_send_resource_mut::<NonSendMut<TuiMain>>()
+                            {
+                                () = tui.output.push(Line::from(String::from(err_log).red()));
+                            } else {
+                                // Since we don't have direct TUI access here, we simply print.
+                                eprintln!("{err_log}");
+                            }
+
+                            _ = world.remove_resource::<CodingAgentTask>();
+                            () = world
+                                .get_resource_mut::<NextState<CodingAgentState>>()
+                                .unwrap()
+                                .set(CodingAgentState::Idle);
+                        })
+                        .await;
+                }
+            }
+
+            // The event processing and cleanup is handled inside the match arms above.
+        });
 
         () = commands.init_resource::<CodingAgentTask>();
         () = next_state.set(CodingAgentState::Processing);
@@ -237,11 +225,11 @@ fn truncate(s: &str, max: usize) -> &str {
 }
 
 fn handle_coding_agent_events(
-    mut messages: MessageReader<'_, '_, CodingAgentEvent>,
-    mut coding_agent_task: ResMut<'_, CodingAgentTask>,
-    mut token_usage: ResMut<'_, CodingAgentTotalTokenUsage>,
-    mut tui: Option<NonSendMut<'_, TuiMain<'_>>>,
-    permission: Res<'_, PermissionConfig>,
+    mut messages: MessageReader<CodingAgentEvent>,
+    mut coding_agent_task: ResMut<CodingAgentTask>,
+    mut token_usage: ResMut<CodingAgentTotalTokenUsage>,
+    mut tui: Option<NonSendMut<TuiMain>>,
+    permission: Res<PermissionConfig>,
 ) {
     for CodingAgentEvent(event) in messages.read() {
         let CodingAgentTask {
@@ -256,14 +244,13 @@ fn handle_coding_agent_events(
                 tool_name, args, ..
             } => {
                 // Permission check for file system related tools
-                let permission_check =
-                    |path: &str| -> Result<(), String> { (*permission).validate_path(path) };
-                let maybe_path: Option<&str> = match tool_name.as_str() {
+                let permission_check = |path| (*permission).validate_path(path);
+                let maybe_path = match tool_name.as_str() {
                     "read_file" | "write_file" | "edit_file" | "list_files" => {
-                        args.get::<&str>("path").and_then(|v| v.as_str())
+                        args.get("path").and_then(|v| v.as_str())
                     }
-                    "search" => args.get::<&str>("path").and_then(|v| v.as_str()),
-                    "bash" => args.get::<&str>("command").and_then(|v| v.as_str()),
+                    "search" => args.get("path").and_then(|v| v.as_str()),
+                    "bash" => args.get("command").and_then(|v| v.as_str()),
                     _ => None,
                 };
                 if let Some(p) = maybe_path
@@ -273,62 +260,40 @@ fn handle_coding_agent_events(
                         () = tui.output.push(Line::from(msg).red());
                         () = tui.scroll_to_bottom();
                     } else {
-                        eprintln!("{}", msg);
+                        eprintln!("{msg}");
                     }
                 }
                 if *in_text {
                     if let Some(tui) = tui.as_mut() {
-                        let span: Span<'_> =
+                        let span: Span =
                             format!("🔧 Tool Call: {tool_name} with args: {args}").yellow();
-                        () = tui.output.push(Line::<'_>::from(span));
-                        () = tui.output.push(Line::<'_>::from(""));
+                        () = tui.output.push(Line::from(span));
+                        () = tui.output.push(Line::from(""));
                     }
                     *in_text = false;
                 }
                 let summary: String = match tool_name.as_str() {
                     "bash" => {
                         let cmd: &str = args
-                            .get::<&str>("command")
-                            .and_then::<&str, fn(&Value) -> Option<&str>>(
-                                |v: &Value| -> Option<&str> { v.as_str() },
-                            )
+                            .get("command")
+                            .and_then(|v| v.as_str())
                             .unwrap_or("...");
                         format!("$ {}", truncate(cmd, 60))
                     }
                     "read_file" => {
-                        let path: &str = args
-                            .get::<&str>("path")
-                            .and_then::<&str, fn(&Value) -> Option<&str>>(
-                                |v: &Value| -> Option<&str> { v.as_str() },
-                            )
-                            .unwrap_or("?");
+                        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("?");
                         format!("read {path}")
                     }
                     "write_file" => {
-                        let path: &str = args
-                            .get::<&str>("path")
-                            .and_then::<&str, fn(&Value) -> Option<&str>>(
-                                |v: &Value| -> Option<&str> { v.as_str() },
-                            )
-                            .unwrap_or("?");
+                        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("?");
                         format!("write {path}")
                     }
                     "edit_file" => {
-                        let path: &str = args
-                            .get::<&str>("path")
-                            .and_then::<&str, fn(&Value) -> Option<&str>>(
-                                |v: &Value| -> Option<&str> { v.as_str() },
-                            )
-                            .unwrap_or("?");
+                        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("?");
                         format!("edit {path}")
                     }
                     "list_files" => {
-                        let path: &str = args
-                            .get::<&str>("path")
-                            .and_then::<&str, fn(&Value) -> Option<&str>>(
-                                |v: &Value| -> Option<&str> { v.as_str() },
-                            )
-                            .unwrap_or(".");
+                        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
                         format!("ls {path}")
                     }
                     "search" => {
@@ -352,7 +317,7 @@ fn handle_coding_agent_events(
                 is_error,
                 ..
             } => {
-                let line: Line<'_> = if *is_error {
+                let line = if *is_error {
                     Line::from(format!(
                         "❌ Tool Incompleted: {tool_name} - Result: {result:?}"
                     ))
@@ -376,13 +341,13 @@ fn handle_coding_agent_events(
                 if !*in_text {
                     () = buf.clear();
                     if let Some(tui) = tui.as_mut() {
-                        () = tui.output.push(Line::<'_>::from(""));
-                        let line: Line<'_> = Line::<'_>::from("📝 Agent Response:");
+                        () = tui.output.push(Line::from(""));
+                        let line: Line = Line::from("📝 Agent Response:");
                         () = tui.output.push(line);
-                        let span: Span<'_> = "─".repeat(50).blue();
-                        let line: Line<'_> = Line::<'_>::from(span);
+                        let span = "─".repeat(50).blue();
+                        let line = Line::from(span);
                         () = tui.output.push(line);
-                        () = tui.output.push(Line::<'_>::from(""));
+                        () = tui.output.push(Line::from(""));
                     }
                     *tui_output_index = 0;
                     *in_text = true;
@@ -396,22 +361,22 @@ fn handle_coding_agent_events(
 
                     let skin: MadSkin = MadSkin::default();
 
-                    let output_len: usize = tui.output.len();
+                    let output_len = tui.output.len();
                     () = tui.output.truncate(output_len - 1 - *tui_output_index);
 
-                    let mut out: String = String::new();
+                    let mut out = String::new();
                     () = skin
-                        .write_text_on::<Vec<u8>>(unsafe { out.as_mut_vec() }, buf)
+                        .write_text_on(unsafe { out.as_mut_vec() }, buf)
                         .unwrap();
 
-                    let text: Text<'_> = out.into_text().unwrap();
+                    let text: Text = out.into_text().unwrap();
                     *tui_output_index = text.lines.len();
                     for line in text.lines {
                         () = tui.output.push(line);
                     }
 
-                    let span: Span<'_> = "─".repeat(50).blue();
-                    let line: Line<'_> = Line::<'_>::from(span);
+                    let span: Span = "─".repeat(50).blue();
+                    let line: Line = Line::from(span);
                     () = tui.output.push(line);
 
                     () = tui.scroll_to_bottom();
@@ -447,8 +412,8 @@ fn handle_coding_agent_events(
 }
 
 fn shutdown_coding_agent(
-    mut messages: MessageReader<'_, '_, AppExit>,
-    mut cancel: Option<Res<'_, AgentsCancelToken>>,
+    mut messages: MessageReader<AppExit>,
+    mut cancel: Option<Res<AgentsCancelToken>>,
 ) {
     for _message in messages.read() {
         if let Some(cancel) = cancel.take()
@@ -460,66 +425,24 @@ fn shutdown_coding_agent(
 }
 
 pub fn coding_agent_plugin(app: &mut App) {
-    let _: &mut App =
-        app.init_resource::<CodingAgentPromptChannel>()
-            .init_resource::<CodingAgentTotalTokenUsage>()
-            .add_systems::<_>(Startup, setup)
-            .init_state::<CodingAgentState>()
-            .add_message::<CodingAgentEvent>()
-            .add_systems::<(ScheduleConfigTupleMarker, (), ())>(
-                Update,
-                (
-                    spawn_agent_task.run_if::<()>(
-                        in_state::<CodingAgentState>(CodingAgentState::Idle).and::<(), NotSystem<
-                            FunctionSystem<
-                                fn(
-                                    Option<
-                                        _, // Res<'_, CodingAgentTask>
-                                    >,
-                                ) -> bool,
-                                (),
-                                bool,
-                                fn(Option<Res<'_, CodingAgentTask>>) -> bool,
-                            >,
-                        >>(
-                            not::<
-                                (
-                                    IsFunctionSystem,
-                                    fn(
-                                        Option<
-                                            _, // Res<'_, CodingAgentTask>
-                                        >,
-                                    ) -> bool,
-                                ),
-                                bool,
-                                fn(Option<Res<'_, CodingAgentTask>>) -> bool,
-                            >(resource_exists::<CodingAgentTask>),
-                        ),
-                    ),
-                    handle_coding_agent_events.run_if::<()>(
-                        in_state::<CodingAgentState>(CodingAgentState::Processing).and::<(
-                            IsFunctionSystem,
-                            fn(
-                                Option<
-                                    _, // Res<'_, CodingAgentTask>
-                                >,
-                            ) -> bool,
-                        ), fn(
-                            Option<Res<'_, CodingAgentTask>>,
-                        )
-                            -> bool>(
-                            resource_exists::<CodingAgentTask>,
-                        ),
-                    ),
+    let _: &mut App = app
+        .init_resource::<CodingAgentPromptChannel>()
+        .init_resource::<CodingAgentTotalTokenUsage>()
+        .add_systems(Startup, setup)
+        .init_state::<CodingAgentState>()
+        .add_message::<CodingAgentEvent>()
+        .add_systems(
+            Update,
+            (
+                spawn_agent_task.run_if(
+                    in_state(CodingAgentState::Idle).and(not(resource_exists::<CodingAgentTask>)),
                 ),
-            )
-            .add_systems::<(
-                IsFunctionSystem,
-                fn(
-                    _, // MessageReader<'_, '_, AppExit>
-                    _, // Option<Res<'_, AgentsCancelToken>>
-                ) -> (),
-            )>(PostUpdate, shutdown_coding_agent);
+                handle_coding_agent_events.run_if(
+                    in_state(CodingAgentState::Processing).and(resource_exists::<CodingAgentTask>),
+                ),
+            ),
+        )
+        .add_systems(PostUpdate, shutdown_coding_agent);
 }
 
 #[cfg(test)]

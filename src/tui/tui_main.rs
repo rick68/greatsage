@@ -5,9 +5,9 @@ use {
         app::{App, AppExit, PreUpdate, Update},
         ecs::{
             change_detection::{NonSendMut, Res, ResMut},
-            message::{MessageId, MessageReader, MessageWriter},
+            message::{MessageReader, MessageWriter},
             schedule::IntoScheduleConfigs,
-            system::{IsFunctionSystem, Local},
+            system::Local,
         },
         state::{
             app::AppExtStates,
@@ -18,7 +18,7 @@ use {
     },
     bevy_ratatui::{RatatuiContext, crossterm, event::KeyMessage},
     ratatui::{
-        CompletedFrame, Frame,
+        Frame,
         layout::{Constraint, Layout, Rect},
         style::Style,
         text::Line,
@@ -26,7 +26,6 @@ use {
     },
     std::{
         iter::{DoubleEndedIterator, ExactSizeIterator, Iterator},
-        rc::Rc,
         time::Duration,
     },
     strum::{EnumCount, FromRepr},
@@ -49,8 +48,8 @@ impl Iterator for TuiMainFocus {
     type Item = TuiMainFocus;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next: u8 = ((*self as usize + 1) % Self::COUNT) as u8;
-        TuiMainFocus::from_repr(next).inspect::<_>(|item: &TuiMainFocus| *self = *item)
+        let next = ((*self as usize + 1) % Self::COUNT) as u8;
+        TuiMainFocus::from_repr(next).inspect(|item| *self = *item)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -62,12 +61,12 @@ impl ExactSizeIterator for TuiMainFocus {}
 
 impl DoubleEndedIterator for TuiMainFocus {
     fn next_back(&mut self) -> Option<Self::Item> {
-        let next: u8 = if (*self as u8) == 0 {
+        let next = if (*self as u8) == 0 {
             (Self::COUNT - 1) as u8
         } else {
             (*self as u8) - 1
         };
-        TuiMainFocus::from_repr(next).inspect::<_>(|item: &TuiMainFocus| *self = *item)
+        TuiMainFocus::from_repr(next).inspect(|item| *self = *item)
     }
 }
 
@@ -93,42 +92,40 @@ impl<'a> TuiMain<'a> {
         self.output.len().saturating_sub(self.output_area_height())
     }
 
-    fn draw(&mut self, frame: &mut Frame<'_>) {
-        let vertical: Layout =
-            Layout::vertical::<[Constraint; 2]>([Constraint::Min(3), Constraint::Length(3)]);
-        let area: Rect = frame.area();
-        let [output_area, input_area]: [Rect; 2] = vertical.areas::<2>(area);
-        let chunks: Rc<[Rect]> = vertical.split(area);
+    fn draw(&mut self, frame: &mut Frame) {
+        let vertical = Layout::vertical([Constraint::Min(3), Constraint::Length(3)]);
+        let area = frame.area();
+        let [output_area, input_area] = vertical.areas(area);
+        let chunks = vertical.split(area);
 
         self.output_area = output_area;
 
-        let text: &Vec<Line<'_>> = &self.output;
-        let output: Paragraph<'_> = Paragraph::<'_>::new::<Vec<Line<'_>>>(text.clone())
-            .style::<Style>(Style::default())
-            .block(Block::<'_>::bordered().title::<&str>("Output"))
+        let text = &self.output;
+        let output = Paragraph::new(text.clone())
+            .style(Style::default())
+            .block(Block::bordered().title("Output"))
             .scroll((self.vertical_scroll as u16, 0));
         self.vertical_scroll_state = self
             .vertical_scroll_state
             .content_length(self.max_scroll())
             .position(self.vertical_scroll);
 
-        () = frame.render_widget::<Paragraph<'_>>(output, output_area);
-        () = frame.render_stateful_widget::<Scrollbar>(
-            Scrollbar::<'_>::new(ScrollbarOrientation::VerticalRight)
+        () = frame.render_widget(output, output_area);
+        () = frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(Some("↑"))
                 .end_symbol(Some("↓")),
             chunks[0],
             &mut self.vertical_scroll_state,
         );
 
-        let input: Paragraph<'_> =
-            Paragraph::<'_>::new::<String>(format!("{}{}", PROMPT_PREFIX, self.input))
-                .style::<Style>(Style::default())
-                .block(Block::<'_>::bordered().title::<&str>("Input"));
+        let input = Paragraph::new(format!("{PROMPT_PREFIX}{}", self.input))
+            .style(Style::default())
+            .block(Block::bordered().title("Input"));
         () = frame.render_widget::<Paragraph<'_>>(input, input_area);
 
         if self.show_cursor && self.focused == TuiMainFocus::InputArea {
-            () = frame.set_cursor_position::<(u16, u16)>((
+            () = frame.set_cursor_position((
                 input_area.left() + (self.character_index + PROMPT_SUFFIX_LENGTH) as u16 + 1,
                 input_area.top() + 1,
             ));
@@ -168,11 +165,11 @@ impl<'a> TuiMain<'a> {
 }
 
 fn handle_global_input(
-    mut messages: MessageReader<'_, '_, KeyMessage>,
-    mut tui_main: NonSendMut<'_, TuiMain<'_>>,
-    mut dirty: ResMut<'_, RenderNeeded>,
-    mut next_tui_main_focus: ResMut<'_, NextState<TuiMainFocus>>,
-    mut exit: MessageWriter<'_, AppExit>,
+    mut messages: MessageReader<KeyMessage>,
+    mut tui_main: NonSendMut<TuiMain>,
+    mut dirty: ResMut<RenderNeeded>,
+    mut next_tui_main_focus: ResMut<NextState<TuiMainFocus>>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
@@ -181,13 +178,13 @@ fn handle_global_input(
 
         match code {
             KeyCode::Tab => {
-                let TuiMain::<'_> { focused, .. } = tui_main.as_mut();
-                let next: TuiMainFocus = focused.next().unwrap();
+                let TuiMain { focused, .. } = tui_main.as_mut();
+                let next = focused.next().unwrap();
                 () = next_tui_main_focus.set(next);
                 **dirty = true;
             }
             KeyCode::Esc => {
-                let _: MessageId<AppExit> = exit.write_default();
+                _ = exit.write_default();
             }
             KeyCode::Up if kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat => {
                 () = tui_main.scroll_up();
@@ -219,11 +216,11 @@ fn handle_global_input(
 }
 
 fn handle_input_area_input(
-    mut messages: MessageReader<'_, '_, KeyMessage>,
-    mut tui_main: NonSendMut<'_, TuiMain<'_>>,
-    mut dirty: ResMut<'_, RenderNeeded>,
-    mut exit: MessageWriter<'_, AppExit>,
-    channel: Res<'_, CodingAgentPromptChannel>,
+    mut messages: MessageReader<KeyMessage>,
+    mut tui_main: NonSendMut<TuiMain>,
+    mut dirty: ResMut<RenderNeeded>,
+    mut exit: MessageWriter<AppExit>,
+    channel: Res<CodingAgentPromptChannel>,
 ) {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
@@ -248,18 +245,16 @@ fn handle_input_area_input(
             }
             KeyCode::Enter if kind == &KeyEventKind::Press => {
                 if !tui_main.input.is_empty() {
-                    let input: String = tui_main.input.clone();
+                    let input = tui_main.input.clone();
 
                     match input.as_str() {
                         "/exit" | "/quit" => {
-                            let _: MessageId<AppExit> = exit.write_default();
+                            _ = exit.write_default();
                         }
                         _ => (),
                     }
 
-                    () = tui_main
-                        .output
-                        .push(Line::<'_>::raw::<String>(input.clone()));
+                    () = tui_main.output.push(Line::raw(input.clone()));
                     () = tui_main.input.clear();
                     tui_main.character_index = 0;
                     () = tui_main.scroll_to_bottom();
@@ -274,9 +269,9 @@ fn handle_input_area_input(
 }
 
 fn handle_output_area_input(
-    mut messages: MessageReader<'_, '_, KeyMessage>,
-    mut tui_main: NonSendMut<'_, TuiMain<'_>>,
-    mut dirty: ResMut<'_, RenderNeeded>,
+    mut messages: MessageReader<KeyMessage>,
+    mut tui_main: NonSendMut<TuiMain>,
+    mut dirty: ResMut<RenderNeeded>,
 ) {
     use crossterm::event::{KeyCode, KeyEvent};
 
@@ -291,18 +286,18 @@ fn handle_output_area_input(
 }
 
 fn draw_scene_system(
-    mut context: ResMut<'_, RatatuiContext>,
-    mut tui: NonSendMut<'_, TuiMain<'_>>,
-    time: Res<'_, Time<()>>,
-    mut cursor_timer: Local<'_, Option<Timer>>,
-    mut dirty: ResMut<'_, RenderNeeded>,
+    mut context: ResMut<RatatuiContext>,
+    mut tui: NonSendMut<TuiMain>,
+    time: Res<Time<()>>,
+    mut cursor_timer: Local<Option<Timer>>,
+    mut dirty: ResMut<RenderNeeded>,
 ) -> bevy::ecs::error::Result {
-    let cursor_timer: &mut Timer = cursor_timer.get_or_insert(Timer::new(
+    let cursor_timer = cursor_timer.get_or_insert(Timer::new(
         Duration::from_millis(CURSOR_BLINK_INTERVAL_MS),
         TimerMode::Repeating,
     ));
-    let _: &Timer = cursor_timer.tick(time.delta());
-    let TuiMain::<'_> { show_cursor, .. } = &mut *tui;
+    _ = cursor_timer.tick(time.delta());
+    let TuiMain { show_cursor, .. } = &mut *tui;
 
     if cursor_timer.just_finished() {
         *show_cursor ^= true;
@@ -310,7 +305,7 @@ fn draw_scene_system(
     }
 
     if **dirty {
-        let _: CompletedFrame<'_> = context.draw::<_>(|frame: &mut Frame<'_>| {
+        _ = context.draw(|frame| {
             () = tui.draw(frame);
         })?;
     }
@@ -321,44 +316,17 @@ fn draw_scene_system(
 }
 
 pub fn plugin(app: &mut App) {
-    let _: &mut App = app
-        .init_non_send_resource::<TuiMain<'_>>()
+    _ = app
+        .init_non_send_resource::<TuiMain>()
         .init_state::<TuiMainFocus>()
-        .add_systems::<()>(
+        .add_systems(
             PreUpdate,
             (
                 handle_global_input,
-                handle_input_area_input.run_if::<(
-                    IsFunctionSystem,
-                    fn(
-                        Option<
-                            _, // Res<'_, State<TuiMainFocus>>
-                        >,
-                    ) -> bool,
-                )>(in_state::<TuiMainFocus>(
-                    TuiMainFocus::InputArea,
-                )),
-                handle_output_area_input.run_if::<(
-                    IsFunctionSystem,
-                    fn(
-                        Option<
-                            _, // Res<'_, State<TuiMainFocus>>
-                        >,
-                    ) -> bool,
-                )>(in_state::<TuiMainFocus>(
-                    TuiMainFocus::OutputArea,
-                )),
+                handle_input_area_input.run_if(in_state::<TuiMainFocus>(TuiMainFocus::InputArea)),
+                handle_output_area_input.run_if(in_state::<TuiMainFocus>(TuiMainFocus::OutputArea)),
             )
                 .chain(),
         )
-        .add_systems::<(
-            IsFunctionSystem,
-            fn(
-                _, // ResMut<'_, RatatuiContext>
-                _, // NonSendMut<'_, TuiMain<'_>>
-                _, // Res<'_, Time<()>>
-                _, // Local<'_, Option<Timer>>
-                _, // ResMut<'_, RenderNeeded>
-            ) -> bevy::ecs::error::Result,
-        )>(Update, draw_scene_system);
+        .add_systems(Update, draw_scene_system);
 }
