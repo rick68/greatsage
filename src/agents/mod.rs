@@ -213,4 +213,17 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Permission denied"));
     }
+
+    #[test]
+    fn test_retry_failure_all_attempts() {
+        // Count attempts
+        let mut attempts = 0usize;
+        let result: Result<(), ()> = retry(|| {
+            attempts += 1;
+            Err(())
+        });
+        // Should be Err after MAX_RETRY_ATTEMPTS attempts (plus one final call)
+        assert_eq!(attempts, MAX_RETRY_ATTEMPTS + 1);
+        assert!(result.is_err());
+    }
 }
