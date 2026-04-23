@@ -19,6 +19,9 @@ use {
     tokio_util::sync::CancellationToken,
 };
 
+// Re-export Args from env for external use.
+pub use env::Args;
+
 /// Maximum number of retry attempts for LLM requests.
 pub const MAX_RETRY_ATTEMPTS: usize = 3;
 
@@ -134,17 +137,24 @@ impl PermissionConfig {
     /// Validate a bash command string by checking any path‑like tokens.
     /// Tokens that contain a '/' or start with '.' are considered potential paths.
     /// Returns Ok(()) if all such tokens are within the allowed directory.
+    #[allow(clippy::while_let_on_iterator)]
     pub fn validate_command(&self, command: &str) -> Result<(), String> {
-        for token in command.split_whitespace() {
-            // Skip flags like -la
+        // Split the command into whitespace‑separated tokens and iterate with a peekable iterator so we can
+        // optionally skip the argument that follows a flag.
+        let mut tokens = command.split_whitespace().peekable();
+        while let Some(token) = tokens.next() {
+            // Tokens starting with '-' are considered flags and are ignored for path validation.
             if token.starts_with('-') {
+                // Skip the flag token itself.
                 continue;
             }
             // Heuristic: treat as a path if it contains '/' or is relative '.' or '..'
             if token.contains('/') || token.starts_with('.') {
                 // Strip surrounding quotes
                 let stripped = token.trim_matches('\'').trim_matches('"');
-                () = self.validate_path(stripped)?;
+                // Propagate a richer error that includes the offending token.
+                self.validate_path(stripped)
+                    .map_err(|e| format!("Token '{}' disallowed: {}", token, e))?;
             }
         }
         Ok(())

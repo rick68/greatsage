@@ -17,6 +17,7 @@ use {
         time::{Time, Timer, TimerMode},
     },
     bevy_ratatui::{RatatuiContext, crossterm, event::KeyMessage},
+    ratatui::prelude::Stylize,
     ratatui::{
         Frame,
         layout::{Constraint, Layout, Rect},
@@ -254,18 +255,84 @@ fn handle_input_area_input(
                 if !tui_main.input.is_empty() {
                     let input = tui_main.input.clone();
 
-                    match input.as_str() {
-                        "/exit" | "/quit" => {
-                            _ = exit.write_default();
-                            () = tui_main.input.clear();
-                            tui_main.character_index = 0;
-                        }
-                        _ => {
-                            () = tui_main.output.push(Line::raw(input.clone()));
-                            () = tui_main.input.clear();
-                            tui_main.character_index = 0;
-                            () = tui_main.scroll_to_bottom();
-                            () = channel.sender.send(input).unwrap();
+                    // Handle built‑in REPL commands before sending to LLM.
+                    if input.trim_start().starts_with("git ") {
+                        // Parse simple git subcommands.
+                        let output_line = if input.trim() == "git stage" {
+                            match crate::git::stage_all() {
+                                Ok(_) => Line::from("✅ Staged all changes").green(),
+                                Err(e) => Line::from(format!("❌ git stage failed: {e}")).red(),
+                            }
+                        } else if input.trim_start().starts_with("git commit") {
+                            // Expect format: git commit -m <msg>
+                            // Find -m and extract following message.
+                            let parts: Vec<&str> = input.splitn(4, ' ').collect();
+                            // parts[0]=git, parts[1]=commit, parts[2]=maybe -m, parts[3]=msg
+                            let msg_opt = parts.iter().skip(2).find_map(|p| {
+                                if p.starts_with("-m") {
+                                    // Remove leading -m and possible surrounding quotes
+                                    let msg = p.trim_start_matches("-m");
+                                    // If message after -m in same token, strip leading whitespace
+                                    if msg.is_empty() {
+                                        None
+                                    } else {
+                                        Some(msg.trim_matches('"').trim_matches('\'').trim())
+                                    }
+                                } else {
+                                    None
+                                }
+                            });
+                            // If message not captured, try to get the next token after -m
+                            let msg = if let Some(m) = msg_opt {
+                                m.to_string()
+                            } else {
+                                // fallback: take everything after "-m " substring
+                                if let Some(idx) = input.find("-m ") {
+                                    input[idx + 3..]
+                                        .trim()
+                                        .trim_matches('"')
+                                        .trim_matches('\'')
+                                        .to_string()
+                                } else {
+                                    String::new()
+                                }
+                            };
+                            if msg.is_empty() {
+                                Line::from("❌ git commit missing -m message").red()
+                            } else {
+                                match crate::git::commit(&msg) {
+                                    Ok(_) => Line::from(format!("✅ Commit: {msg}")).green(),
+                                    Err(e) => {
+                                        Line::from(format!("❌ git commit failed: {e}")).red()
+                                    }
+                                }
+                            }
+                        } else if input.trim() == "git revert" {
+                            match crate::git::revert_last() {
+                                Ok(_) => Line::from("✅ Reverted last commit").green(),
+                                Err(e) => Line::from(format!("❌ git revert failed: {e}")).red(),
+                            }
+                        } else {
+                            Line::from("❌ Unknown git command").red()
+                        };
+                        () = tui_main.output.push(output_line);
+                        () = tui_main.input.clear();
+                        tui_main.character_index = 0;
+                        () = tui_main.scroll_to_bottom();
+                    } else {
+                        match input.as_str() {
+                            "/exit" | "/quit" => {
+                                _ = exit.write_default();
+                                () = tui_main.input.clear();
+                                tui_main.character_index = 0;
+                            }
+                            _ => {
+                                () = tui_main.output.push(Line::raw(input.clone()));
+                                () = tui_main.input.clear();
+                                tui_main.character_index = 0;
+                                () = tui_main.scroll_to_bottom();
+                                () = channel.sender.send(input).unwrap();
+                            }
                         }
                     }
                 }
