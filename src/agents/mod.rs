@@ -144,7 +144,7 @@ impl PermissionConfig {
             if token.contains('/') || token.starts_with('.') {
                 // Strip surrounding quotes
                 let stripped = token.trim_matches('\'').trim_matches('"');
-                self.validate_path(stripped)?;
+                () = self.validate_path(stripped)?;
             }
         }
         Ok(())
@@ -153,7 +153,7 @@ impl PermissionConfig {
 
 impl Default for PermissionConfig {
     fn default() -> Self {
-        let cwd: PathBuf = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
         Self { allowed_dir: cwd }
     }
