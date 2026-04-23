@@ -34,7 +34,7 @@ use {
     serde_json::Value,
     std::{
         io::{Write, stdout},
-        sync::Arc,
+        sync::{Arc, Mutex as StdMutex},
     },
     termimad::MadSkin,
     tokio::{
@@ -147,6 +147,22 @@ pub struct CodingAgentTask {
 #[derive(Default, Deref, DerefMut, Resource)]
 pub struct CodingAgentTotalTokenUsage(pub Usage);
 
+// Simple token statistics shared across the agent.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct TokenStats {
+    pub sent: usize,
+    pub received: usize,
+}
+
+#[derive(Resource, Clone)]
+pub struct TokenStatsShared(pub std::sync::Arc<std::sync::Mutex<TokenStats>>);
+
+impl TokenStatsShared {
+    pub fn get_stats(&self) -> TokenStats {
+        *self.0.lock().unwrap()
+    }
+}
+
 #[derive(Debug, Deref, DerefMut, Message)]
 pub struct CodingAgentEvent(AgentEvent);
 
@@ -240,6 +256,7 @@ fn handle_coding_agent_events(
     mut messages: MessageReader<'_, '_, CodingAgentEvent>,
     mut coding_agent_task: ResMut<'_, CodingAgentTask>,
     mut token_usage: ResMut<'_, CodingAgentTotalTokenUsage>,
+    mut token_stats: ResMut<'_, TokenStatsShared>,
     mut tui: Option<NonSendMut<'_, TuiMain<'_>>>,
     permission: Res<'_, PermissionConfig>,
 ) {
@@ -436,6 +453,13 @@ fn handle_coding_agent_events(
                         *dst_cache_read += usage.cache_read;
                         *dst_cache_write += usage.cache_write;
                         *dst_total_tokens += usage.total_tokens;
+
+                        // Update token statistics (sent = input, received = output)
+                        {
+                            let mut stats = token_stats.0.lock().unwrap();
+                            stats.sent += usage.input as usize;
+                            stats.received += usage.output as usize;
+                        }
 
                         break;
                     }

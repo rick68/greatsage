@@ -162,20 +162,35 @@ fn setup(
         });
 }
 
+pub struct GitAgent;
+
+impl GitAgent {
+    /// Stage all changes in the repository.
+    pub fn stage(&self) -> Result<(), String> {
+        crate::git::stage_all()
+    }
+
+    /// Commit staged changes with the provided message.
+    pub fn commit(&self, message: &str) -> Result<(), String> {
+        crate::git::commit(message)
+    }
+
+    /// Revert the most recent commit.
+    pub fn revert(&self) -> Result<(), String> {
+        crate::git::revert_last()
+    }
+}
+
+#[cfg(test)]
+mod mod_test;
+
 pub fn agents_plugin(app: &mut App) {
     let _: &mut App = app
         .init_resource::<LlmConfig>()
         .init_resource::<AgentsCancelToken>()
         .init_resource::<PermissionConfig>()
         .add_plugins::<_>(coding_agent_plugin)
-        .add_systems::<(
-            IsFunctionSystem,
-            fn(
-                _, // Res<'_, AppCancelToken>
-                _, // Res<'_, AgentsCancelToken>
-                _, // ResMut<'_, TokioTasksRuntime>
-            ) -> (),
-        )>(Startup, setup);
+        .add_systems(Startup, setup);
 }
 
 #[cfg(test)]
