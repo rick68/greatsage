@@ -96,8 +96,6 @@ impl<'a> TuiMain<'a> {
         let vertical = Layout::vertical([Constraint::Min(3), Constraint::Length(3)]);
         let area = frame.area();
         let [output_area, input_area] = vertical.areas(area);
-        let chunks = vertical.split(area);
-
         self.output_area = output_area;
 
         let text = &self.output;
@@ -115,7 +113,7 @@ impl<'a> TuiMain<'a> {
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(Some("↑"))
                 .end_symbol(Some("↓")),
-            chunks[0],
+            output_area,
             &mut self.vertical_scroll_state,
         );
 
@@ -239,7 +237,7 @@ fn handle_input_area_input(
                 if let Some(c) = tui_main.input.pop()
                     && let Some(width) = UnicodeWidthChar::width(c)
                 {
-                    tui_main.character_index -= width;
+                    tui_main.character_index = tui_main.character_index.saturating_sub(width);
                 }
                 **dirty = true;
             }

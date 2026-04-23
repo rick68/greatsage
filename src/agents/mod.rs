@@ -168,11 +168,7 @@ pub fn agents_plugin(app: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        pretty_assertions::assert_eq,
-        tempfile::{TempDir, tempdir},
-    };
+    use {super::*, pretty_assertions::assert_eq, tempfile::tempdir};
 
     #[test]
     fn test_retry_success_on_second_attempt() {

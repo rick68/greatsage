@@ -171,6 +171,8 @@ fn spawn_agent_task(
                             })
                             .await;
                     }
+                    // Flush internal agent state so messages accumulate for the next turn.
+                    () = coding_agent.lock().await.finish().await;
                     // When done, reset state to Idle
                     () = ctx
                         .run_on_main_thread(|ctx| {
@@ -362,12 +364,13 @@ fn handle_coding_agent_events(
                     let skin: MadSkin = MadSkin::default();
 
                     let output_len = tui.output.len();
-                    () = tui.output.truncate(output_len - 1 - *tui_output_index);
+                    () = tui
+                        .output
+                        .truncate(output_len.saturating_sub(1 + *tui_output_index));
 
-                    let mut out = String::new();
-                    () = skin
-                        .write_text_on(unsafe { out.as_mut_vec() }, buf)
-                        .unwrap();
+                    let mut bytes = Vec::new();
+                    () = skin.write_text_on(&mut bytes, buf).unwrap();
+                    let out = String::from_utf8(bytes).expect("termimad produced invalid UTF-8");
 
                     let text: Text = out.into_text().unwrap();
                     *tui_output_index = text.lines.len();
