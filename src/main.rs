@@ -12,7 +12,7 @@ use {
     },
     bevy::{
         DefaultPlugins,
-        app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update},
+        app::{App, AppExit, ScheduleRunnerPlugin, Update},
         ecs::{
             change_detection::Res,
             resource::Resource,
@@ -120,13 +120,13 @@ fn main() {
 
     let mut app: App = App::new();
     _ = app.insert_resource::<Args>(args);
-    _ = app.add_plugins((
-        DefaultPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f32(
-            FRAMES_PER_SECOND.recip(),
-        ))),
-        tokio_plugin,
-        agents_plugin,
-    ));
+    _ = app.add_plugins(DefaultPlugins);
+    // Add schedule runner plugin
+    _ = app.add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f32(
+        FRAMES_PER_SECOND.recip(),
+    )));
+    // Add other custom plugins
+    _ = app.add_plugins((tokio_plugin, agents_plugin));
 
     if let Some(prompt) = invocation_prompt {
         _ = app.add_systems(

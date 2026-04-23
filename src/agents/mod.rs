@@ -121,7 +121,7 @@ impl PermissionConfig {
                 if self.is_path_allowed(&canonical_target) {
                     Ok(())
                 } else {
-                    Err(format!("Permission denied for path: {path_str}",))
+                    Err(format!("Permission denied for path: {path_str}"))
                 }
             }
             Err(_e) => {
@@ -129,6 +129,25 @@ impl PermissionConfig {
                 Ok(())
             }
         }
+    }
+
+    /// Validate a bash command string by checking any path‑like tokens.
+    /// Tokens that contain a '/' or start with '.' are considered potential paths.
+    /// Returns Ok(()) if all such tokens are within the allowed directory.
+    pub fn validate_command(&self, command: &str) -> Result<(), String> {
+        for token in command.split_whitespace() {
+            // Skip flags like -la
+            if token.starts_with('-') {
+                continue;
+            }
+            // Heuristic: treat as a path if it contains '/' or is relative '.' or '..'
+            if token.contains('/') || token.starts_with('.') {
+                // Strip surrounding quotes
+                let stripped = token.trim_matches('\'').trim_matches('"');
+                self.validate_path(stripped)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -182,18 +201,21 @@ mod tests {
     }
 
     #[test]
-    fn permission_allows_path_within_cwd() {
-        // Create a temporary directory that will serve as the allowed base.
-        let allowed_dir = tempdir().expect("failed to create temp dir");
+    fn permission_denies_bash_outside_path() {
+        // Setup allowed directory
+        let allowed_dir = tempdir().expect("failed to create allowed temp dir");
         let allowed_path = allowed_dir.path().to_path_buf();
-        // Create a sub-file inside the allowed directory.
-        let sub_path = allowed_path.join("sub.txt");
-        () = std::fs::write(&sub_path, b"test").expect("failed to write sub file");
-
+        // Create a file outside allowed directory
+        let denied_dir = tempdir().expect("failed to create denied temp dir");
+        let denied_path = denied_dir.path().join("outside.txt");
+        std::fs::write(&denied_path, b"nope").expect("failed to write denied file");
         let perm = PermissionConfig {
-            allowed_dir: allowed_path.clone(),
+            allowed_dir: allowed_path,
         };
-        assert!(perm.validate_path(sub_path.to_str().unwrap()).is_ok());
+        let cmd = format!("cat {}", denied_path.to_str().unwrap());
+        let result = perm.validate_command(&cmd);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Permission denied"));
     }
 
     #[test]

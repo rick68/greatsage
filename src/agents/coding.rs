@@ -245,8 +245,14 @@ fn handle_coding_agent_events(
             AgentEvent::ToolExecutionStart {
                 tool_name, args, ..
             } => {
-                // Permission check for file system related tools
-                let permission_check = |path| (*permission).validate_path(path);
+                // Permission check for tools: apply whitelist where appropriate.
+                let permission_check = |tool: &str, arg: &str| {
+                    if tool == "bash" {
+                        permission.validate_command(arg)
+                    } else {
+                        permission.validate_path(arg)
+                    }
+                };
                 let maybe_path = match tool_name.as_str() {
                     "read_file" | "write_file" | "edit_file" | "list_files" => {
                         args.get("path").and_then(|v| v.as_str())
@@ -256,7 +262,7 @@ fn handle_coding_agent_events(
                     _ => None,
                 };
                 if let Some(p) = maybe_path
-                    && let Err(msg) = permission_check(p)
+                    && let Err(msg) = permission_check(tool_name.as_str(), p)
                 {
                     if let Some(tui) = tui.as_mut() {
                         () = tui.output.push(Line::from(msg).red());
