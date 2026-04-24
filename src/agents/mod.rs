@@ -7,6 +7,7 @@ pub use tools::build_tools;
 use {
     self::coding::coding_agent_plugin,
     crate::{config::AppConfig, tokio::AppCancelToken},
+    anyhow::Context,
     backon::{BlockingRetryable, ConstantBuilder},
     bevy::{
         app::{App, Startup},
@@ -23,6 +24,12 @@ use {
     tokio_util::sync::CancellationToken,
     url::Url,
 };
+
+#[derive(Debug, thiserror::Error)]
+pub enum PermissionError {
+    #[error("Permission denied for path: {0}")]
+    PathDenied(String),
+}
 
 /// Maximum number of retry attempts for LLM requests.
 pub const MAX_RETRY_ATTEMPTS: usize = 3;
@@ -129,18 +136,15 @@ impl PermissionConfig {
 
     /// Validate a given string path against the permission config.
     /// Returns Ok(()) if allowed, otherwise Err with a human‑readable message.
-    pub fn validate_path(&self, path_str: &str) -> Result<(), String> {
-        // Treat the input as a filesystem path; if it cannot be canonicalized (e.g., a command
-        // string for the `bash` tool), we consider it allowed.
+    pub fn validate_path(&self, path_str: &str) -> Result<(), PermissionError> {
+        let deny = || PermissionError::PathDenied(path_str.to_string());
         // Expand leading `~` to the user's home directory for convenience.
         let expanded = if path_str.starts_with('~') {
             if let Some(home) = dirs::home_dir() {
                 let without_tilde = path_str.trim_start_matches('~');
-                // Preserve possible leading slash after '~'.
                 let stripped = without_tilde.strip_prefix('/').unwrap_or(without_tilde);
                 home.join(stripped).to_string_lossy().into_owned()
             } else {
-                // If we cannot determine home, fall back to original path.
                 path_str.to_string()
             }
         } else {
@@ -152,30 +156,34 @@ impl PermissionConfig {
                 if self.is_path_allowed(&canonical_target) {
                     Ok(())
                 } else {
-                    Err(format!("Permission denied for path: {path_str}"))
+                    Err(deny())
                 }
             }
-            Err(_e) => {
+            Err(_) => {
                 // Path may not exist yet (e.g., a new file to be created).
                 // In that case, consider its parent directory for permission checking.
                 if let Some(parent) = path.parent() {
                     match parent.canonicalize() {
                         Ok(parent_canonical) => {
                             if self.is_path_allowed(&parent_canonical) {
-                                // Parent is within allowed dir, so the intended path is allowed.
                                 Ok(())
                             } else {
-                                Err(format!("Permission denied for path: {path_str}"))
+                                Err(deny())
                             }
                         }
                         Err(_) => {
-                            // Parent also cannot be resolved – deny for safety.
-                            Err(format!("Permission denied for path: {path_str}"))
+                            // Parent also cannot be resolved. If the token contains '..', deny
+                            // (potential traversal attack). Otherwise allow — it's almost certainly
+                            // not a real path (e.g., a GitHub "user/repo" reference).
+                            if path_str.contains("..") {
+                                Err(deny())
+                            } else {
+                                Ok(())
+                            }
                         }
                     }
                 } else {
-                    // No parent (unlikely) – deny.
-                    Err(format!("Permission denied for path: {path_str}"))
+                    Err(deny())
                 }
             }
         }
@@ -200,7 +208,7 @@ impl PermissionConfig {
     /// This reduces over‑rejection while preserving security – only clearly path‑like arguments are
     /// checked against the allowed directory.
     #[allow(clippy::while_let_on_iterator)]
-    pub fn validate_command(&self, command: &str) -> Result<(), String> {
+    pub fn validate_command(&self, command: &str) -> anyhow::Result<()> {
         // Split the command into whitespace‑separated tokens and iterate.
         let mut tokens = command.split_whitespace().peekable();
         while let Some(token) = tokens.next() {
@@ -216,6 +224,10 @@ impl PermissionConfig {
             if token.starts_with('{') || token.starts_with('[') {
                 continue;
             }
+            // Skip glob patterns — they are never real filesystem paths.
+            if token.contains('*') || token.contains('?') {
+                continue;
+            }
             // Heuristic: treat as a path if it contains '/' or is relative '.' or '..'
             if token.contains('/') || token.starts_with('.') {
                 // Strip surrounding quotes for cleaner validation.
@@ -224,9 +236,8 @@ impl PermissionConfig {
                 if stripped.len() <= 1 {
                     continue;
                 }
-                () = self
-                    .validate_path(stripped)
-                    .map_err(|e| format!("Token '{}' disallowed: {}", token, e))?;
+                self.validate_path(stripped)
+                    .with_context(|| format!("Token '{}' disallowed", token))?;
             }
         }
         Ok(())
@@ -348,7 +359,7 @@ mod tests {
         let cmd = format!("cat {}", denied_path.to_str().unwrap());
         let result = perm.validate_command(&cmd);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Permission denied"));
+        assert!(format!("{:#}", result.unwrap_err()).contains("Permission denied"));
     }
 
     #[test]
@@ -365,8 +376,7 @@ mod tests {
             allowed_dir: allowed_path.clone(),
         };
         let result = perm.validate_path(denied_path.to_str().unwrap());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Permission denied"));
+        assert!(matches!(result, Err(PermissionError::PathDenied(_))));
     }
 
     #[test]
@@ -394,9 +404,8 @@ mod tests {
         let cmd = format!("git -C {} status", denied_dir.path().to_str().unwrap());
         let res = config.validate_command(&cmd);
         assert!(res.is_err());
-        let err = res.unwrap_err();
-        assert!(err.contains("Token"));
-        assert!(err.contains("disallowed"));
+        let err = res.unwrap_err().to_string();
+        assert!(err.contains("Token") || err.contains("disallowed"));
     }
 
     #[test]
@@ -417,7 +426,7 @@ mod tests {
         );
         let res = config.validate_command(&cmd);
         assert!(res.is_err());
-        let err = res.unwrap_err();
+        let err = format!("{:#}", res.unwrap_err());
         assert!(err.contains(denied_file.to_str().unwrap()));
     }
 

@@ -317,7 +317,7 @@ fn handle_coding_agent_events(
                     if tool == "bash" {
                         permission.validate_command(arg)
                     } else {
-                        permission.validate_path(arg)
+                        permission.validate_path(arg).map_err(anyhow::Error::from)
                     }
                 };
                 let maybe_path = match tool_name.as_str() {
@@ -329,13 +329,14 @@ fn handle_coding_agent_events(
                     _ => None,
                 };
                 if let Some(p) = maybe_path
-                    && let Err(msg) = permission_check(tool_name.as_str(), p)
+                    && let Err(err) = permission_check(tool_name.as_str(), p)
                 {
+                    let msg = err.to_string();
                     if let Some(tui) = tui.as_mut() {
                         () = tui.output.push(Line::from(msg).red());
                         () = tui.scroll_to_bottom();
                     } else {
-                        eprintln!("{msg}");
+                        eprintln!("{err}");
                     }
                 }
                 if *in_text {
@@ -499,7 +500,7 @@ fn check_agent_ready(
         return;
     }
 
-    next_state.set(CodingAgentState::Idle);
+    () = next_state.set(CodingAgentState::Idle);
 
     let McpConfig {
         sse_transports,
