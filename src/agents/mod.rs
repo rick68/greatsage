@@ -14,7 +14,6 @@ use {
         prelude::Deref,
     },
     bevy_tokio_tasks::{TaskContext, TokioTasksRuntime},
-    dirs,
     std::{cell::Cell, env, future::Future, path::PathBuf, sync::Arc, time::Duration},
     tokio::task::JoinHandle,
     tokio_util::sync::CancellationToken,
