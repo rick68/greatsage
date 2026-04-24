@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod agents;
+mod cli;
 mod config;
 mod evolve;
 mod git;
@@ -10,10 +11,8 @@ mod tui;
 use {
     crate::{
         agents::{CodingAgentPromptChannel, CodingAgentTask, agents_plugin},
-        config::{
-            AppConfig, ConfigSubcommand, ContextStrategy, default_config_path,
-            run_config_subcommand, validate_required,
-        },
+        cli::{Args, Command, complete},
+        config::{AppConfig, run_config_subcommand, validate_required},
         tokio::tokio_plugin,
         tui::tui_plugin,
     },
@@ -22,7 +21,6 @@ use {
         app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update},
         ecs::{
             change_detection::Res,
-            resource::Resource,
             schedule::{
                 IntoScheduleConfigs,
                 common_conditions::{condition_changed_to, resource_exists, run_once},
@@ -30,79 +28,17 @@ use {
             system::Commands,
         },
     },
-    clap::{
-        ArgAction, CommandFactory, Parser, Subcommand,
-        builder::styling::{AnsiColor, Effects, Styles},
-    },
+    clap::Parser,
     std::{
         env,
         io::{IsTerminal, Read, stdin},
-        path::PathBuf,
         process,
         time::Duration,
     },
 };
 
-const STYLES: Styles = Styles::styled()
-    .header(AnsiColor::Green.on_default().effects(Effects::BOLD))
-    .usage(AnsiColor::Green.on_default().effects(Effects::BOLD))
-    .literal(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
-    .placeholder(AnsiColor::Cyan.on_default())
-    .error(AnsiColor::Red.on_default().effects(Effects::BOLD))
-    .valid(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
-    .invalid(AnsiColor::Yellow.on_default().effects(Effects::BOLD));
-
-#[derive(Clone, Debug, Parser, Resource)]
-#[command(version, about, long_about = None, styles = STYLES)]
-struct Args {
-    /// Path to config file
-    #[arg(long, value_name = "PATH", default_value_os_t = default_config_path())]
-    config: PathBuf,
-    // Model to use (overrides config file)
-    #[arg(long, value_name = "name")]
-    model: Option<String>,
-    /// Run a single prompt and exit (no REPL)
-    #[arg(short, long, value_name = "t")]
-    prompt: Option<String>,
-    /// Positional prompt argument (alternative to --prompt)
-    #[arg(value_name = "prompt", required = false)]
-    positional_prompt: Option<String>,
-    /// Directory containing skill files
-    #[arg(long, value_name = "dir", action = ArgAction::Append)]
-    skills: Vec<PathBuf>,
-    /// MCP server to connect: HTTP URL or stdio command. Repeatable.
-    #[arg(long, value_name = "server", action = ArgAction::Append)]
-    mcp: Vec<String>,
-    /// Context management: compaction or checkpoint (overrides config file)
-    #[arg(long, value_name = "s")]
-    context_strategy: Option<ContextStrategy>,
-    /// Print status messages to stderr in non-interactive mode
-    #[arg(short = 'v', long)]
-    verbose: bool,
-    /// Stage all changes before running the app
-    #[arg(long, action = ArgAction::SetTrue)]
-    stage_all: bool,
-    /// Commit staged changes with the given message after optional staging
-    #[arg(long, value_name = "msg")]
-    git_commit: Option<String>,
-    #[command(subcommand)]
-    command: Option<Command>,
-    /// Run evolve mode (placeholder)
-    #[arg(long, action = ArgAction::SetTrue)]
-    evolve: bool,
-}
-
-#[derive(Subcommand, Clone, Debug)]
-enum Command {
-    /// View and edit configuration
-    Config {
-        #[command(subcommand)]
-        cmd: ConfigSubcommand,
-    },
-}
-
 fn main() {
-    clap_complete::CompleteEnv::with_factory(Args::command).complete();
+    () = complete();
 
     _ = dotenvy::dotenv();
 
@@ -127,6 +63,11 @@ fn main() {
     if let Some(strategy) = args.context_strategy {
         app_config.agent.context_strategy = strategy;
     }
+
+    // Populate runtime-only fields from CLI flags.
+    app_config.runtime.skills = args.skills.clone();
+    app_config.runtime.mcp_servers = args.mcp.clone();
+    app_config.runtime.verbose = args.verbose;
 
     if let Err(e) = validate_required(&app_config) {
         eprintln!("error: {e:#}");
@@ -183,7 +124,6 @@ fn main() {
     let mut app: App = App::new();
     _ =
         app.insert_resource(app_config)
-            .insert_resource::<Args>(args)
             .add_plugins(DefaultPlugins.set(ScheduleRunnerPlugin::run_loop(
                 Duration::from_secs_f32(frames_per_second.recip()),
             )));
@@ -196,14 +136,14 @@ fn main() {
                 (move |channel: Res<CodingAgentPromptChannel>| {
                     () = channel.sender.send(prompt.clone()).unwrap();
                 })
-                    .run_if(run_once),
+                .run_if(run_once),
                 (|mut commands: Commands| {
                     _ = commands.write_message(AppExit::Success);
                 })
-                    .run_if(condition_changed_to(
-                        false,
-                        resource_exists::<CodingAgentTask>,
-                    )),
+                .run_if(condition_changed_to(
+                    false,
+                    resource_exists::<CodingAgentTask>,
+                )),
             ),
         );
     } else {

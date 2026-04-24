@@ -1,9 +1,9 @@
 use {
     crate::{
-        Args,
         agents::{
             AgentsCancelToken, LlmConfig, McpConfig, PermissionConfig, build_tools, retry_async,
         },
+        config::AppConfig,
         tokio::AppCancelToken,
         tui::TuiMain,
     },
@@ -76,15 +76,15 @@ impl Default for CodingAgentPromptChannel {
 
 fn setup(
     llm_config: Res<LlmConfig>,
-    args: Res<Args>,
+    app_config: Res<AppConfig>,
     mut tui: Option<NonSendMut<TuiMain>>,
     app_cancel: Res<AppCancelToken>,
     agents_cancel: Res<AgentsCancelToken>,
     mut commands: Commands,
     tokio_runtime: ResMut<TokioTasksRuntime>,
 ) {
-    let args = args.clone();
-    let mcp_config = McpConfig::from(args.mcp.clone());
+    let runtime = app_config.runtime.clone();
+    let mcp_config = McpConfig::from(runtime.mcp_servers.clone());
 
     () = commands.insert_resource::<McpConfig>(mcp_config.clone());
 
@@ -113,8 +113,8 @@ fn setup(
             .with_api_key(&llm_config.api_key)
             .with_tools(build_tools());
 
-        if !args.skills.is_empty()
-            && let Ok(skill_set) = SkillSet::load(args.skills.as_slice())
+        if !runtime.skills.is_empty()
+            && let Ok(skill_set) = SkillSet::load(runtime.skills.as_slice())
         {
             agent = agent.with_skills(skill_set);
         }
@@ -492,7 +492,7 @@ fn check_agent_ready(
     mut next_state: ResMut<NextState<CodingAgentState>>,
     mcp_config: Res<McpConfig>,
     mut tui: Option<NonSendMut<TuiMain>>,
-    args: Res<Args>,
+    app_config: Res<AppConfig>,
 ) {
     // Wait until the async setup task has inserted the CodingAgent resource.
     if coding_agent.is_none() {
@@ -524,7 +524,7 @@ fn check_agent_ready(
             }
         }
         () = tui.scroll_to_bottom();
-    } else if args.verbose {
+    } else if app_config.runtime.verbose {
         eprintln!("greatsage: ready");
         if has_mcp {
             eprintln!("greatsage: MCP connected:");

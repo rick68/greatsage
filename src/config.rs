@@ -8,6 +8,14 @@ use {
     },
 };
 
+/// Runtime-only parameters parsed from CLI flags; never persisted to the config file.
+#[derive(Clone, Debug, Default)]
+pub struct RuntimeConfig {
+    pub skills: Vec<PathBuf>,
+    pub mcp_servers: Vec<String>,
+    pub verbose: bool,
+}
+
 #[non_exhaustive]
 #[derive(thiserror::Error, Debug)]
 pub enum ConfigError {
@@ -132,6 +140,8 @@ pub struct AppConfig {
     pub tui: TuiFileConfig,
     pub mcp: McpFileConfig,
     pub permissions: PermissionsFileConfig,
+    #[serde(skip)]
+    pub runtime: RuntimeConfig,
 }
 
 impl AppConfig {
