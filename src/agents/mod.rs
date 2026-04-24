@@ -203,9 +203,22 @@ impl PermissionConfig {
 
 impl Default for PermissionConfig {
     fn default() -> Self {
-        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        // Allow overriding the allowed directory via the ALLOWED_DIR environment variable.
+        // If the variable is set and points to an existing directory, use its canonicalized
+        // form; otherwise fall back to the current working directory.
+        let allowed = match env::var("ALLOWED_DIR") {
+            Ok(dir) => {
+                let path = PathBuf::from(dir);
+                // Attempt to canonicalize; if it fails (e.g., path does not exist), ignore and use cwd.
+                path.canonicalize()
+                    .unwrap_or_else(|_| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+            }
+            Err(_) => env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        };
 
-        Self { allowed_dir: cwd }
+        Self {
+            allowed_dir: allowed,
+        }
     }
 }
 
