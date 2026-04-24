@@ -1,6 +1,6 @@
 use {
     super::RenderNeeded,
-    crate::agents::CodingAgentPromptChannel,
+    crate::agents::{CodingAgentPromptChannel, CodingAgentTotalTokenUsage},
     bevy::{
         app::{App, AppExit, PreUpdate, Update},
         ecs::{
@@ -189,10 +189,14 @@ impl<'a> TuiMain<'a> {
         self.output.len().saturating_sub(self.output_area_height())
     }
 
-    fn draw(&mut self, frame: &mut Frame) {
-        let vertical = Layout::vertical([Constraint::Min(3), Constraint::Length(3)]);
+    fn draw(&mut self, frame: &mut Frame, token_usage: Option<&CodingAgentTotalTokenUsage>) {
+        let vertical = Layout::vertical([
+            Constraint::Min(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+        ]);
         let area = frame.area();
-        let [output_area, input_area] = vertical.areas(area);
+        let [output_area, status_area, input_area] = vertical.areas(area);
         self.output_area = output_area;
 
         let text = &self.output;
@@ -213,6 +217,21 @@ impl<'a> TuiMain<'a> {
             output_area,
             &mut self.vertical_scroll_state,
         );
+
+        // Draw status bar with token usage
+        let status_text = if let Some(usage) = token_usage {
+            let CodingAgentTotalTokenUsage(usage) = usage;
+            format!(
+                " 🎯 Input: {} | Output: {} | Total: {} | Cache Read: {} | Cache Write: {}",
+                usage.input, usage.output, usage.total_tokens, usage.cache_read, usage.cache_write
+            )
+        } else {
+            " 🎯 Token usage: Waiting for first response...".to_string()
+        };
+        let status = Paragraph::new(status_text)
+            .style(Style::default().fg(ratatui::style::Color::Rgb(100, 150, 200)))
+            .block(Block::bordered().title("Token Usage"));
+        () = frame.render_widget(status, status_area);
 
         let input = Paragraph::new(format!("{PROMPT_PREFIX}{}", self.input))
             .style(Style::default())
@@ -493,6 +512,7 @@ fn draw_scene_system(
     time: Res<Time<()>>,
     mut cursor_timer: Local<Option<Timer>>,
     mut dirty: ResMut<RenderNeeded>,
+    token_usage: Option<Res<CodingAgentTotalTokenUsage>>,
 ) -> bevy::ecs::error::Result {
     let cursor_timer = cursor_timer.get_or_insert(Timer::new(
         Duration::from_millis(CURSOR_BLINK_INTERVAL_MS),
@@ -508,7 +528,7 @@ fn draw_scene_system(
 
     if **dirty {
         _ = context.draw(|frame| {
-            () = tui.draw(frame);
+            () = tui.draw(frame, token_usage.as_deref());
         })?;
     }
 
