@@ -1,11 +1,12 @@
 use {
     crate::{
         Args,
-        agents::{AgentsCancelToken, LlmConfig, PermissionConfig, retry_async},
+        agents::{AgentsCancelToken, LlmConfig, McpConfig, PermissionConfig, retry_async},
         tokio::AppCancelToken,
         tui::TuiMain,
     },
     ansi_to_tui::IntoText,
+    anyhow::anyhow,
     bevy::{
         app::{App, AppExit, PostUpdate, Startup, Update},
         ecs::{
@@ -23,7 +24,7 @@ use {
         state::{
             app::AppExtStates,
             condition::in_state,
-            state::{NextState, States},
+            state::{NextState, State, States},
         },
     },
     bevy_tokio_tasks::{MainThreadContext, TokioTasksRuntime},
@@ -53,7 +54,7 @@ Use tools proactively: read files to understand context, run commands to verify 
 After making changes, run tests or verify the result when appropriate."#;
 
 #[derive(Deref, DerefMut, Resource)]
-struct CodingAgent(Arc<Mutex<Agent>>);
+struct CodingAgent(Arc<Mutex<anyhow::Result<Agent>>>);
 
 #[derive(Clone, Resource)]
 pub struct CodingAgentPromptChannel {
@@ -76,45 +77,104 @@ fn setup(
     llm_config: Res<LlmConfig>,
     args: Res<Args>,
     mut tui: Option<NonSendMut<TuiMain>>,
-    mut commands: Commands,
     app_cancel: Res<AppCancelToken>,
     agents_cancel: Res<AgentsCancelToken>,
+    mut commands: Commands,
     tokio_runtime: ResMut<TokioTasksRuntime>,
 ) {
+    let args = args.clone();
+    let mcp_config = McpConfig::from(args.mcp.clone());
+
+    () = commands.insert_resource::<McpConfig>(mcp_config.clone());
+
     if let Some(tui) = tui.as_mut() {
         () = tui
             .output
             .push(Line::from("🚀 Starting Interactive Coding Agent Session"));
+        if !mcp_config.sse_transports.is_empty() || !mcp_config.stdio_transports.is_empty() {
+            () = tui
+                .output
+                .push(Line::from("🔌 Connecting to MCP servers...").yellow());
+            () = tui.scroll_to_bottom();
+        }
     }
 
-    let LlmConfig {
-        base_url,
-        model,
-        api_key,
-    } = llm_config.into_inner();
-    let args = args.into_inner();
-
-    let model_config = ModelConfig::local(base_url, model);
-    let mut agent = Agent::new(OpenAiCompatProvider)
-        .with_model_config(model_config)
-        .with_system_prompt(SYSTEM_PROMPT)
-        .with_model(model)
-        .with_api_key(api_key)
-        .with_tools(default_tools());
-
-    if let Some(skills) = args.skills.clone() {
-        let skills = SkillSet::load(skills.as_slice()).expect("Failed to load skills");
-        agent = agent.with_skills(skills);
-    }
-
-    let coding_agent = CodingAgent(Arc::new(Mutex::new(agent)));
-
-    () = commands.insert_resource(coding_agent);
-
+    let llm_config = llm_config.clone();
     let app_cancel = app_cancel.clone();
     let agents_cancel = agents_cancel.clone();
 
-    let _: JoinHandle<()> = tokio_runtime.spawn_background_task(|_ctx| async move {
+    let _: JoinHandle<()> = tokio_runtime.spawn_background_task(move |mut ctx| async move {
+        let model_config = ModelConfig::local(&llm_config.base_url, &llm_config.model);
+        let mut agent = Agent::new(OpenAiCompatProvider)
+            .with_model_config(model_config)
+            .with_system_prompt(SYSTEM_PROMPT)
+            .with_model(&llm_config.model)
+            .with_api_key(&llm_config.api_key)
+            .with_tools(default_tools());
+
+        if !args.skills.is_empty() {
+            if let Ok(skill_set) = SkillSet::load(args.skills.as_slice()) {
+                agent = agent.with_skills(skill_set);
+            }
+        }
+
+        let mut current_agent = Some(agent);
+        let mut mcp_error: Option<anyhow::Error> = None;
+
+        // yoagent's with_mcp_server_* consumes self and returns Result<Self, _>.
+        // Wrap in Option so the borrow checker can see agent is always valid after the loop.
+        for cmd in &mcp_config.stdio_transports {
+            let Some(agent) = current_agent.take() else {
+                break;
+            };
+            let parts: Vec<&str> = cmd.split_whitespace().collect();
+            match parts.split_first() {
+                Some((command, mcp_args)) => {
+                    match agent.with_mcp_server_stdio(command, mcp_args, None).await {
+                        Ok(new_agent) => current_agent = Some(new_agent),
+                        Err(e) => {
+                            mcp_error = Some(anyhow!(e));
+                            break;
+                        }
+                    }
+                }
+                None => current_agent = Some(agent),
+            }
+        }
+
+        debug_assert!(
+            current_agent.is_some() && mcp_error.is_none()
+                || current_agent.is_none() && mcp_error.is_some()
+        );
+
+        for url in &mcp_config.sse_transports {
+            let Some(agent) = current_agent.take() else {
+                break;
+            };
+            match agent.with_mcp_server_http(url.as_str()).await {
+                Ok(new_a) => {
+                    current_agent = Some(new_a);
+                }
+                Err(e) => {
+                    mcp_error = Some(anyhow!(e));
+                    break;
+                }
+            }
+        }
+
+        let result: anyhow::Result<Agent> = match (current_agent, mcp_error) {
+            (Some(agent), None) => Ok(agent),
+            (None, Some(e)) => Err(e),
+            _ => unreachable!(),
+        };
+
+        let coding_agent = CodingAgent(Arc::new(Mutex::new(result)));
+        () = ctx
+            .run_on_main_thread(move |ctx| {
+                () = ctx.world.insert_resource(coding_agent);
+            })
+            .await;
+
         tokio::select! {
             _ = app_cancel.cancelled() => (),
             _ = agents_cancel.cancelled() => (),
@@ -126,6 +186,7 @@ fn setup(
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, States)]
 enum CodingAgentState {
     #[default]
+    Initializing,
     Idle,
     Processing,
 }
@@ -147,17 +208,20 @@ pub struct CodingAgentEvent(AgentEvent);
 fn spawn_agent_task(
     channel: Res<'_, CodingAgentPromptChannel>,
     runtime: ResMut<'_, TokioTasksRuntime>,
-    coding_agent: ResMut<'_, CodingAgent>,
+    coding_agent: Res<'_, CodingAgent>,
     mut commands: Commands<'_, '_>,
     mut next_state: ResMut<'_, NextState<CodingAgentState>>,
 ) {
     if let Ok(prompt) = channel.receiver.try_recv() {
-        let coding_agent = coding_agent.clone();
+        let coding_agent = Arc::clone(&**coding_agent.into_inner());
         _ = runtime.spawn_background_task(move |mut ctx| async move {
-            // Try to prompt the LLM with retry logic.
+            // // Try to prompt the LLM with retry logic.
             let rx_result = retry_async(|| async {
                 // The prompt itself does not return a Result, so we wrap it.
-                Ok(coding_agent.lock().await.prompt(prompt.clone()).await)
+                match *coding_agent.clone().lock().await {
+                    Ok(ref mut agent) => Ok(agent.prompt(prompt.clone()).await),
+                    Err(_) => Err(()),
+                }
             })
             .await;
             match rx_result {
@@ -172,7 +236,10 @@ fn spawn_agent_task(
                             .await;
                     }
                     // Flush internal agent state so messages accumulate for the next turn.
-                    () = coding_agent.lock().await.finish().await;
+                    match *coding_agent.lock().await {
+                        Ok(ref mut agent) => agent.finish().await,
+                        _ => (),
+                    }
                     // When done, reset state to Idle
                     () = ctx
                         .run_on_main_thread(|ctx| {
@@ -420,6 +487,47 @@ fn handle_coding_agent_events(
     }
 }
 
+fn check_agent_ready(
+    coding_agent: Option<Res<CodingAgent>>,
+    state: Res<State<CodingAgentState>>,
+    mut next_state: ResMut<NextState<CodingAgentState>>,
+    mut tui: Option<NonSendMut<TuiMain>>,
+    mcp_config: Res<McpConfig>,
+) {
+    if coding_agent.is_some() && *state.get() != CodingAgentState::Initializing {
+        return;
+    }
+
+    () = next_state.set(CodingAgentState::Idle);
+    if let Some(tui) = tui.as_mut() {
+        () = tui.output.push(Line::from("✅ Ready").green());
+
+        let McpConfig {
+            sse_transports,
+            stdio_transports,
+        } = mcp_config.as_ref();
+
+        if !sse_transports.is_empty() || !stdio_transports.is_empty() {
+            () = tui.output.push(Line::from("✅ MCP connected:").green());
+            for url in &mcp_config.sse_transports {
+                let label = url.as_str();
+                let msg = format!("  stdio: {label}");
+                () = tui.output.push(Line::from(msg).green());
+            }
+            for cmd in &mcp_config.stdio_transports {
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                if let Some((command, _mcp_args)) = parts.split_first() {
+                    let label = command.to_string();
+                    let msg = format!("  http: {label}");
+                    () = tui.output.push(Line::from(msg).green());
+                }
+            }
+        }
+
+        () = tui.scroll_to_bottom();
+    }
+}
+
 fn shutdown_coding_agent(
     mut messages: MessageReader<AppExit>,
     mut cancel: Option<Res<AgentsCancelToken>>,
@@ -443,8 +551,11 @@ pub fn coding_agent_plugin(app: &mut App) {
         .add_systems(
             Update,
             (
+                check_agent_ready.run_if(in_state(CodingAgentState::Initializing)),
                 spawn_agent_task.run_if(
-                    in_state(CodingAgentState::Idle).and(not(resource_exists::<CodingAgentTask>)),
+                    in_state(CodingAgentState::Idle)
+                        .and(not(resource_exists::<CodingAgentTask>))
+                        .and(resource_exists::<CodingAgent>),
                 ),
                 handle_coding_agent_events.run_if(
                     in_state(CodingAgentState::Processing).and(resource_exists::<CodingAgentTask>),

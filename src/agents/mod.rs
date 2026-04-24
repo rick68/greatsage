@@ -17,6 +17,7 @@ use {
     std::{cell::Cell, env, future::Future, path::PathBuf, sync::Arc, time::Duration},
     tokio::task::JoinHandle,
     tokio_util::sync::CancellationToken,
+    url::Url,
 };
 
 /// Maximum number of retry attempts for LLM requests.
@@ -72,7 +73,7 @@ where
     Err(())
 }
 
-#[derive(Resource)]
+#[derive(Clone, Resource)]
 pub struct LlmConfig {
     pub base_url: String,
     pub model: String,
@@ -181,6 +182,35 @@ fn setup(
             else => unreachable!(),
         }
     });
+}
+
+/// MCP server entries supplied via `--mcp`. Each entry is either an HTTP(S) URL
+/// (auto-detected by `http://` / `https://` prefix) or a stdio command string.
+#[derive(Clone, Default, Resource)]
+pub struct McpConfig {
+    pub sse_transports: Vec<Url>,
+    pub stdio_transports: Vec<String>,
+}
+
+impl From<Vec<String>> for McpConfig {
+    fn from(servers: Vec<String>) -> Self {
+        let mut sse_transports = Vec::new();
+        let mut stdio_transports = Vec::new();
+        for server in servers {
+            if server.starts_with("http://") || server.starts_with("https://") {
+                match Url::parse(&server) {
+                    Ok(url) => sse_transports.push(url),
+                    Err(e) => eprintln!("MCP: invalid URL '{server}': {e}"),
+                }
+            } else if !server.trim().is_empty() {
+                stdio_transports.push(server);
+            }
+        }
+        Self {
+            sse_transports,
+            stdio_transports,
+        }
+    }
 }
 
 pub fn agents_plugin(app: &mut App) {

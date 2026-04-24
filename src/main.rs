@@ -24,7 +24,7 @@ use {
             system::Commands,
         },
     },
-    clap::{Parser, ValueEnum},
+    clap::{ArgAction, Parser, ValueEnum},
     std::{
         env,
         io::{IsTerminal, Read, stdin},
@@ -58,8 +58,11 @@ struct Args {
     #[arg(value_name = "prompt", required = false)]
     positional_prompt: Option<String>,
     /// Directory containing skill files
-    #[arg(long, value_name = "dir")]
-    skills: Option<Vec<PathBuf>>,
+    #[arg(long, value_name = "dir", action = ArgAction::Append)]
+    skills: Vec<PathBuf>,
+    /// MCP server to connect: HTTP URL (e.g. http://localhost:3000) or stdio command (e.g. "npx -y @mcp/server-fs /tmp"). Repeatable.
+    #[arg(long, value_name = "server", action = ArgAction::Append)]
+    mcp: Vec<String>,
     /// Context management: compaction or checkpoint
     #[arg(long, value_name = "s", default_value = "compaction")]
     context_strategy: ContextStrategy,
@@ -165,15 +168,15 @@ mod tests {
         static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = TEST_MUTEX.lock().unwrap();
         unsafe {
-            env::remove_var("API_KEY");
             env::remove_var("BASE_URL");
             env::remove_var("MODEL");
+            env::remove_var("API_KEY");
         }
         let err = validate_env_vars().unwrap_err();
         // The error should list all missing variables.
-        assert!(err.contains("API_KEY"));
         assert!(err.contains("BASE_URL"));
         assert!(err.contains("MODEL"));
+        assert!(err.contains("API_KEY"));
     }
 
     #[test]
@@ -181,15 +184,15 @@ mod tests {
     fn test_validate_env_missing_partial() {
         // Set only BASE_URL, leave others missing.
         unsafe {
-            () = env::remove_var("API_KEY");
             () = env::set_var("BASE_URL", "https://example.com");
             () = env::remove_var("MODEL");
+            () = env::remove_var("API_KEY");
         }
         let err = validate_env_vars().unwrap_err();
         // Should mention only the missing vars.
-        assert!(err.contains("API_KEY"));
         assert!(!err.contains("BASE_URL"));
         assert!(err.contains("MODEL"));
+        assert!(err.contains("API_KEY"));
     }
 
     #[test]
@@ -197,9 +200,9 @@ mod tests {
     fn test_validate_env_present() {
         // All vars present.
         unsafe {
-            () = env::set_var("API_KEY", "daummy_key");
             () = env::set_var("BASE_URL", "https://example.com");
             () = env::set_var("MODEL", "test-model");
+            () = env::set_var("API_KEY", "daummy_key");
         }
         assert!(validate_env_vars().is_ok());
     }
