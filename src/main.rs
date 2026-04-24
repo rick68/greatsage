@@ -66,6 +66,9 @@ struct Args {
     /// Context management: compaction or checkpoint
     #[arg(long, value_name = "s", default_value = "compaction")]
     context_strategy: ContextStrategy,
+    /// Print status messages (MCP connection, ready) to stderr in non-interactive mode
+    #[arg(short = 'v', long)]
+    verbose: bool,
 }
 
 pub fn validate_env_vars() -> Result<(), String> {

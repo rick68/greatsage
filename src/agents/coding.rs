@@ -490,8 +490,9 @@ fn handle_coding_agent_events(
 fn check_agent_ready(
     coding_agent: Option<Res<CodingAgent>>,
     mut next_state: ResMut<NextState<CodingAgentState>>,
-    mut tui: Option<NonSendMut<TuiMain>>,
     mcp_config: Res<McpConfig>,
+    mut tui: Option<NonSendMut<TuiMain>>,
+    args: Res<Args>,
 ) {
     // Wait until the async setup task has inserted the CodingAgent resource.
     if coding_agent.is_none() {
@@ -516,7 +517,7 @@ fn check_agent_ready(
             }
         }
         () = tui.scroll_to_bottom();
-    } else {
+    } else if args.verbose {
         eprintln!("greatsage: ready");
         if has_mcp {
             eprintln!("greatsage: MCP connected:");
