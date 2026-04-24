@@ -156,8 +156,27 @@ impl PermissionConfig {
                 }
             }
             Err(_e) => {
-                // Not a valid path (likely a command) – allow.
-                Ok(())
+                // Path may not exist yet (e.g., a new file to be created).
+                // In that case, consider its parent directory for permission checking.
+                if let Some(parent) = path.parent() {
+                    match parent.canonicalize() {
+                        Ok(parent_canonical) => {
+                            if self.is_path_allowed(&parent_canonical) {
+                                // Parent is within allowed dir, so the intended path is allowed.
+                                Ok(())
+                            } else {
+                                Err(format!("Permission denied for path: {path_str}"))
+                            }
+                        }
+                        Err(_) => {
+                            // Parent also cannot be resolved – deny for safety.
+                            Err(format!("Permission denied for path: {path_str}"))
+                        }
+                    }
+                } else {
+                    // No parent (unlikely) – deny.
+                    Err(format!("Permission denied for path: {path_str}"))
+                }
             }
         }
     }
@@ -457,5 +476,39 @@ mod tests {
         // Should be Err after MAX_RETRY_ATTEMPTS attempts (plus one final call)
         assert_eq!(attempts, MAX_RETRY_ATTEMPTS + 1);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_path_allows_nonexistent_file_within_allowed_dir() {
+        let allowed_dir = tempdir().expect("create allowed temp dir");
+        let allowed_path = allowed_dir.path().to_path_buf();
+        let perm = PermissionConfig {
+            allowed_dir: allowed_path.clone(),
+        };
+        // Path does not exist yet but is within allowed dir
+        let new_file = allowed_path.join("new.txt");
+        assert!(!new_file.exists());
+        let result = perm.validate_path(new_file.to_str().unwrap());
+        assert!(
+            result.is_ok(),
+            "validate_path should allow creation of new file within allowed dir"
+        );
+    }
+
+    #[test]
+    fn validate_path_denies_nonexistent_file_outside_allowed_dir() {
+        let allowed_dir = tempdir().expect("create allowed temp dir");
+        let denied_dir = tempdir().expect("create denied temp dir");
+        let perm = PermissionConfig {
+            allowed_dir: allowed_dir.path().to_path_buf(),
+        };
+        // Path does not exist and is outside allowed dir
+        let new_file = denied_dir.path().join("new.txt");
+        assert!(!new_file.exists());
+        let result = perm.validate_path(new_file.to_str().unwrap());
+        assert!(
+            result.is_err(),
+            "validate_path should deny creation of file outside allowed dir"
+        );
     }
 }
