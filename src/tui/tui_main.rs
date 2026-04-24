@@ -230,8 +230,8 @@ impl<'a> TuiMain<'a> {
         let status_text = if let Some(usage) = token_usage {
             let CodingAgentTotalTokenUsage(usage) = usage;
             format!(
-                " 🎯 Input: {} | Output: {} | Total: {} | Cache Read: {} | Cache Write: {}",
-                usage.input, usage.output, usage.total_tokens, usage.cache_read, usage.cache_write
+                " 🎯 Input: {} | Output: {} | Cache Read: {} | Cache Write: {}",
+                usage.input, usage.output, usage.cache_read, usage.cache_write
             )
         } else {
             " 🎯 Token usage: Waiting for first response...".to_string()
