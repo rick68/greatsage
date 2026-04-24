@@ -34,10 +34,12 @@ pub enum ConfigError {
 pub type ConfigResult<T> = Result<T, ConfigError>;
 
 pub fn default_config_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or(PathBuf::from("."))
-        .join("greatsage")
-        .join("config.toml")
+    // Follow XDG: respect $XDG_CONFIG_HOME, fall back to ~/.config on all platforms.
+    let base = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
+        .unwrap_or_else(|| PathBuf::from(".config"));
+    base.join("greatsage").join("config.toml")
 }
 
 /// Context management strategy.
