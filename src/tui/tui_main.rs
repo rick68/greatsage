@@ -16,7 +16,10 @@ use {
         },
         time::{Time, Timer, TimerMode},
     },
-    bevy_ratatui::{RatatuiContext, crossterm, event::{KeyMessage, MouseMessage}},
+    bevy_ratatui::{
+        RatatuiContext, crossterm,
+        event::{KeyMessage, MouseMessage},
+    },
     ratatui::{
         Frame,
         layout::{Constraint, Layout, Rect},
@@ -534,7 +537,7 @@ fn handle_mouse_input(
     mut tui_main: NonSendMut<TuiMain>,
     mut dirty: ResMut<RenderNeeded>,
 ) {
-    use crossterm::event::{MouseEventKind, MouseEvent};
+    use crossterm::event::{MouseEvent, MouseEventKind};
 
     for message in messages.read() {
         let MouseEvent { kind, .. } = &**message;
