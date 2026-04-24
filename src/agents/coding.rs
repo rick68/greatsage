@@ -112,10 +112,10 @@ fn setup(
             .with_api_key(&llm_config.api_key)
             .with_tools(default_tools());
 
-        if !args.skills.is_empty() {
-            if let Ok(skill_set) = SkillSet::load(args.skills.as_slice()) {
-                agent = agent.with_skills(skill_set);
-            }
+        if !args.skills.is_empty()
+            && let Ok(skill_set) = SkillSet::load(args.skills.as_slice())
+        {
+            agent = agent.with_skills(skill_set);
         }
 
         let mut current_agent = Some(agent);
@@ -236,9 +236,8 @@ fn spawn_agent_task(
                             .await;
                     }
                     // Flush internal agent state so messages accumulate for the next turn.
-                    match *coding_agent.lock().await {
-                        Ok(ref mut agent) => agent.finish().await,
-                        _ => (),
+                    if let Ok(ref mut agent) = *coding_agent.lock().await {
+                        agent.finish().await;
                     }
                     // When done, reset state to Idle
                     () = ctx
@@ -500,7 +499,10 @@ fn check_agent_ready(
 
     next_state.set(CodingAgentState::Idle);
 
-    let McpConfig { sse_transports, stdio_transports } = mcp_config.as_ref();
+    let McpConfig {
+        sse_transports,
+        stdio_transports,
+    } = mcp_config.as_ref();
     let has_mcp = !sse_transports.is_empty() || !stdio_transports.is_empty();
 
     if let Some(tui) = tui.as_mut() {
@@ -508,11 +510,15 @@ fn check_agent_ready(
         if has_mcp {
             () = tui.output.push(Line::from("✅ MCP connected:").green());
             for url in sse_transports {
-                () = tui.output.push(Line::from(format!("  http: {url}")).green());
+                () = tui
+                    .output
+                    .push(Line::from(format!("  http: {url}")).green());
             }
             for cmd in stdio_transports {
                 let label = cmd.split_whitespace().next().unwrap_or(cmd.as_str());
-                () = tui.output.push(Line::from(format!("  stdio: {label}")).green());
+                () = tui
+                    .output
+                    .push(Line::from(format!("  stdio: {label}")).green());
             }
         }
         () = tui.scroll_to_bottom();
