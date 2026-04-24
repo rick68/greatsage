@@ -1,7 +1,7 @@
-use std::fs;
-use std::path::Path;
-use std::time::Duration;
-use tokio::time;
+use {
+    std::{io::ErrorKind, path::Path, time::Duration},
+    tokio::{fs, runtime::Runtime, time},
+};
 
 const TIMEOUT_SECS: u64 = 1200;
 
@@ -11,12 +11,12 @@ const TIMEOUT_SECS: u64 = 1200;
 /// half the total evolve timeout.
 pub fn assessment_phase() -> Result<String, Box<dyn std::error::Error>> {
     // Create a Tokio runtime to run the async timeout.
-    let rt = tokio::runtime::Runtime::new()?;
+    let rt = Runtime::new()?;
     rt.block_on(async {
         // Wrap the actual assessment work in a timeout future.
         let work = async {
             // Read Cargo.toml version.
-            let cargo_toml = fs::read_to_string("Cargo.toml")?;
+            let cargo_toml = fs::read_to_string("Cargo.toml").await?;
             let version_line = cargo_toml
                 .lines()
                 .find(|l| l.trim_start().starts_with("version"))
@@ -28,21 +28,25 @@ pub fn assessment_phase() -> Result<String, Box<dyn std::error::Error>> {
                 .to_string();
 
             // Count .rs source files recursively under src/.
-            fn count_rs(dir: &Path) -> usize {
-                let mut cnt = 0;
-                if let Ok(entries) = fs::read_dir(dir) {
-                    for entry in entries.filter_map(Result::ok) {
-                        let path = entry.path();
-                        if path.is_dir() {
-                            cnt += count_rs(&path);
-                        } else if path.extension().is_some_and(|e| e == "rs") {
-                            cnt += 1;
+            fn count_rs(
+                dir: std::path::PathBuf,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = usize> + Send>> {
+                Box::pin(async move {
+                    let mut cnt = 0;
+                    if let Ok(mut entries) = fs::read_dir(&dir).await {
+                        while let Ok(Some(entry)) = entries.next_entry().await {
+                            let path = entry.path();
+                            if path.is_dir() {
+                                cnt += count_rs(path).await;
+                            } else if path.extension().is_some_and(|e| e == "rs") {
+                                cnt += 1;
+                            }
                         }
                     }
-                }
-                cnt
+                    cnt
+                })
             }
-            let src_files = count_rs(Path::new("src"));
+            let src_files = count_rs(Path::new("src").to_path_buf()).await;
 
             // Placeholder for latest CI status.
             let ci_status = "unknown";
@@ -54,7 +58,10 @@ pub fn assessment_phase() -> Result<String, Box<dyn std::error::Error>> {
 
         match time::timeout(Duration::from_secs(TIMEOUT_SECS / 2), work).await {
             Ok(res) => res,
-            Err(_) => Err("assessment phase timed out".into()),
+            Err(_) => Err(Box::new(std::io::Error::new(
+                ErrorKind::TimedOut,
+                "assessment phase timed out",
+            )) as Box<dyn std::error::Error>),
         }
     })
 }
@@ -62,7 +69,7 @@ pub fn assessment_phase() -> Result<String, Box<dyn std::error::Error>> {
 pub fn run_evolve() -> Result<(), Box<dyn std::error::Error>> {
     // Phase A1 – Assessment
     let assessment = assessment_phase()?;
-    println!("[greatsage] Assessment Phase Result:\n{}", assessment);
+    println!("[greatsage] Assessment Phase Result:\n{assessment}");
     Ok(())
 }
 
