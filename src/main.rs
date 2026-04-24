@@ -8,7 +8,6 @@ mod tui;
 use {
     crate::{
         agents::{CodingAgentPromptChannel, CodingAgentTask, agents_plugin},
-        // git module is available as crate::git
         tokio::tokio_plugin,
         tui::tui_plugin,
     },
