@@ -171,7 +171,8 @@ impl PermissionConfig {
             if token.contains('/') || token.starts_with('.') {
                 // Strip surrounding quotes for cleaner validation.
                 let stripped = token.trim_matches('\'').trim_matches('"');
-                () = self.validate_path(stripped)
+                () = self
+                    .validate_path(stripped)
                     .map_err(|e| format!("Token '{}' disallowed: {}", token, e))?;
             }
         }

@@ -8,6 +8,7 @@ mod tui;
 use {
     crate::{
         agents::{CodingAgentPromptChannel, CodingAgentTask, agents_plugin},
+        // git module is available as crate::git
         tokio::tokio_plugin,
         tui::tui_plugin,
     },
@@ -69,6 +70,12 @@ struct Args {
     /// Print status messages (MCP connection, ready) to stderr in non-interactive mode
     #[arg(short = 'v', long)]
     verbose: bool,
+    /// Stage all changes before running the app
+    #[arg(long, action = ArgAction::SetTrue)]
+    stage_all: bool,
+    /// Commit staged changes with the given message after optional staging
+    #[arg(long, value_name = "msg")]
+    git_commit: Option<String>,
 }
 
 pub fn validate_env_vars() -> Result<(), String> {
@@ -99,6 +106,19 @@ fn main() {
     // Validate required environment variables after parsing args (so --help works).
     if let Err(msg) = validate_env_vars() {
         eprintln!("{msg}");
+        std::process::exit(1);
+    }
+    // Git integration: optional staging and commit.
+    if args.stage_all
+        && let Err(e) = git::stage_all()
+    {
+        eprintln!("{}", e);
+        std::process::exit(1);
+    }
+    if let Some(msg) = &args.git_commit
+        && let Err(e) = git::commit(msg)
+    {
+        eprintln!("{}", e);
         std::process::exit(1);
     }
     let mut invocation_prompt = None;
@@ -208,5 +228,13 @@ mod tests {
             () = env::set_var("API_KEY", "daummy_key");
         }
         assert!(validate_env_vars().is_ok());
+    }
+
+    #[test]
+    fn test_args_parsing_stage_and_commit() {
+        // Simulate command line arguments for staging and committing.
+        let args = Args::parse_from(["test_bin", "--stage-all", "--git-commit", "Initial commit"]);
+        assert!(args.stage_all);
+        assert_eq!(args.git_commit.as_deref(), Some("Initial commit"));
     }
 }
