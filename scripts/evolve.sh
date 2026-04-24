@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # scripts/evolve.sh — One evolution cycle. Cron fires hourly; 8h gap controls frequency.
 # Monthly sponsors get benefit tiers (priority, shoutout, listing) — no run speedup.
 # One-time sponsors ($2+) get 1 accelerated run + benefit tiers based on amount.
