@@ -49,6 +49,8 @@ ANTHROPIC_API_KEY=sk-... ./scripts/evolve.sh
 
 **Multi-file agent** (`src/`):
 - `main.rs` — Primary Bevy application entry point. Initializes the ECS world, plugins, resources, and systems. Manages overall application lifecycle, REPL interface, streaming event handling, and high-level integration with yoagent for the self-evolving agent core.
+- `cli.rs` — CLI argument parsing via clap. Defines `Args` (the `Parser` struct) and `Command` (subcommands). Pure clap — no Bevy dependency. `Args` is consumed in `main()` to populate `AppConfig::runtime` and is never inserted into the ECS.
+- `config.rs` — Configuration management. `AppConfig` is the single Bevy `Resource` for all runtime state: file-backed fields (llm, agent, tools, tui, mcp, permissions) loaded from TOML, plus `RuntimeConfig` (`#[serde(skip)]`) which holds per-invocation CLI flags (skills, mcp_servers, verbose) that are never persisted.
 - `tokio.rs` — Handles seamless integration between the Tokio async runtime and Bevy's task system, enabling non-blocking asynchronous execution across all agent operations.
 - `agents/mod.rs` — Module declaration for the agents subsystem. Re-exports public interfaces and configures AutoAgents integration along with dynamic skill loading and context management strategies.
 - `agents/coding.rs` — Implements core coding and self-evolution agents. Responsible for code analysis, task planning, safe source modifications, evolution workflows, and integration with the Bevy ECS orchestration layer.
