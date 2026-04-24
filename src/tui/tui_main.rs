@@ -166,7 +166,7 @@ impl<'a> TuiMain<'a> {
 
     fn history_next(&mut self) {
         match self.history_pos {
-            None => return,
+            None => (),
             Some(i) if i + 1 >= self.history.len() => {
                 self.history_pos = None;
                 let draft = self.history_draft.clone();
@@ -369,11 +369,17 @@ fn handle_input_area_input(
                 tui_main.insert_char(*c);
                 **dirty = true;
             }
-            KeyCode::Char('a') if matches!(kind, KeyEventKind::Press) && modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('a')
+                if matches!(kind, KeyEventKind::Press)
+                    && modifiers.contains(KeyModifiers::CONTROL) =>
+            {
                 tui_main.cursor_to_start();
                 **dirty = true;
             }
-            KeyCode::Char('e') if matches!(kind, KeyEventKind::Press) && modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('e')
+                if matches!(kind, KeyEventKind::Press)
+                    && modifiers.contains(KeyModifiers::CONTROL) =>
+            {
                 tui_main.cursor_to_end();
                 **dirty = true;
             }
@@ -462,18 +468,18 @@ fn handle_input_area_input(
                         } else {
                             Line::from("❌ Unknown git command").red()
                         };
-                        ()=tui_main.push_history(&input);
+                        () = tui_main.push_history(&input);
                         () = tui_main.output.push(output_line);
                         () = tui_main.clear_input();
                         () = tui_main.scroll_to_bottom();
                     } else {
                         match input.as_str() {
                             "/exit" | "/quit" => {
-                                () =tui_main.clear_input();
+                                () = tui_main.clear_input();
                                 _ = exit.write_default();
                             }
                             _ => {
-                                () =tui_main.push_history(&input);
+                                () = tui_main.push_history(&input);
                                 () = tui_main.output.push(Line::raw(input.clone()));
                                 () = tui_main.clear_input();
                                 () = tui_main.scroll_to_bottom();
