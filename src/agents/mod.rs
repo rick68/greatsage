@@ -135,22 +135,42 @@ impl PermissionConfig {
     /// Validate a bash command string by checking any path‑like tokens.
     /// Tokens that contain a '/' or start with '.' are considered potential paths.
     /// Returns Ok(()) if all such tokens are within the allowed directory.
+    /// Validate a bash command string by checking any path‑like tokens.
+    ///
+    /// The original implementation considered **any** token containing a `/` or starting with `.`
+    /// a potential file path. This caused false‑positives for URLs (e.g. `http://example.com`) and
+    /// JSON strings that may contain slashes or dots. The updated logic applies a more nuanced
+    /// heuristic:
+    ///
+    /// * Tokens that look like URLs (`scheme://...`) are ignored.
+    /// * Tokens that start with a JSON delimiter (`{` or `[`) are ignored.
+    /// * Tokens that start with `-` are treated as flags and skipped.
+    /// * Remaining tokens that contain a `/` or start with `.` are considered file paths and are
+    ///   validated via `validate_path`.
+    ///
+    /// This reduces over‑rejection while preserving security – only clearly path‑like arguments are
+    /// checked against the allowed directory.
     #[allow(clippy::while_let_on_iterator)]
     pub fn validate_command(&self, command: &str) -> Result<(), String> {
-        // Split the command into whitespace‑separated tokens and iterate with a peekable iterator so we can
-        // optionally skip the argument that follows a flag.
+        // Split the command into whitespace‑separated tokens and iterate.
         let mut tokens = command.split_whitespace().peekable();
         while let Some(token) = tokens.next() {
-            // Tokens starting with '-' are considered flags and are ignored for path validation.
+            // Skip flags.
             if token.starts_with('-') {
-                // Skip the flag token itself.
+                continue;
+            }
+            // Skip URLs (e.g. http://example.com) – they contain "://".
+            if token.contains("://") {
+                continue;
+            }
+            // Skip JSON literals.
+            if token.starts_with('{') || token.starts_with('[') {
                 continue;
             }
             // Heuristic: treat as a path if it contains '/' or is relative '.' or '..'
             if token.contains('/') || token.starts_with('.') {
-                // Strip surrounding quotes
+                // Strip surrounding quotes for cleaner validation.
                 let stripped = token.trim_matches('\'').trim_matches('"');
-                // Propagate a richer error that includes the offending token.
                 self.validate_path(stripped)
                     .map_err(|e| format!("Token '{}' disallowed: {}", token, e))?;
             }
@@ -323,6 +343,40 @@ mod tests {
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert!(err.contains(denied_file.to_str().unwrap()));
+    }
+
+    #[test]
+    fn command_skips_url_tokens() {
+        // Allowed directory
+        let allowed_dir = tempdir().expect("create allowed temp dir");
+        let allowed_path = allowed_dir.path().to_path_buf();
+        let config = PermissionConfig {
+            allowed_dir: allowed_path,
+        };
+        // Command includes a URL and an allowed path token.
+        let cmd = format!(
+            "curl http://example.com -o {}",
+            allowed_dir.path().join("out.txt").to_str().unwrap()
+        );
+        // Should be allowed because URL is skipped and path is within allowed dir.
+        assert!(config.validate_command(&cmd).is_ok());
+    }
+
+    #[test]
+    fn command_skips_json_tokens() {
+        let allowed_dir = tempdir().expect("create allowed temp dir");
+        let config = PermissionConfig {
+            allowed_dir: allowed_dir.path().to_path_buf(),
+        };
+        // JSON token that includes slashes but should be ignored.
+        let json = "{\"url\": \"http://example.com/path\"}";
+        // Also include an allowed path token to ensure overall passes.
+        let cmd = format!(
+            "echo {} {}",
+            json,
+            allowed_dir.path().join("file.txt").to_str().unwrap()
+        );
+        assert!(config.validate_command(&cmd).is_ok());
     }
 
     #[test]
