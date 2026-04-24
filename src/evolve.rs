@@ -90,6 +90,6 @@ mod tests {
     fn test_run_evolve_executes_without_error() {
         // Ensure that the evolve pipeline runs to completion without panicking.
         // The function prints to stdout; we only verify that it returns Ok.
-        run_evolve().expect("run_evolve should complete without error");
+        () = run_evolve().expect("run_evolve should complete without error");
     }
 }
