@@ -24,7 +24,7 @@ use {
         state::{
             app::AppExtStates,
             condition::in_state,
-            state::{NextState, State, States},
+            state::{NextState, States},
         },
     },
     bevy_tokio_tasks::{MainThreadContext, TokioTasksRuntime},
@@ -489,42 +489,45 @@ fn handle_coding_agent_events(
 
 fn check_agent_ready(
     coding_agent: Option<Res<CodingAgent>>,
-    state: Res<State<CodingAgentState>>,
     mut next_state: ResMut<NextState<CodingAgentState>>,
     mut tui: Option<NonSendMut<TuiMain>>,
     mcp_config: Res<McpConfig>,
 ) {
-    if coding_agent.is_some() && *state.get() != CodingAgentState::Initializing {
+    // Wait until the async setup task has inserted the CodingAgent resource.
+    if coding_agent.is_none() {
         return;
     }
 
-    () = next_state.set(CodingAgentState::Idle);
+    next_state.set(CodingAgentState::Idle);
+
+    let McpConfig { sse_transports, stdio_transports } = mcp_config.as_ref();
+    let has_mcp = !sse_transports.is_empty() || !stdio_transports.is_empty();
+
     if let Some(tui) = tui.as_mut() {
         () = tui.output.push(Line::from("✅ Ready").green());
-
-        let McpConfig {
-            sse_transports,
-            stdio_transports,
-        } = mcp_config.as_ref();
-
-        if !sse_transports.is_empty() || !stdio_transports.is_empty() {
+        if has_mcp {
             () = tui.output.push(Line::from("✅ MCP connected:").green());
-            for url in &mcp_config.sse_transports {
-                let label = url.as_str();
-                let msg = format!("  stdio: {label}");
-                () = tui.output.push(Line::from(msg).green());
+            for url in sse_transports {
+                () = tui.output.push(Line::from(format!("  http: {url}")).green());
             }
-            for cmd in &mcp_config.stdio_transports {
-                let parts: Vec<&str> = cmd.split_whitespace().collect();
-                if let Some((command, _mcp_args)) = parts.split_first() {
-                    let label = command.to_string();
-                    let msg = format!("  http: {label}");
-                    () = tui.output.push(Line::from(msg).green());
-                }
+            for cmd in stdio_transports {
+                let label = cmd.split_whitespace().next().unwrap_or(cmd.as_str());
+                () = tui.output.push(Line::from(format!("  stdio: {label}")).green());
             }
         }
-
         () = tui.scroll_to_bottom();
+    } else {
+        eprintln!("greatsage: ready");
+        if has_mcp {
+            eprintln!("greatsage: MCP connected:");
+            for url in sse_transports {
+                eprintln!("  http: {url}");
+            }
+            for cmd in stdio_transports {
+                let label = cmd.split_whitespace().next().unwrap_or(cmd.as_str());
+                eprintln!("  stdio: {label}");
+            }
+        }
     }
 }
 
