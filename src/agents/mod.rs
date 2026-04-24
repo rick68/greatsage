@@ -119,7 +119,21 @@ impl PermissionConfig {
     pub fn validate_path(&self, path_str: &str) -> Result<(), String> {
         // Treat the input as a filesystem path; if it cannot be canonicalized (e.g., a command
         // string for the `bash` tool), we consider it allowed.
-        let path = std::path::Path::new(path_str);
+        // Expand leading `~` to the user's home directory for convenience.
+        let expanded = if path_str.starts_with('~') {
+            if let Some(home) = dirs::home_dir() {
+                let without_tilde = path_str.trim_start_matches('~');
+                // Preserve possible leading slash after '~'.
+                let stripped = without_tilde.strip_prefix('/').unwrap_or(without_tilde);
+                home.join(stripped).to_string_lossy().into_owned()
+            } else {
+                // If we cannot determine home, fall back to original path.
+                path_str.to_string()
+            }
+        } else {
+            path_str.to_string()
+        };
+        let path = std::path::Path::new(&expanded);
         match path.canonicalize() {
             Ok(canonical_target) => {
                 if self.is_path_allowed(&canonical_target) {
