@@ -139,6 +139,13 @@ impl<'a> TuiMain<'a> {
         self.byte_index = 0;
     }
 
+    /// Clears the REPL output buffer and resets scrolling.
+    fn clear_output(&mut self) {
+        self.output.clear();
+        self.vertical_scroll = 0;
+        self.vertical_scroll_state = ScrollbarState::default();
+    }
+
     fn push_history(&mut self, s: &str) {
         if !s.is_empty() && self.history.last().map(|l| l != s).unwrap_or(true) {
             self.history.push(s.to_owned());
@@ -477,6 +484,11 @@ fn handle_input_area_input(
                             "/exit" | "/quit" => {
                                 () = tui_main.clear_input();
                                 _ = exit.write_default();
+                            }
+                            "/clear" => {
+                                // Clear the REPL output buffer and reset scroll.
+                                () = tui_main.clear_output();
+                                () = tui_main.clear_input();
                             }
                             _ => {
                                 () = tui_main.push_history(&input);
