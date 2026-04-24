@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod agents;
+mod config;
 mod git;
 mod tokio;
 mod tui;
@@ -8,6 +9,10 @@ mod tui;
 use {
     crate::{
         agents::{CodingAgentPromptChannel, CodingAgentTask, agents_plugin},
+        config::{
+            AppConfig, ConfigSubcommand, ContextStrategy, default_config_path,
+            run_config_subcommand, validate_required,
+        },
         tokio::tokio_plugin,
         tui::tui_plugin,
     },
@@ -24,32 +29,34 @@ use {
             system::Commands,
         },
     },
-    clap::{ArgAction, Parser, ValueEnum},
+    clap::{
+        ArgAction, CommandFactory, Parser, Subcommand,
+        builder::styling::{AnsiColor, Effects, Styles},
+    },
     std::{
-        env,
         io::{IsTerminal, Read, stdin},
         path::PathBuf,
         time::Duration,
     },
 };
 
-const FRAMES_PER_SECOND: f32 = 30.0;
-
-/// Context management strategy.
-#[derive(Clone, Copy, Debug, Default, PartialEq, ValueEnum)]
-pub enum ContextStrategy {
-    /// Default: auto-compact conversation when approaching context limit
-    #[default]
-    Compaction,
-    /// Write checkpoint file and exit with code 2 when approaching limit
-    Checkpoint,
-}
+const STYLES: Styles = Styles::styled()
+    .header(AnsiColor::Green.on_default().effects(Effects::BOLD))
+    .usage(AnsiColor::Green.on_default().effects(Effects::BOLD))
+    .literal(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
+    .placeholder(AnsiColor::Cyan.on_default())
+    .error(AnsiColor::Red.on_default().effects(Effects::BOLD))
+    .valid(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
+    .invalid(AnsiColor::Yellow.on_default().effects(Effects::BOLD));
 
 #[derive(Clone, Debug, Parser, Resource)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about = None, styles = STYLES)]
 struct Args {
-    // Model to use
-    #[arg(long, value_name = "name", default_value = "claude-opus-4-7")]
+    /// Path to config file
+    #[arg(long, value_name = "PATH")]
+    config: Option<PathBuf>,
+    // Model to use (overrides config file)
+    #[arg(long, value_name = "name")]
     model: Option<String>,
     /// Run a single prompt and exit (no REPL)
     #[arg(short, long, value_name = "t")]
@@ -60,13 +67,13 @@ struct Args {
     /// Directory containing skill files
     #[arg(long, value_name = "dir", action = ArgAction::Append)]
     skills: Vec<PathBuf>,
-    /// MCP server to connect: HTTP URL (e.g. http://localhost:3000) or stdio command (e.g. "npx -y @mcp/server-fs /tmp"). Repeatable.
+    /// MCP server to connect: HTTP URL or stdio command. Repeatable.
     #[arg(long, value_name = "server", action = ArgAction::Append)]
     mcp: Vec<String>,
-    /// Context management: compaction or checkpoint
-    #[arg(long, value_name = "s", default_value = "compaction")]
-    context_strategy: ContextStrategy,
-    /// Print status messages (MCP connection, ready) to stderr in non-interactive mode
+    /// Context management: compaction or checkpoint (overrides config file)
+    #[arg(long, value_name = "s")]
+    context_strategy: Option<ContextStrategy>,
+    /// Print status messages to stderr in non-interactive mode
     #[arg(short = 'v', long)]
     verbose: bool,
     /// Stage all changes before running the app
@@ -75,38 +82,51 @@ struct Args {
     /// Commit staged changes with the given message after optional staging
     #[arg(long, value_name = "msg")]
     git_commit: Option<String>,
+    #[command(subcommand)]
+    command: Option<Command>,
 }
 
-pub fn validate_env_vars() -> Result<(), String> {
-    // Collect all missing or empty required environment variables.
-    let mut missing = Vec::new();
-    for &var in &["BASE_URL", "MODEL", "API_KEY"] {
-        // Retrieve the variable; if it exists and is not empty, skip.
-        match env::var(var) {
-            Ok(val) if !val.trim().is_empty() => continue,
-            _ => missing.push(var),
-        }
-    }
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        // Join missing variables with commas for a clear message.
-        Err(format!(
-            "Error: Missing required environment variables: {}",
-            missing.join(", ")
-        ))
-    }
+#[derive(Subcommand, Clone, Debug)]
+enum Command {
+    /// View and edit configuration
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigSubcommand,
+    },
 }
 
 fn main() {
+    clap_complete::CompleteEnv::with_factory(Args::command).complete();
+
     _ = dotenvy::dotenv();
 
     let args = Args::parse();
-    // Validate required environment variables after parsing args (so --help works).
-    if let Err(msg) = validate_env_vars() {
-        eprintln!("{msg}");
+
+    let config_path = args.config.clone().unwrap_or_else(default_config_path);
+    let mut app_config = AppConfig::load_or_create(&config_path);
+
+    // Config subcommand: operate on the file and exit.
+    if let Some(Command::Config { ref cmd }) = args.command {
+        if let Err(e) = run_config_subcommand(cmd, &config_path, &mut app_config) {
+            eprintln!("error: {e:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // CLI overrides for config-file values.
+    if let Some(model) = &args.model {
+        app_config.llm.model = model.clone();
+    }
+    if let Some(strategy) = args.context_strategy {
+        app_config.agent.context_strategy = strategy;
+    }
+
+    if let Err(e) = validate_required(&app_config) {
+        eprintln!("error: {e:#}");
         std::process::exit(1);
     }
+
     // Git integration: optional staging and commit.
     if args.stage_all
         && let Err(e) = git::stage_all()
@@ -120,8 +140,8 @@ fn main() {
         eprintln!("{}", e);
         std::process::exit(1);
     }
-    let mut invocation_prompt = None;
 
+    let mut invocation_prompt = None;
     {
         let stdin = stdin();
         let Args {
@@ -144,13 +164,14 @@ fn main() {
         }
     }
 
+    let frames_per_second = app_config.tui.frames_per_second;
     let mut app: App = App::new();
     _ =
-        app.insert_resource::<Args>(args)
+        app.insert_resource(app_config)
+            .insert_resource::<Args>(args)
             .add_plugins(DefaultPlugins.set(ScheduleRunnerPlugin::run_loop(
-                Duration::from_secs_f32(FRAMES_PER_SECOND.recip()),
+                Duration::from_secs_f32(frames_per_second.recip()),
             )));
-    // Add other custom plugins
     _ = app.add_plugins((tokio_plugin, agents_plugin));
 
     if let Some(prompt) = invocation_prompt {
@@ -179,6 +200,25 @@ fn main() {
     }
 }
 
+/// Validate required env vars (pure env check, used in tests).
+pub fn validate_env_vars() -> Result<(), String> {
+    let mut missing = Vec::new();
+    for &var in &["BASE_URL", "MODEL", "API_KEY"] {
+        match std::env::var(var) {
+            Ok(val) if !val.trim().is_empty() => continue,
+            _ => missing.push(var),
+        }
+    }
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Error: Missing required environment variables: {}",
+            missing.join(", ")
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use {super::*, temp_env_vars::temp_env_vars};
@@ -186,16 +226,14 @@ mod tests {
     #[test]
     #[temp_env_vars]
     fn test_validate_env_missing_all() {
-        // Ensure all required vars are absent.
         static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = TEST_MUTEX.lock().unwrap();
         unsafe {
-            env::remove_var("BASE_URL");
-            env::remove_var("MODEL");
-            env::remove_var("API_KEY");
+            std::env::remove_var("BASE_URL");
+            std::env::remove_var("MODEL");
+            std::env::remove_var("API_KEY");
         }
         let err = validate_env_vars().unwrap_err();
-        // The error should list all missing variables.
         assert!(err.contains("BASE_URL"));
         assert!(err.contains("MODEL"));
         assert!(err.contains("API_KEY"));
@@ -204,14 +242,12 @@ mod tests {
     #[test]
     #[temp_env_vars]
     fn test_validate_env_missing_partial() {
-        // Set only BASE_URL, leave others missing.
         unsafe {
-            () = env::set_var("BASE_URL", "https://example.com");
-            () = env::remove_var("MODEL");
-            () = env::remove_var("API_KEY");
+            () = std::env::set_var("BASE_URL", "https://example.com");
+            () = std::env::remove_var("MODEL");
+            () = std::env::remove_var("API_KEY");
         }
         let err = validate_env_vars().unwrap_err();
-        // Should mention only the missing vars.
         assert!(!err.contains("BASE_URL"));
         assert!(err.contains("MODEL"));
         assert!(err.contains("API_KEY"));
@@ -220,18 +256,16 @@ mod tests {
     #[test]
     #[temp_env_vars]
     fn test_validate_env_present() {
-        // All vars present.
         unsafe {
-            () = env::set_var("BASE_URL", "https://example.com");
-            () = env::set_var("MODEL", "test-model");
-            () = env::set_var("API_KEY", "daummy_key");
+            () = std::env::set_var("BASE_URL", "https://example.com");
+            () = std::env::set_var("MODEL", "test-model");
+            () = std::env::set_var("API_KEY", "dummy_key");
         }
         assert!(validate_env_vars().is_ok());
     }
 
     #[test]
     fn test_args_parsing_stage_and_commit() {
-        // Simulate command line arguments for staging and committing.
         let args = Args::parse_from(["test_bin", "--stage-all", "--git-commit", "Initial commit"]);
         assert!(args.stage_all);
         assert_eq!(args.git_commit.as_deref(), Some("Initial commit"));

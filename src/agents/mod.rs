@@ -6,13 +6,14 @@ pub use tools::build_tools;
 
 use {
     self::coding::coding_agent_plugin,
-    crate::tokio::AppCancelToken,
+    crate::{config::AppConfig, tokio::AppCancelToken},
     backon::{BlockingRetryable, ConstantBuilder},
     bevy::{
         app::{App, Startup},
         ecs::{
             change_detection::{Res, ResMut},
             resource::Resource,
+            world::World,
         },
         prelude::Deref,
     },
@@ -83,12 +84,24 @@ pub struct LlmConfig {
     pub api_key: String,
 }
 
-impl Default for LlmConfig {
-    fn default() -> Self {
+impl bevy::ecs::world::FromWorld for LlmConfig {
+    fn from_world(world: &mut World) -> Self {
+        let cfg = world.resource::<AppConfig>();
+        // Env vars override config file values; API_KEY is env-only.
+        let base_url = env::var("BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| cfg.llm.base_url.clone());
+        let model = env::var("MODEL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| cfg.llm.model.clone());
+        let api_key = dotenvy::var("API_KEY").unwrap_or_default();
+
         Self {
-            base_url: dotenvy::var("BASE_URL").unwrap_or_default(),
-            model: dotenvy::var("MODEL").unwrap_or_default(),
-            api_key: dotenvy::var("API_KEY").unwrap_or_default(),
+            base_url,
+            model,
+            api_key,
         }
     }
 }
@@ -201,19 +214,28 @@ impl PermissionConfig {
     }
 }
 
-impl Default for PermissionConfig {
-    fn default() -> Self {
-        // Allow overriding the allowed directory via the ALLOWED_DIR environment variable.
-        // If the variable is set and points to an existing directory, use its canonicalized
-        // form; otherwise fall back to the current working directory.
-        let allowed = match env::var("ALLOWED_DIR") {
-            Ok(dir) => {
+impl bevy::ecs::world::FromWorld for PermissionConfig {
+    fn from_world(world: &mut World) -> Self {
+        let cfg = world.resource::<AppConfig>();
+        // ALLOWED_DIR env var overrides config file; config overrides cwd default.
+        let raw = env::var("ALLOWED_DIR")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                let dir = &cfg.permissions.allowed_dir;
+                if dir.is_empty() {
+                    None
+                } else {
+                    Some(dir.clone())
+                }
+            });
+        let allowed = match raw {
+            Some(dir) => {
                 let path = PathBuf::from(dir);
-                // Attempt to canonicalize; if it fails (e.g., path does not exist), ignore and use cwd.
                 path.canonicalize()
                     .unwrap_or_else(|_| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
             }
-            Err(_) => env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            None => env::current_dir().unwrap_or(PathBuf::from(".")),
         };
 
         Self {
