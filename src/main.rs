@@ -252,6 +252,4 @@ mod tests {
         // Ensure run_evolve returns Ok without panic.
         evolve::run_evolve().expect("run_evolve should succeed");
     }
-
-
 }
