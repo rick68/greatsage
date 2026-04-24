@@ -56,8 +56,8 @@ const STYLES: Styles = Styles::styled()
 #[command(version, about, long_about = None, styles = STYLES)]
 struct Args {
     /// Path to config file
-    #[arg(long, value_name = "PATH")]
-    config: Option<PathBuf>,
+    #[arg(long, value_name = "PATH", default_value_os_t = default_config_path())]
+    config: PathBuf,
     // Model to use (overrides config file)
     #[arg(long, value_name = "name")]
     model: Option<String>,
@@ -108,7 +108,7 @@ fn main() {
 
     let args = Args::parse();
 
-    let config_path = args.config.clone().unwrap_or_else(default_config_path);
+    let config_path = args.config.clone();
     let mut app_config = AppConfig::load_or_create(&config_path);
 
     // Config subcommand: operate on the file and exit.
@@ -258,9 +258,9 @@ mod tests {
     #[temp_env_vars]
     fn test_validate_env_missing_partial() {
         unsafe {
-            () = std::env::set_var("BASE_URL", "https://example.com");
-            () = std::env::remove_var("MODEL");
-            () = std::env::remove_var("API_KEY");
+            () = env::set_var("BASE_URL", "https://example.com");
+            () = env::remove_var("MODEL");
+            () = env::remove_var("API_KEY");
         }
         let err = validate_env_vars().unwrap_err();
         assert!(!err.contains("BASE_URL"));
@@ -272,9 +272,9 @@ mod tests {
     #[temp_env_vars]
     fn test_validate_env_present() {
         unsafe {
-            () = std::env::set_var("BASE_URL", "https://example.com");
-            () = std::env::set_var("MODEL", "test-model");
-            () = std::env::set_var("API_KEY", "dummy_key");
+            () = env::set_var("BASE_URL", "https://example.com");
+            () = env::set_var("MODEL", "test-model");
+            () = env::set_var("API_KEY", "dummy_key");
         }
         assert!(validate_env_vars().is_ok());
     }
