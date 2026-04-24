@@ -16,7 +16,7 @@ use {
         },
         time::{Time, Timer, TimerMode},
     },
-    bevy_ratatui::{RatatuiContext, crossterm, event::KeyMessage},
+    bevy_ratatui::{RatatuiContext, crossterm, event::{KeyMessage, MouseMessage}},
     ratatui::{
         Frame,
         layout::{Constraint, Layout, Rect},
@@ -213,7 +213,8 @@ impl<'a> TuiMain<'a> {
             .scroll((self.vertical_scroll as u16, 0));
         self.vertical_scroll_state = self
             .vertical_scroll_state
-            .content_length(self.output.len())
+            .content_length(self.max_scroll() + 1)
+            .viewport_content_length(self.output_area_height())
             .position(self.vertical_scroll);
 
         () = frame.render_widget(output, output_area);
@@ -528,6 +529,29 @@ fn handle_output_area_input(
     }
 }
 
+fn handle_mouse_input(
+    mut messages: MessageReader<MouseMessage>,
+    mut tui_main: NonSendMut<TuiMain>,
+    mut dirty: ResMut<RenderNeeded>,
+) {
+    use crossterm::event::{MouseEventKind, MouseEvent};
+
+    for message in messages.read() {
+        let MouseEvent { kind, .. } = &**message;
+        match kind {
+            MouseEventKind::ScrollUp => {
+                () = tui_main.scroll_up();
+                **dirty = true;
+            }
+            MouseEventKind::ScrollDown => {
+                () = tui_main.scroll_down();
+                **dirty = true;
+            }
+            _ => (),
+        }
+    }
+}
+
 fn draw_scene_system(
     mut context: ResMut<RatatuiContext>,
     mut tui: NonSendMut<TuiMain>,
@@ -567,8 +591,9 @@ pub fn plugin(app: &mut App) {
             PreUpdate,
             (
                 handle_global_input,
-                handle_input_area_input.run_if(in_state::<TuiMainFocus>(TuiMainFocus::InputArea)),
-                handle_output_area_input.run_if(in_state::<TuiMainFocus>(TuiMainFocus::OutputArea)),
+                handle_mouse_input,
+                handle_input_area_input.run_if(in_state(TuiMainFocus::InputArea)),
+                handle_output_area_input.run_if(in_state(TuiMainFocus::OutputArea)),
             )
                 .chain(),
         )
