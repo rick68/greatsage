@@ -76,9 +76,16 @@ fn main() {
         app_config.agent.context_strategy = strategy;
     }
 
-    // Populate runtime-only fields from CLI flags.
+    // Populate runtime-only fields: config file first, CLI appended after (CLI wins on conflict).
     app_config.runtime.skills = args.skills.clone();
-    app_config.runtime.mcp_servers = args.mcp.clone();
+    app_config.runtime.mcp_servers = app_config
+        .mcp
+        .sse_transports
+        .iter()
+        .chain(app_config.mcp.stdio_transports.iter())
+        .cloned()
+        .chain(args.mcp.iter().cloned())
+        .collect();
     app_config.runtime.verbose = args.verbose;
 
     if let Err(e) = validate_required(&app_config) {
