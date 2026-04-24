@@ -188,6 +188,10 @@ impl PermissionConfig {
             if token.contains('/') || token.starts_with('.') {
                 // Strip surrounding quotes for cleaner validation.
                 let stripped = token.trim_matches('\'').trim_matches('"');
+                // Skip bare '/' and other single-char tokens — not a real path.
+                if stripped.len() <= 1 {
+                    continue;
+                }
                 () = self
                     .validate_path(stripped)
                     .map_err(|e| format!("Token '{}' disallowed: {}", token, e))?;
@@ -361,6 +365,16 @@ mod tests {
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert!(err.contains(denied_file.to_str().unwrap()));
+    }
+
+    #[test]
+    fn command_allows_bare_slash() {
+        let allowed_dir = tempdir().expect("create allowed temp dir");
+        let config = PermissionConfig {
+            allowed_dir: allowed_dir.path().to_path_buf(),
+        };
+        assert!(config.validate_command("ls /").is_ok());
+        assert!(config.validate_command("find / -name foo").is_ok());
     }
 
     #[test]

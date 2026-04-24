@@ -1,7 +1,9 @@
 use {
     crate::{
         Args,
-        agents::{AgentsCancelToken, LlmConfig, McpConfig, PermissionConfig, build_tools, retry_async},
+        agents::{
+            AgentsCancelToken, LlmConfig, McpConfig, PermissionConfig, build_tools, retry_async,
+        },
         tokio::AppCancelToken,
         tui::TuiMain,
     },
