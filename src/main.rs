@@ -2,6 +2,7 @@
 
 mod agents;
 mod config;
+mod evolve;
 mod git;
 mod tokio;
 mod tui;
@@ -34,8 +35,10 @@ use {
         builder::styling::{AnsiColor, Effects, Styles},
     },
     std::{
+        env,
         io::{IsTerminal, Read, stdin},
         path::PathBuf,
+        process,
         time::Duration,
     },
 };
@@ -84,6 +87,9 @@ struct Args {
     git_commit: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
+    /// Run evolve mode (placeholder)
+    #[arg(long, action = ArgAction::SetTrue)]
+    evolve: bool,
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -109,7 +115,7 @@ fn main() {
     if let Some(Command::Config { ref cmd }) = args.command {
         if let Err(e) = run_config_subcommand(cmd, &config_path, &mut app_config) {
             eprintln!("error: {e:#}");
-            std::process::exit(1);
+            _ = process::exit(1);
         }
         return;
     }
@@ -124,7 +130,7 @@ fn main() {
 
     if let Err(e) = validate_required(&app_config) {
         eprintln!("error: {e:#}");
-        std::process::exit(1);
+        _ = process::exit(1);
     }
 
     // Git integration: optional staging and commit.
@@ -132,13 +138,22 @@ fn main() {
         && let Err(e) = git::stage_all()
     {
         eprintln!("{}", e);
-        std::process::exit(1);
+        _ = process::exit(1);
     }
     if let Some(msg) = &args.git_commit
         && let Err(e) = git::commit(msg)
     {
         eprintln!("{}", e);
-        std::process::exit(1);
+        _ = process::exit(1);
+    }
+
+    // Evolve mode placeholder
+    if args.evolve {
+        if let Err(e) = evolve::run_evolve() {
+            eprintln!("{}", e);
+            _ = process::exit(1);
+        }
+        _ = process::exit(0);
     }
 
     let mut invocation_prompt = None;
@@ -181,14 +196,14 @@ fn main() {
                 (move |channel: Res<CodingAgentPromptChannel>| {
                     () = channel.sender.send(prompt.clone()).unwrap();
                 })
-                .run_if(run_once),
+                    .run_if(run_once),
                 (|mut commands: Commands| {
                     _ = commands.write_message(AppExit::Success);
                 })
-                .run_if(condition_changed_to(
-                    false,
-                    resource_exists::<CodingAgentTask>,
-                )),
+                    .run_if(condition_changed_to(
+                        false,
+                        resource_exists::<CodingAgentTask>,
+                    )),
             ),
         );
     } else {
@@ -196,7 +211,7 @@ fn main() {
     }
 
     if let AppExit::Error(code) = app.run() {
-        () = std::process::exit(code.get() as i32);
+        () = process::exit(code.get() as i32);
     }
 }
 
@@ -204,7 +219,7 @@ fn main() {
 pub fn validate_env_vars() -> Result<(), String> {
     let mut missing = Vec::new();
     for &var in &["BASE_URL", "MODEL", "API_KEY"] {
-        match std::env::var(var) {
+        match env::var(var) {
             Ok(val) if !val.trim().is_empty() => continue,
             _ => missing.push(var),
         }
@@ -229,9 +244,9 @@ mod tests {
         static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = TEST_MUTEX.lock().unwrap();
         unsafe {
-            std::env::remove_var("BASE_URL");
-            std::env::remove_var("MODEL");
-            std::env::remove_var("API_KEY");
+            env::remove_var("BASE_URL");
+            env::remove_var("MODEL");
+            env::remove_var("API_KEY");
         }
         let err = validate_env_vars().unwrap_err();
         assert!(err.contains("BASE_URL"));
@@ -269,5 +284,17 @@ mod tests {
         let args = Args::parse_from(["test_bin", "--stage-all", "--git-commit", "Initial commit"]);
         assert!(args.stage_all);
         assert_eq!(args.git_commit.as_deref(), Some("Initial commit"));
+    }
+
+    #[test]
+    fn test_args_parsing_evolve_flag() {
+        let args = Args::parse_from(["test_bin", "--evolve"]);
+        assert!(args.evolve);
+    }
+
+    #[test]
+    fn test_run_evolve_placeholder() {
+        // Ensure run_evolve returns Ok without panic.
+        () = evolve::run_evolve().expect("run_evolve should succeed");
     }
 }
