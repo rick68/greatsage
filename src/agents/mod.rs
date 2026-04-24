@@ -1,5 +1,5 @@
 mod coding;
-pub use coding::{CodingAgentPromptChannel, CodingAgentTask};
+pub use coding::{CodingAgentPromptChannel, CodingAgentTask, CodingAgentTotalTokenUsage};
 
 use {
     self::coding::coding_agent_plugin,
