@@ -495,7 +495,11 @@ fn handle_input_area_input(
                                 () = tui_main.output.push(Line::raw(input.clone()));
                                 () = tui_main.clear_input();
                                 () = tui_main.scroll_to_bottom();
-                                () = channel.sender.send(input).unwrap();
+                                // Send input to the coding agent; handle potential disconnection gracefully.
+                                if let Err(e) = channel.sender.send(input) {
+                                    // Log the error; the REPL can continue without crashing.
+                                    eprintln!("Failed to send REPL input to agent: {e}");
+                                }
                             }
                         }
                     }
