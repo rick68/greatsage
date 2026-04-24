@@ -52,10 +52,11 @@ ANTHROPIC_API_KEY=sk-... ./scripts/evolve.sh
 - `tokio.rs` — Handles seamless integration between the Tokio async runtime and Bevy's task system, enabling non-blocking asynchronous execution across all agent operations.
 - `agents/mod.rs` — Module declaration for the agents subsystem. Re-exports public interfaces and configures AutoAgents integration along with dynamic skill loading and context management strategies.
 - `agents/coding.rs` — Implements core coding and self-evolution agents. Responsible for code analysis, task planning, safe source modifications, evolution workflows, and integration with the Bevy ECS orchestration layer.
+- `agents/tools.rs` — Tool wrappers. `TruncatingTool` wraps any `AgentTool` and truncates large output (strips ANSI codes, keeps first 100 + last 50 lines with a `[... truncated N lines ...]` marker). `build_tools()` assembles the full tool set by wrapping `default_tools()` with this truncation (40,000 char limit).
 - `tui/mod.rs` — Module declaration for all Terminal User Interface components, shared types, and rendering utilities.
 - `tui/tui_main.rs` — Core TUI implementation using bevy_ratatui and ratatui. Manages console rendering, real-time input processing, ANSI color output, spinner animations, and live display of agent activities and streaming events.
 
-Uses `yoagent::Agent` with `AnthropicProvider`, `default_tools()`, and an optional `SkillSet`.
+Uses `yoagent::Agent` with `OpenAiCompatProvider`, `build_tools()` (see `agents/tools.rs`), and an optional `SkillSet`.
 
 **Documentation** (`docs/`): mdbook source in `docs/src/`, config in `docs/book.toml`. Output goes to `site/book/` (gitignored). The journal homepage (`site/index.html`) is built by `scripts/build_site.py`. Both are built and deployed by the Pages workflow (`.github/workflows/pages.yml`), not during evolution.
 
@@ -99,7 +100,6 @@ Additional skills:
 - `ECONOMICS.md` — what money and sponsorship mean to yoyo (DO NOT MODIFY)
 - `SPONSORS.md` — auto-maintained sponsor recognition (only additions, never removals; amounts shown so yoyo understands the investment)
 - `sponsors/sponsor_info.json` — single source of truth for sponsor state (recurring + one-time, with run_used, shouted_out, benefit_expires). Rebuilt by `scripts/refresh_sponsors.py`; only the `run_used` flag is mutated by `evolve.sh` when consuming an accelerated run.
-
 
 ## yoagent: Don't Reinvent the Wheel
 
