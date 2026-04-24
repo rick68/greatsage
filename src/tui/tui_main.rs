@@ -12,7 +12,7 @@ use {
         state::{
             app::AppExtStates,
             condition::in_state,
-            state::{NextState, States},
+            state::{NextState, State, States},
         },
         time::{Time, Timer, TimerMode},
     },
@@ -29,7 +29,7 @@ use {
         time::Duration,
     },
     strum::{EnumCount, FromRepr},
-    unicode_width::UnicodeWidthChar,
+    unicode_width::UnicodeWidthStr,
 };
 
 const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
@@ -72,7 +72,10 @@ impl DoubleEndedIterator for TuiMainFocus {
 #[derive(Default)]
 pub struct TuiMain<'a> {
     input: String,
-    character_index: usize,
+    byte_index: usize, // byte offset of cursor in input
+    history: Vec<String>,
+    history_pos: Option<usize>, // None = editing new input, Some(i) = viewing history[i]
+    history_draft: String,      // saved draft when navigating history
     pub output: Vec<Line<'a>>,
     output_area: Rect,
     show_cursor: bool,
@@ -82,6 +85,101 @@ pub struct TuiMain<'a> {
 }
 
 impl<'a> TuiMain<'a> {
+    fn display_index(&self) -> usize {
+        self.input[..self.byte_index].width()
+    }
+
+    fn insert_char(&mut self, c: char) {
+        self.input.insert(self.byte_index, c);
+        self.byte_index += c.len_utf8();
+    }
+
+    fn delete_before(&mut self) {
+        if self.byte_index == 0 {
+            return;
+        }
+        let c = self.input[..self.byte_index].chars().next_back().unwrap();
+        self.byte_index -= c.len_utf8();
+        self.input.remove(self.byte_index);
+    }
+
+    fn delete_after(&mut self) {
+        if self.byte_index < self.input.len() {
+            self.input.remove(self.byte_index);
+        }
+    }
+
+    fn cursor_left(&mut self) {
+        if let Some(c) = self.input[..self.byte_index].chars().next_back() {
+            self.byte_index -= c.len_utf8();
+        }
+    }
+
+    fn cursor_right(&mut self) {
+        if let Some(c) = self.input[self.byte_index..].chars().next() {
+            self.byte_index += c.len_utf8();
+        }
+    }
+
+    fn cursor_to_start(&mut self) {
+        self.byte_index = 0;
+    }
+
+    fn cursor_to_end(&mut self) {
+        self.byte_index = self.input.len();
+    }
+
+    fn set_input(&mut self, s: String) {
+        self.input = s;
+        self.cursor_to_end();
+    }
+
+    fn clear_input(&mut self) {
+        self.input.clear();
+        self.byte_index = 0;
+    }
+
+    fn push_history(&mut self, s: &str) {
+        if !s.is_empty() && self.history.last().map(|l| l != s).unwrap_or(true) {
+            self.history.push(s.to_owned());
+        }
+        self.history_pos = None;
+        self.history_draft.clear();
+    }
+
+    fn history_prev(&mut self) {
+        if self.history.is_empty() {
+            return;
+        }
+        let new_pos = match self.history_pos {
+            None => {
+                self.history_draft = self.input.clone();
+                self.history.len() - 1
+            }
+            Some(0) => return,
+            Some(i) => i - 1,
+        };
+        self.history_pos = Some(new_pos);
+        let entry = self.history[new_pos].clone();
+        self.set_input(entry);
+    }
+
+    fn history_next(&mut self) {
+        match self.history_pos {
+            None => return,
+            Some(i) if i + 1 >= self.history.len() => {
+                self.history_pos = None;
+                let draft = self.history_draft.clone();
+                self.set_input(draft);
+            }
+            Some(i) => {
+                self.history_pos = Some(i + 1);
+                let entry = self.history[i + 1].clone();
+                self.set_input(entry);
+            }
+        }
+    }
+
     fn output_area_height(&self) -> usize {
         const BORDER: u16 = 2;
         self.output_area.height.saturating_sub(BORDER) as usize
@@ -122,10 +220,8 @@ impl<'a> TuiMain<'a> {
         () = frame.render_widget::<Paragraph<'_>>(input, input_area);
 
         if self.show_cursor && self.focused == TuiMainFocus::InputArea {
-            use unicode_width::UnicodeWidthStr;
-            let prefix_width = UnicodeWidthStr::width(PROMPT_PREFIX);
             () = frame.set_cursor_position((
-                input_area.left() + (self.character_index + prefix_width) as u16 + 1,
+                input_area.left() + (self.display_index() + PROMPT_PREFIX.width()) as u16 + 1,
                 input_area.top() + 1,
             ));
         }
@@ -169,6 +265,7 @@ fn handle_global_input(
     mut dirty: ResMut<RenderNeeded>,
     mut next_tui_main_focus: ResMut<NextState<TuiMainFocus>>,
     mut exit: MessageWriter<AppExit>,
+    focus: Res<State<TuiMainFocus>>,
 ) {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -179,6 +276,8 @@ fn handle_global_input(
             modifiers,
             ..
         } = &**message;
+
+        let in_input = focus.get() == &TuiMainFocus::InputArea;
 
         match code {
             KeyCode::Tab => {
@@ -193,11 +292,16 @@ fn handle_global_input(
             {
                 _ = exit.write_default();
             }
-            KeyCode::Up if kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat => {
+            // Up/Down/Home/End are yielded to InputArea for cursor/history when focused there.
+            KeyCode::Up
+                if !in_input && (kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat) =>
+            {
                 () = tui_main.scroll_up();
                 **dirty = true;
             }
-            KeyCode::Down if kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat => {
+            KeyCode::Down
+                if !in_input && (kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat) =>
+            {
                 () = tui_main.scroll_down();
                 **dirty = true;
             }
@@ -209,11 +313,11 @@ fn handle_global_input(
                 () = tui_main.scroll_page_down();
                 **dirty = true;
             }
-            KeyCode::Home => {
+            KeyCode::Home if !in_input => {
                 () = tui_main.scroll_to_top();
                 **dirty = true;
             }
-            KeyCode::End => {
+            KeyCode::End if !in_input => {
                 () = tui_main.scroll_to_bottom();
                 **dirty = true;
             }
@@ -229,49 +333,78 @@ fn handle_input_area_input(
     mut exit: MessageWriter<AppExit>,
     channel: Res<CodingAgentPromptChannel>,
 ) {
-    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
     for message in messages.read() {
-        let KeyEvent { code, kind, .. } = &**message;
+        let KeyEvent {
+            code,
+            kind,
+            modifiers,
+            ..
+        } = &**message;
+
+        let is_active = kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat;
 
         match code {
-            KeyCode::Char(c) if kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat => {
-                () = tui_main.input.push(*c);
-                if let Some(width) = UnicodeWidthChar::width(*c) {
-                    tui_main.character_index = tui_main.character_index.saturating_add(width);
-                }
+            KeyCode::Char(c) if is_active && !modifiers.contains(KeyModifiers::CONTROL) => {
+                tui_main.insert_char(*c);
                 **dirty = true;
             }
-            KeyCode::Backspace if kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat => {
-                if let Some(c) = tui_main.input.pop()
-                    && let Some(width) = UnicodeWidthChar::width(c)
-                {
-                    tui_main.character_index = tui_main.character_index.saturating_sub(width);
-                }
+            KeyCode::Char('a') if matches!(kind, KeyEventKind::Press) && modifiers.contains(KeyModifiers::CONTROL) => {
+                tui_main.cursor_to_start();
                 **dirty = true;
             }
-            KeyCode::Enter if kind == &KeyEventKind::Press => {
+            KeyCode::Char('e') if matches!(kind, KeyEventKind::Press) && modifiers.contains(KeyModifiers::CONTROL) => {
+                tui_main.cursor_to_end();
+                **dirty = true;
+            }
+            KeyCode::Backspace if is_active => {
+                tui_main.delete_before();
+                **dirty = true;
+            }
+            KeyCode::Delete if is_active => {
+                tui_main.delete_after();
+                **dirty = true;
+            }
+            KeyCode::Left if is_active => {
+                tui_main.cursor_left();
+                **dirty = true;
+            }
+            KeyCode::Right if is_active => {
+                tui_main.cursor_right();
+                **dirty = true;
+            }
+            KeyCode::Home if matches!(kind, KeyEventKind::Press) => {
+                tui_main.cursor_to_start();
+                **dirty = true;
+            }
+            KeyCode::End if matches!(kind, KeyEventKind::Press) => {
+                tui_main.cursor_to_end();
+                **dirty = true;
+            }
+            KeyCode::Up if matches!(kind, KeyEventKind::Press) => {
+                tui_main.history_prev();
+                **dirty = true;
+            }
+            KeyCode::Down if matches!(kind, KeyEventKind::Press) => {
+                tui_main.history_next();
+                **dirty = true;
+            }
+            KeyCode::Enter if matches!(kind, KeyEventKind::Press) => {
                 if !tui_main.input.is_empty() {
                     let input = tui_main.input.clone();
 
-                    // Handle built‑in REPL commands before sending to LLM.
                     if input.trim_start().starts_with("git ") {
-                        // Parse simple git subcommands.
                         let output_line = if input.trim() == "git stage" {
                             match crate::git::stage_all() {
                                 Ok(_) => Line::from("✅ Staged all changes").green(),
                                 Err(e) => Line::from(format!("❌ git stage failed: {e}")).red(),
                             }
                         } else if input.trim_start().starts_with("git commit") {
-                            // Expect format: git commit -m <msg>
-                            // Find -m and extract following message.
                             let parts: Vec<&str> = input.splitn(4, ' ').collect();
-                            // parts[0]=git, parts[1]=commit, parts[2]=maybe -m, parts[3]=msg
                             let msg_opt = parts.iter().skip(2).find_map(|p| {
                                 if p.starts_with("-m") {
-                                    // Remove leading -m and possible surrounding quotes
                                     let msg = p.trim_start_matches("-m");
-                                    // If message after -m in same token, strip leading whitespace
                                     if msg.is_empty() {
                                         None
                                     } else {
@@ -281,20 +414,16 @@ fn handle_input_area_input(
                                     None
                                 }
                             });
-                            // If message not captured, try to get the next token after -m
                             let msg = if let Some(m) = msg_opt {
                                 m.to_string()
+                            } else if let Some(idx) = input.find("-m ") {
+                                input[idx + 3..]
+                                    .trim()
+                                    .trim_matches('"')
+                                    .trim_matches('\'')
+                                    .to_string()
                             } else {
-                                // fallback: take everything after "-m " substring
-                                if let Some(idx) = input.find("-m ") {
-                                    input[idx + 3..]
-                                        .trim()
-                                        .trim_matches('"')
-                                        .trim_matches('\'')
-                                        .to_string()
-                                } else {
-                                    String::new()
-                                }
+                                String::new()
                             };
                             if msg.is_empty() {
                                 Line::from("❌ git commit missing -m message").red()
@@ -314,21 +443,20 @@ fn handle_input_area_input(
                         } else {
                             Line::from("❌ Unknown git command").red()
                         };
+                        ()=tui_main.push_history(&input);
                         () = tui_main.output.push(output_line);
-                        () = tui_main.input.clear();
-                        tui_main.character_index = 0;
+                        () = tui_main.clear_input();
                         () = tui_main.scroll_to_bottom();
                     } else {
                         match input.as_str() {
                             "/exit" | "/quit" => {
+                                () =tui_main.clear_input();
                                 _ = exit.write_default();
-                                () = tui_main.input.clear();
-                                tui_main.character_index = 0;
                             }
                             _ => {
+                                () =tui_main.push_history(&input);
                                 () = tui_main.output.push(Line::raw(input.clone()));
-                                () = tui_main.input.clear();
-                                tui_main.character_index = 0;
+                                () = tui_main.clear_input();
                                 () = tui_main.scroll_to_bottom();
                                 () = channel.sender.send(input).unwrap();
                             }
