@@ -1,7 +1,7 @@
 use {
     crate::{
         Args,
-        agents::{AgentsCancelToken, LlmConfig, McpConfig, PermissionConfig, retry_async},
+        agents::{AgentsCancelToken, LlmConfig, McpConfig, PermissionConfig, build_tools, retry_async},
         tokio::AppCancelToken,
         tui::TuiMain,
     },
@@ -42,7 +42,6 @@ use {
         agent::Agent,
         provider::{ModelConfig, openai_compat::OpenAiCompatProvider},
         skills::SkillSet,
-        tools::default_tools,
         types::{AgentEvent, AgentMessage, StreamDelta, Usage},
     },
 };
@@ -110,7 +109,7 @@ fn setup(
             .with_system_prompt(SYSTEM_PROMPT)
             .with_model(&llm_config.model)
             .with_api_key(&llm_config.api_key)
-            .with_tools(default_tools());
+            .with_tools(build_tools());
 
         if !args.skills.is_empty()
             && let Ok(skill_set) = SkillSet::load(args.skills.as_slice())
