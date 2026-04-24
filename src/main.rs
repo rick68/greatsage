@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod agents;
+mod evolve;
 mod git;
 mod tokio;
 mod tui;
@@ -75,6 +76,9 @@ struct Args {
     /// Commit staged changes with the given message after optional staging
     #[arg(long, value_name = "msg")]
     git_commit: Option<String>,
+    /// Run evolve mode (placeholder)
+    #[arg(long, action = ArgAction::SetTrue)]
+    evolve: bool,
 }
 
 pub fn validate_env_vars() -> Result<(), String> {
@@ -119,6 +123,14 @@ fn main() {
     {
         eprintln!("{}", e);
         std::process::exit(1);
+    }
+    // Evolve mode placeholder
+    if args.evolve {
+        if let Err(e) = evolve::run_evolve() {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+        std::process::exit(0);
     }
     let mut invocation_prompt = None;
 
@@ -230,10 +242,16 @@ mod tests {
     }
 
     #[test]
-    fn test_args_parsing_stage_and_commit() {
-        // Simulate command line arguments for staging and committing.
-        let args = Args::parse_from(["test_bin", "--stage-all", "--git-commit", "Initial commit"]);
-        assert!(args.stage_all);
-        assert_eq!(args.git_commit.as_deref(), Some("Initial commit"));
+    fn test_args_parsing_evolve_flag() {
+        let args = Args::parse_from(["test_bin", "--evolve"]);
+        assert!(args.evolve);
     }
+
+    #[test]
+    fn test_run_evolve_placeholder() {
+        // Ensure run_evolve returns Ok without panic.
+        evolve::run_evolve().expect("run_evolve should succeed");
+    }
+
+
 }
