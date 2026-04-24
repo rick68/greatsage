@@ -1,5 +1,6 @@
 [dependencies]
 ansi-to-tui = "8.0.1"
+async-trait = "0.1.89"
 anyhow = "1.0.102"
 backon = "1.6.0"
 bevy = { version = "0.18.1", default-features = false, features = [
