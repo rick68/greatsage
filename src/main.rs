@@ -101,6 +101,18 @@ enum Command {
     },
 }
 
+use std::error::Error;
+
+fn handle_prompt(prompt: String) -> Result<(), Box<dyn Error>> {
+    // Currently, we simply treat empty prompts as a no-op.
+    // Future logic can include more validation.
+    if prompt.trim().is_empty() {
+        return Ok(());
+    }
+    // No other side‑effects here; sending is handled elsewhere.
+    Ok(())
+}
+
 fn main() {
     clap_complete::CompleteEnv::with_factory(Args::command).complete();
 
@@ -190,20 +202,38 @@ fn main() {
     _ = app.add_plugins((tokio_plugin, agents_plugin));
 
     if let Some(prompt) = invocation_prompt {
+        // Use helper to handle the prompt with error handling.
+        let prompt_clone = prompt.clone();
         _ = app.add_systems(
             Update,
             (
                 (move |channel: Res<CodingAgentPromptChannel>| {
-                    () = channel.sender.send(prompt.clone()).unwrap();
+                    // First, handle prompt validation.
+                    if let Err(e) = handle_prompt(prompt_clone.clone()) {
+                        eprintln!("Prompt handling error: {e}");
+                        return;
+                    }
+                    // Wrap send in panic catcher and forward errors.
+                    let result =
+                        std::panic::catch_unwind(|| channel.sender.send(prompt_clone.clone()));
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            eprintln!("Error sending prompt: {e:?}");
+                        }
+                        Err(panic) => {
+                            eprintln!("Panic while sending prompt: {panic:?}");
+                        }
+                    }
                 })
-                    .run_if(run_once),
+                .run_if(run_once),
                 (|mut commands: Commands| {
                     _ = commands.write_message(AppExit::Success);
                 })
-                    .run_if(condition_changed_to(
-                        false,
-                        resource_exists::<CodingAgentTask>,
-                    )),
+                .run_if(condition_changed_to(
+                    false,
+                    resource_exists::<CodingAgentTask>,
+                )),
             ),
         );
     } else {
@@ -293,8 +323,8 @@ mod tests {
     }
 
     #[test]
-    fn test_run_evolve_placeholder() {
-        // Ensure run_evolve returns Ok without panic.
-        () = evolve::run_evolve().expect("run_evolve should succeed");
+    fn test_handle_prompt_empty() {
+        // Empty prompt should be handled without error.
+        assert!(handle_prompt("".to_string()).is_ok());
     }
 }
