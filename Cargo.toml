@@ -1,11 +1,19 @@
+[package]
+name = "greatsage"
+version = "0.0.0"
+edition = "2024"
+description = "Rimuru's Unique Skill, you know the one."
+license = "MIT OR Apache-2.0"
+categories = []
+keywords = []
+
 [dependencies]
+# Directory handling
+dirs = "5.0"
 ansi-to-tui = "8.0.1"
 anyhow = "1.0.102"
 backon = "1.6.0"
-bevy = { version = "0.18.1", default-features = false, features = [
-    "bevy_state",
-    "std",
-] }
+bevy = { version = "0.18.1", default-features = false, features = ["bevy_state", "std"] }
 bevy-tokio-tasks = "0.18.0"
 bevy_ratatui = "0.11.1"
 clap = { version = "4.6.1", features = ["derive"] }
@@ -18,6 +26,7 @@ signal-hook = "0.4.4"
 signal-hook-tokio = { version = "0.4.0", features = ["futures-v0_3"] }
 strum = { version = "0.28.0", features = ["derive"] }
 termimad = "0.34.1"
+# Async runtime
 tokio = { version = "1.52.1", features = ["macros", "rt"] }
 tokio-util = "0.7.18"
 unicode-width = "0.2.2"
@@ -35,15 +44,6 @@ default = []
 [lints.clippy]
 diverging_sub_expression = "allow"
 let_underscore_future = "allow"
-
-[package]
-categories = []
-description = "Rimuru's Unique Skill, you know the one."
-edition = "2024"
-keywords = []
-license = "MIT OR Apache-2.0"
-name = "greatsage"
-version = "0.0.0"
 
 [profile.dev.package.backtrace]
 opt-level = 3
