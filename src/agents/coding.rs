@@ -308,6 +308,7 @@ fn spawn_agent_task(
 /// Helper to handle errors based on the runtime `error_handling` flag.
 /// If error handling is enabled, logs the error and returns `Ok(())`.
 /// Otherwise, returns an `Err` with the error message.
+#[allow(dead_code)]
 pub fn handle_error<E: std::fmt::Display>(err: E, error_handling: bool) -> Result<(), String> {
     if error_handling {
         eprintln!("Error: {}", err);
