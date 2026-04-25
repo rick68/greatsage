@@ -258,6 +258,8 @@ pub fn validate_env_vars() -> Result<(), String> {
 mod tests {
     mod cli_stats;
     mod repl_error_handling;
+    mod task_02_placeholder;
+    mod task_03_placeholder;
     mod truncate;
 
     use {super::*, temp_env_vars::temp_env_vars};

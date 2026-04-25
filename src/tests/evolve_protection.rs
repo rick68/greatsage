@@ -2,7 +2,6 @@
 
 #[cfg(test)]
 mod tests {
-    use super::super::*; // bring is_protected_path into scope
     use std::path::Path;
 
     #[test]
@@ -15,7 +14,7 @@ mod tests {
         ];
         for p in protected.iter() {
             let path = Path::new(p);
-            assert!(is_protected_path(path), "{} should be protected", p);
+            assert!(is_protected_path(path), "{p} should be protected");
         }
     }
 
@@ -29,7 +28,7 @@ mod tests {
         ];
         for p in non_protected.iter() {
             let path = Path::new(p);
-            assert!(!is_protected_path(path), "{} should NOT be protected", p);
+            assert!(!is_protected_path(path), "{p} should NOT be protected");
         }
     }
 }

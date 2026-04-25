@@ -2,9 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::fs;
-    use std::path::Path;
+    use std::{fs, path::Path};
 
     #[test]
     fn test_placeholder_task_2_content() {
@@ -16,8 +14,17 @@ mod tests {
         let task_path = base.join("session_plan").join("task_02.md");
         assert!(task_path.is_file(), "task_02.md should exist");
         let content = fs::read_to_string(&task_path).expect("read task_02.md");
-        assert!(content.contains("Placeholder Task 2"), "Content should contain title for task 2");
-        assert!(content.contains("Files: none"), "Files line should be present");
-        assert!(content.contains("Issue: none"), "Issue line should be present");
+        assert!(
+            content.contains("Placeholder Task 2"),
+            "Content should contain title for task 2"
+        );
+        assert!(
+            content.contains("Files: none"),
+            "Files line should be present"
+        );
+        assert!(
+            content.contains("Issue: none"),
+            "Issue line should be present"
+        );
     }
 }
