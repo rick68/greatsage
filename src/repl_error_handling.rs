@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::handle_prompt;
-    use tempfile::Builder;
-    use std::io::Write;
+    use {crate::handle_prompt, std::io::Write, tempfile::Builder};
 
     #[test]
     fn test_flag_disabled_accepts_any_prompt() {
@@ -17,7 +15,7 @@ mod tests {
         writeln!(tmp, "temporary content").unwrap();
         let path = tmp.path().to_str().unwrap().to_string();
         let res = handle_prompt(path.clone(), true);
-        assert!(res.is_ok(), "Existing file should be accepted: {}", path);
+        assert!(res.is_ok(), "Existing file should be accepted: {path}");
     }
 
     #[test]
