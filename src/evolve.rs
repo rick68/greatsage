@@ -299,7 +299,10 @@ mod tests {
         let log_path = base.join(".greatsage").join("evolve.log");
         assert!(log_path.is_file(), "evolve.log should be created");
         let log_content = fs::read_to_string(&log_path).expect("read evolve.log");
-        assert!(log_content.contains("Placeholder Task 2"), "log should contain Placeholder Task 2 title");
+        assert!(
+            log_content.contains("Placeholder Task 2"),
+            "log should contain Placeholder Task 2 title"
+        );
     }
 
     #[test]
