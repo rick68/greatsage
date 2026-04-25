@@ -119,7 +119,7 @@ mod tests {
     fn test_run_evolve_executes_without_error() {
         // Ensure that the evolve pipeline runs to completion without panicking.
         // The function prints to stdout; we only verify that it returns Ok.
-        run_evolve_with(Path::new(env!("CARGO_MANIFEST_DIR")))
+        () = run_evolve_with(Path::new(env!("CARGO_MANIFEST_DIR")))
             .expect("run_evolve should complete without error");
     }
 
@@ -128,11 +128,11 @@ mod tests {
         let base = Path::new(env!("CARGO_MANIFEST_DIR"));
         // Clean any existing plan dir
         let _ = fs::remove_dir_all(base.join("session_plan"));
-        planning_phase(base).expect("planning_phase should succeed");
+        () = planning_phase(base).expect("planning_phase should succeed");
         let plan_dir = base.join("session_plan");
         assert!(plan_dir.is_dir(), "session_plan directory should exist");
         for i in 1..=3 {
-            let path = plan_dir.join(format!("task_{:02}.md", i));
+            let path = plan_dir.join(format!("task_{i:02}.md"));
             assert!(path.is_file(), "{} should exist", path.display());
             let content = fs::read_to_string(&path).expect("read task file");
             assert!(
