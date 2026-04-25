@@ -1,5 +1,5 @@
 use {
-    std::{io::ErrorKind, path::Path, time::Duration},
+    std::{future::Future, io::ErrorKind, path::Path, pin::Pin, time::Duration},
     tokio::{fs, runtime::Runtime, time},
 };
 
@@ -9,8 +9,8 @@ const TIMEOUT_SECS: u64 = 1200;
 /// Collects basic self‑analysis data such as version, source file count,
 /// and a placeholder CI status. The operation is wrapped in a timeout of
 /// half the total evolve timeout.
-pub fn assessment_phase(base_dir: &Path) -> Result<String, Box<dyn std::error::Error>> {
-    let base_dir = base_dir.to_path_buf();
+pub fn assessment_phase(base_dir: impl AsRef<Path>) -> Result<String, Box<dyn std::error::Error>> {
+    let base_dir = base_dir.as_ref().to_path_buf();
     // Create a Tokio runtime to run the async timeout.
     let rt = Runtime::new()?;
     rt.block_on(async {
@@ -20,11 +20,11 @@ pub fn assessment_phase(base_dir: &Path) -> Result<String, Box<dyn std::error::E
 
             // Count .rs source files recursively under src/.
             fn count_rs(
-                dir: std::path::PathBuf,
-            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = usize> + Send>> {
+                dir: impl AsRef<Path> + Send + Sync + 'static,
+            ) -> Pin<Box<dyn Future<Output = usize> + Send>> {
                 Box::pin(async move {
                     let mut cnt = 0;
-                    if let Ok(mut entries) = fs::read_dir(&dir).await {
+                    if let Ok(mut entries) = fs::read_dir(dir).await {
                         while let Ok(Some(entry)) = entries.next_entry().await {
                             let path = entry.path();
                             if path.is_dir() {
@@ -57,7 +57,7 @@ pub fn assessment_phase(base_dir: &Path) -> Result<String, Box<dyn std::error::E
     })
 }
 
-pub fn run_evolve_with(base_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_evolve_with(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
     let assessment = assessment_phase(base_dir)?;
     println!("[greatsage] Assessment Phase Result:\n{assessment}");
     Ok(())
@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn test_assessment_phase_returns_nonempty() {
-        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"));
         let res = assessment_phase(base).expect("assessment_phase should succeed");
         assert!(
             !res.trim().is_empty(),
@@ -85,7 +85,7 @@ mod tests {
     fn test_run_evolve_executes_without_error() {
         // Ensure that the evolve pipeline runs to completion without panicking.
         // The function prints to stdout; we only verify that it returns Ok.
-        () = run_evolve_with(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+        () = run_evolve_with(Path::new(env!("CARGO_MANIFEST_DIR")))
             .expect("run_evolve should complete without error");
     }
 }
