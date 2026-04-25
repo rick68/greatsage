@@ -75,6 +75,18 @@ fn main() {
     if let Some(strategy) = args.context_strategy {
         app_config.agent.context_strategy = strategy;
     }
+    if let Some(thinking) = args.thinking {
+        app_config.llm.thinking_level = thinking;
+    }
+    if let Some(max_tokens) = args.max_tokens {
+        app_config.llm.max_tokens = max_tokens;
+    }
+    if let Some(max_turns) = args.max_turns {
+        app_config.agent.max_turns = max_turns;
+    }
+    if let Some(temperature) = args.temperature {
+        app_config.llm.temperature = Some(temperature);
+    }
 
     // Populate runtime-only fields: config file first, CLI appended after (CLI wins on conflict).
     app_config.runtime.skills = args.skills.clone();
@@ -90,20 +102,6 @@ fn main() {
 
     if let Err(e) = validate_required(&app_config) {
         eprintln!("error: {e:#}");
-        _ = process::exit(1);
-    }
-
-    // Git integration: optional staging and commit.
-    if args.stage_all
-        && let Err(e) = git::stage_all()
-    {
-        eprintln!("{}", e);
-        _ = process::exit(1);
-    }
-    if let Some(msg) = &args.git_commit
-        && let Err(e) = git::commit(msg)
-    {
-        eprintln!("{}", e);
         _ = process::exit(1);
     }
 
@@ -254,13 +252,6 @@ mod tests {
             () = env::set_var("API_KEY", "dummy_key");
         }
         assert!(validate_env_vars().is_ok());
-    }
-
-    #[test]
-    fn test_args_parsing_stage_and_commit() {
-        let args = Args::parse_from(["test_bin", "--stage-all", "--git-commit", "Initial commit"]);
-        assert!(args.stage_all);
-        assert_eq!(args.git_commit.as_deref(), Some("Initial commit"));
     }
 
     #[test]

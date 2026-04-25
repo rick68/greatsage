@@ -1,5 +1,5 @@
 use {
-    crate::config::{ConfigSubcommand, ContextStrategy, default_config_path},
+    crate::config::{ConfigSubcommand, ContextStrategy, ThinkingLevel, default_config_path},
     clap::{
         ArgAction, CommandFactory, Parser, Subcommand,
         builder::styling::{AnsiColor, Effects, Styles},
@@ -16,8 +16,21 @@ pub const STYLES: Styles = Styles::styled()
     .valid(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
     .invalid(AnsiColor::Yellow.on_default().effects(Effects::BOLD));
 
+const REPL_HELP: &str = "\
+REPL Commands:
+
+  Session:
+    /help              Show this help
+    /clear             Clear output
+    /quit, /exit       Exit greatsage
+
+  Git:
+    /git stage         Stage all changes
+    /git commit -m …   Commit staged changes
+    /git revert        Revert last commit";
+
 #[derive(Clone, Debug, Parser)]
-#[command(version, about, long_about = None, styles = STYLES)]
+#[command(version, about, long_about = None, styles = STYLES, after_help = REPL_HELP, term_width = 0)]
 pub struct Args {
     /// Path to config file
     #[arg(long, value_name = "PATH", default_value_os_t = default_config_path())]
@@ -40,15 +53,21 @@ pub struct Args {
     /// Context management: compaction or checkpoint (overrides config file)
     #[arg(long, value_name = "s")]
     pub context_strategy: Option<ContextStrategy>,
+    /// Enable extended thinking (off, minimal, low, medium, high)
+    #[arg(long, value_name = "lvl")]
+    pub thinking: Option<ThinkingLevel>,
+    /// Maximum output tokens per response
+    #[arg(long, value_name = "n")]
+    pub max_tokens: Option<u32>,
+    /// Maximum agent turns per prompt
+    #[arg(long, value_name = "n")]
+    pub max_turns: Option<usize>,
+    /// Sampling temperature (0.0-1.0)
+    #[arg(long, value_name = "f")]
+    pub temperature: Option<f32>,
     /// Print status messages to stderr in non-interactive mode
     #[arg(short = 'v', long)]
     pub verbose: bool,
-    /// Stage all changes before running the app
-    #[arg(long, action = ArgAction::SetTrue)]
-    pub stage_all: bool,
-    /// Commit staged changes with the given message after optional staging
-    #[arg(long, value_name = "msg")]
-    pub git_commit: Option<String>,
     #[command(subcommand)]
     pub command: Option<Command>,
     /// Run evolve mode (placeholder)

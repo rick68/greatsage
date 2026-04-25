@@ -73,6 +73,7 @@ pub struct LlmFileConfig {
     pub max_tokens: u32,
     pub context_window: u32,
     pub thinking_level: ThinkingLevel,
+    pub temperature: Option<f32>,
 }
 
 impl Default for LlmFileConfig {
@@ -82,7 +83,8 @@ impl Default for LlmFileConfig {
             base_url: String::new(),
             max_tokens: 4096,
             context_window: 128_000,
-            thinking_level: ThinkingLevel::Off,
+            thinking_level: ThinkingLevel::Medium,
+            temperature: None,
         }
     }
 }
@@ -92,6 +94,7 @@ impl Default for LlmFileConfig {
 pub struct AgentFileConfig {
     pub max_retry_attempts: usize,
     pub context_strategy: ContextStrategy,
+    pub max_turns: usize,
 }
 
 impl Default for AgentFileConfig {
@@ -99,6 +102,7 @@ impl Default for AgentFileConfig {
         Self {
             max_retry_attempts: 3,
             context_strategy: ContextStrategy::default(),
+            max_turns: 50,
         }
     }
 }
@@ -198,9 +202,7 @@ impl AppConfig {
             ConfigKey::LlmBaseUrl => self.llm.base_url.clone(),
             ConfigKey::LlmMaxTokens => self.llm.max_tokens.to_string(),
             ConfigKey::LlmContextWindow => self.llm.context_window.to_string(),
-            ConfigKey::LlmThinkingLevel => {
-                format!("{:?}", self.llm.thinking_level).to_lowercase()
-            }
+            ConfigKey::LlmThinkingLevel => format!("{:?}", self.llm.thinking_level).to_lowercase(),
             ConfigKey::AgentMaxRetryAttempts => self.agent.max_retry_attempts.to_string(),
             ConfigKey::AgentContextStrategy => {
                 format!("{:?}", self.agent.context_strategy).to_lowercase()

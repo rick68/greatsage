@@ -42,6 +42,7 @@ use {
     tokio::{sync::Mutex, task::JoinHandle},
     yoagent::{
         agent::Agent,
+        context::ExecutionLimits,
         provider::{ModelConfig, openai_compat::OpenAiCompatProvider},
         skills::SkillSet,
         types::{AgentEvent, AgentMessage, StreamDelta, ThinkingLevel, Usage},
@@ -123,7 +124,12 @@ fn setup(
             .with_model(&llm_config.model)
             .with_api_key(&llm_config.api_key)
             .with_thinking(thinking_level)
-            .with_tools(build_tools(allowed_dir.clone()));
+            .with_tools(build_tools(allowed_dir.clone()))
+            .with_execution_limits(ExecutionLimits {
+                max_turns: llm_config.max_turns,
+                ..ExecutionLimits::default()
+            });
+        agent.temperature = llm_config.temperature;
 
         if !runtime.skills.is_empty()
             && let Ok(skill_set) = SkillSet::load(runtime.skills.as_slice())

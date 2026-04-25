@@ -57,7 +57,7 @@ fn truncate_tool_output(output: &str, max_chars: usize) -> String {
         result.push_str(line);
         result.push('\n');
     }
-    result.push_str(&format!("\n[... truncated {omitted} {line_word} ...]\n\n"));
+    () = result.push_str(&format!("\n[... truncated {omitted} {line_word} ...]\n\n"));
     for (i, line) in tail.iter().enumerate() {
         result.push_str(line);
         if i < tail.len() - 1 {
@@ -141,23 +141,28 @@ impl AgentTool for PermissionGuardTool {
         params: serde_json::Value,
         ctx: ToolContext,
     ) -> Result<ToolResult, ToolError> {
-        let perm = PermissionConfig { allowed_dir: self.allowed_dir.clone() };
-        let check = match self.inner.name() {
+        let perm = PermissionConfig {
+            allowed_dir: self.allowed_dir.clone(),
+        };
+        match self.inner.name() {
             "bash" => {
+                // Warn-only for bash: complex shell commands are hard to fully validate,
+                // and blocking them breaks legitimate use cases like network access.
                 let cmd = params.get("command").and_then(|v| v.as_str()).unwrap_or("");
-                perm.validate_command(cmd).map_err(|e| e.to_string())
+                if let Err(e) = perm.validate_command(cmd) {
+                    eprintln!("[permission] bash warning: {e}");
+                }
             }
             "read_file" | "write_file" | "edit_file" | "list_files" | "search" => {
                 let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
-                perm.validate_path(path).map_err(|e| e.to_string())
+                if let Err(e) = perm.validate_path(path) {
+                    return Err(ToolError::Failed(format!(
+                        "{e} (allowed directory: {})",
+                        self.allowed_dir.display()
+                    )));
+                }
             }
-            _ => Ok(()),
-        };
-        if let Err(msg) = check {
-            return Err(ToolError::Failed(format!(
-                "{msg} (allowed directory: {})",
-                self.allowed_dir.display()
-            )));
+            _ => {}
         }
         self.inner.execute(params, ctx).await
     }

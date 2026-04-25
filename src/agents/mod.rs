@@ -6,7 +6,10 @@ pub use tools::build_tools;
 
 use {
     self::coding::coding_agent_plugin,
-    crate::{config::{AppConfig, ThinkingLevel}, tokio::AppCancelToken},
+    crate::{
+        config::{AppConfig, ThinkingLevel},
+        tokio::AppCancelToken,
+    },
     anyhow::Context,
     backon::{BlockingRetryable, ConstantBuilder},
     bevy::{
@@ -92,6 +95,8 @@ pub struct LlmConfig {
     pub max_tokens: u32,
     pub context_window: u32,
     pub thinking_level: ThinkingLevel,
+    pub temperature: Option<f32>,
+    pub max_turns: usize,
 }
 
 impl bevy::ecs::world::FromWorld for LlmConfig {
@@ -128,6 +133,16 @@ impl bevy::ecs::world::FromWorld for LlmConfig {
                 _ => ThinkingLevel::Off,
             })
             .unwrap_or(cfg.llm.thinking_level);
+        let temperature = env::var("TEMPERATURE")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .and_then(|s| s.parse().ok())
+            .or(cfg.llm.temperature);
+        let max_turns = env::var("MAX_TURNS")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(cfg.agent.max_turns);
 
         Self {
             base_url,
@@ -136,6 +151,8 @@ impl bevy::ecs::world::FromWorld for LlmConfig {
             max_tokens,
             context_window,
             thinking_level,
+            temperature,
+            max_turns,
         }
     }
 }
@@ -164,7 +181,9 @@ impl PermissionConfig {
     /// Validate a given string path against the permission config.
     /// Returns Ok(()) if allowed, otherwise Err with a human‑readable message.
     pub fn validate_path(&self, path_str: &str) -> Result<(), PermissionError> {
-        let debug = env::var("PERMISSION_DEBUG").map(|v| v == "1").unwrap_or(false);
+        let debug = env::var("PERMISSION_DEBUG")
+            .map(|v| v == "1")
+            .unwrap_or(false);
         // Empty string or bare '/' are not meaningful file targets — allow.
         let trimmed = path_str.trim();
         if trimmed.is_empty() || trimmed == "/" {
@@ -222,8 +241,14 @@ impl PermissionConfig {
         };
         if debug {
             match &result {
-                Ok(()) => eprintln!("[permission] validate_path OK: {path_str} (allowed_dir={:?})", self.allowed_dir),
-                Err(e) => eprintln!("[permission] validate_path DENIED: {path_str} (allowed_dir={:?}) — {e}", self.allowed_dir),
+                Ok(()) => eprintln!(
+                    "[permission] validate_path OK: {path_str} (allowed_dir={:?})",
+                    self.allowed_dir
+                ),
+                Err(e) => eprintln!(
+                    "[permission] validate_path DENIED: {path_str} (allowed_dir={:?}) — {e}",
+                    self.allowed_dir
+                ),
             }
         }
         result
@@ -249,7 +274,9 @@ impl PermissionConfig {
     /// checked against the allowed directory.
     #[allow(clippy::while_let_on_iterator)]
     pub fn validate_command(&self, command: &str) -> anyhow::Result<()> {
-        let debug = env::var("PERMISSION_DEBUG").map(|v| v == "1").unwrap_or(false);
+        let debug = env::var("PERMISSION_DEBUG")
+            .map(|v| v == "1")
+            .unwrap_or(false);
         // Split the command into whitespace‑separated tokens and iterate.
         let mut tokens = command.split_whitespace().peekable();
         let mut first_token = true;
@@ -296,7 +323,8 @@ impl PermissionConfig {
                 if debug {
                     eprintln!("[permission] validating path token: {stripped}");
                 }
-                let result = self.validate_path(stripped)
+                let result = self
+                    .validate_path(stripped)
                     .with_context(|| format!("Token '{token}' disallowed"));
                 if debug {
                     match &result {
