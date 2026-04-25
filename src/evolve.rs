@@ -283,6 +283,26 @@ mod tests {
     }
 
     #[test]
+    fn test_run_evolve_creates_log_with_placeholder_tasks() {
+        // Create a temporary directory as base.
+        let tmp = tempfile::TempDir::new().expect("create temp dir");
+        let base = tmp.path();
+        // Run the full evolve pipeline.
+        () = run_evolve_with(base).expect("run_evolve should succeed");
+        // Verify that task files were created.
+        let plan_dir = base.join("session_plan");
+        for i in 1..=3 {
+            let task_file = plan_dir.join(format!("task_{:02}.md", i));
+            assert!(task_file.is_file(), "{task_file:?} should exist");
+        }
+        // Verify evolve.log contains titles of placeholder tasks.
+        let log_path = base.join(".greatsage").join("evolve.log");
+        assert!(log_path.is_file(), "evolve.log should be created");
+        let log_content = fs::read_to_string(&log_path).expect("read evolve.log");
+        assert!(log_content.contains("Placeholder Task 2"), "log should contain Placeholder Task 2 title");
+    }
+
+    #[test]
     fn test_is_protected_path() {
         // Protected paths
         assert!(is_protected_path(Path::new(".github/workflows/ci.yml")));
