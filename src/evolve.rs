@@ -220,8 +220,10 @@ pub fn run_evolve() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::fs;
+    use {
+        super::*,
+        std::{fs, path::Path},
+    };
 
     #[test]
     fn test_assessment_phase_returns_nonempty() {
@@ -282,7 +284,6 @@ mod tests {
 
     #[test]
     fn test_is_protected_path() {
-        use std::path::Path;
         // Protected paths
         assert!(is_protected_path(Path::new(".github/workflows/ci.yml")));
         assert!(is_protected_path(Path::new("IDENTITY.md")));
