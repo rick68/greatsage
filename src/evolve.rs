@@ -198,8 +198,7 @@ pub fn planning_phase(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::err
     for i in 1..=3 {
         let file_path = plan_dir.join(format!("task_{:02}.md", i));
         // Additional safeguard: ensure each task file path is not protected
-        let canonical_file_path =
-            fs::canonicalize(&file_path).unwrap_or(file_path.clone());
+        let canonical_file_path = fs::canonicalize(&file_path).unwrap_or(file_path.clone());
         if is_protected_path(&canonical_file_path) {
             return Err(Box::new(std::io::Error::other(format!(
                 "planning_phase aborted: protected task file {}",

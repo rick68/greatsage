@@ -305,7 +305,19 @@ fn spawn_agent_task(
     }
 }
 
-pub fn truncate(s: &str, max: usize) -> &str {
+/// Helper to handle errors based on the runtime `error_handling` flag.
+/// If error handling is enabled, logs the error and returns `Ok(())`.
+/// Otherwise, returns an `Err` with the error message.
+pub fn handle_error<E: std::fmt::Display>(err: E, error_handling: bool) -> Result<(), String> {
+    if error_handling {
+        eprintln!("Error: {}", err);
+        Ok(())
+    } else {
+        Err(err.to_string())
+    }
+}
+
+pub(crate) fn truncate(s: &str, max: usize) -> &str {
     match s.char_indices().nth(max) {
         Some((idx, _)) => &s[..idx],
         None => s,
