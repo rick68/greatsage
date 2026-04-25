@@ -11,13 +11,14 @@ const MAX_TOOL_OUTPUT_CHARS: usize = 40_000;
 const TRUNCATION_HEAD_LINES: usize = 100;
 const TRUNCATION_TAIL_LINES: usize = 50;
 
-fn strip_ansi_codes(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
+fn strip_ansi_codes(s: impl AsRef<str>) -> String {
+    let mut result = String::with_capacity(s.as_ref().len());
+    let mut chars = s.as_ref().chars().peekable();
+
     while let Some(c) = chars.next() {
         if c == '\x1b' {
             if chars.peek() == Some(&'[') {
-                chars.next();
+                _ = chars.next();
                 while let Some(&p) = chars.peek() {
                     if p.is_ascii_digit() || p == ';' {
                         chars.next();
@@ -28,17 +29,17 @@ fn strip_ansi_codes(s: &str) -> String {
                 if let Some(&f) = chars.peek()
                     && f.is_ascii_alphabetic()
                 {
-                    chars.next();
+                    _ = chars.next();
                 }
             }
         } else {
-            result.push(c);
+            () = result.push(c);
         }
     }
     result
 }
 
-fn truncate_tool_output(output: &str, max_chars: usize) -> String {
+fn truncate_tool_output(output: impl AsRef<str>, max_chars: usize) -> String {
     let stripped = strip_ansi_codes(output);
     if stripped.len() <= max_chars {
         return stripped;
@@ -54,14 +55,14 @@ fn truncate_tool_output(output: &str, max_chars: usize) -> String {
     let line_word = if omitted == 1 { "line" } else { "lines" };
     let mut result = String::with_capacity(max_chars);
     for line in head {
-        result.push_str(line);
-        result.push('\n');
+        () = result.push_str(line);
+        () = result.push('\n');
     }
     () = result.push_str(&format!("\n[... truncated {omitted} {line_word} ...]\n\n"));
     for (i, line) in tail.iter().enumerate() {
-        result.push_str(line);
+        () = result.push_str(line);
         if i < tail.len() - 1 {
-            result.push('\n');
+            () = result.push('\n');
         }
     }
     result
@@ -185,8 +186,7 @@ pub fn build_tools(allowed_dir: PathBuf) -> Vec<Box<dyn AgentTool>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
+    use {super::*, pretty_assertions::assert_eq};
 
     #[test]
     fn strips_ansi_codes() {
