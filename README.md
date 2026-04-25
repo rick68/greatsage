@@ -3,32 +3,51 @@ Rimuru's Unique Skill, you know the one.
 
 ## Usage
 
-Run a single prompt and exit (no REPL) using either the `--prompt` flag or a positional argument:
+```bash
+greatsage [OPTIONS] [prompt]
+```
+
+Start the REPL (no arguments), or pass a prompt to run once and exit:
 
 ```bash
+greatsage                        # interactive REPL
+greatsage "Explain this code"    # single-shot, same as --prompt
 greatsage --prompt "Hello"
-# or, more succinctly:
-greatsage "Hello"
 ```
 
+### Options
 
-- `--evolve` — Run the self‑evolution pipeline (currently a placeholder). Example:
-
-```bash
-greatsage --evolve
-```
-
-*Note: full functionality is under development.*
+| Flag | Description |
+|------|-------------|
+| `--config <PATH>` | Path to config file (default: `~/.config/greatsage/config.toml`) |
+| `--model <name>` | Model to use (overrides config) |
+| `--context-strategy <s>` | Context management: `compaction` or `checkpoint` |
+| `--thinking <lvl>` | Extended thinking: `off` · `minimal` · `low` · `medium` · `high` |
+| `--max-tokens <n>` | Maximum output tokens per response |
+| `--max-turns <n>` | Maximum agent turns per prompt |
+| `--temperature <f>` | Sampling temperature (0.0–1.0) |
+| `--skills <dir>` | Directory of skill files (repeatable) |
+| `--mcp <server>` | MCP server: HTTP URL or stdio command (repeatable) |
+| `-v, --verbose` | Print status messages to stderr in non-interactive mode |
+| `--evolve` | Run the self-evolution pipeline (placeholder) |
 
 ## REPL usage
 
-The REPL supports several slash commands and git shortcuts. Errors from commands are displayed in red with a ❌ icon.
+All commands start with `/`. Errors are displayed in red with a ❌ icon. Run `/help` inside the REPL for a formatted reference.
 
-- `/clear` – clears the REPL output.
-- `/exit` or `/quit` – exits the application.
-- `git stage` – stages all changes.
-- `git commit -m "msg"` – commits staged changes.
-- `git revert` – reverts the last commit.
+```
+Commands (in REPL):
+
+  Session:
+    /help              Show this help
+    /clear             Clear output
+    /quit, /exit       Exit greatsage
+
+  Git:
+    /git stage         Stage all changes
+    /git commit -m …   Commit staged changes
+    /git revert        Revert last commit
+```
 
 ## Security
 
