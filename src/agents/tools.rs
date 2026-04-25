@@ -1,6 +1,10 @@
-use yoagent::{
-    tools::default_tools,
-    types::{AgentTool, Content, ToolContext, ToolError, ToolResult},
+use {
+    crate::agents::PermissionConfig,
+    std::path::PathBuf,
+    yoagent::{
+        tools::default_tools,
+        types::{AgentTool, Content, ToolContext, ToolError, ToolResult},
+    },
 };
 
 const MAX_TOOL_OUTPUT_CHARS: usize = 40_000;
@@ -109,12 +113,65 @@ impl AgentTool for TruncatingTool {
     }
 }
 
-pub fn build_tools() -> Vec<Box<dyn AgentTool>> {
+struct PermissionGuardTool {
+    inner: Box<dyn AgentTool>,
+    allowed_dir: PathBuf,
+}
+
+#[async_trait::async_trait]
+impl AgentTool for PermissionGuardTool {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn label(&self) -> &str {
+        self.inner.label()
+    }
+
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        self.inner.parameters_schema()
+    }
+
+    async fn execute(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> Result<ToolResult, ToolError> {
+        let perm = PermissionConfig { allowed_dir: self.allowed_dir.clone() };
+        let check = match self.inner.name() {
+            "bash" => {
+                let cmd = params.get("command").and_then(|v| v.as_str()).unwrap_or("");
+                perm.validate_command(cmd).map_err(|e| e.to_string())
+            }
+            "read_file" | "write_file" | "edit_file" | "list_files" | "search" => {
+                let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                perm.validate_path(path).map_err(|e| e.to_string())
+            }
+            _ => Ok(()),
+        };
+        if let Err(msg) = check {
+            return Err(ToolError::Failed(format!(
+                "{msg} (allowed directory: {})",
+                self.allowed_dir.display()
+            )));
+        }
+        self.inner.execute(params, ctx).await
+    }
+}
+
+pub fn build_tools(allowed_dir: PathBuf) -> Vec<Box<dyn AgentTool>> {
     default_tools()
         .into_iter()
         .map(|tool| -> Box<dyn AgentTool> {
             Box::new(TruncatingTool {
-                inner: tool,
+                inner: Box::new(PermissionGuardTool {
+                    inner: tool,
+                    allowed_dir: allowed_dir.clone(),
+                }),
                 max_chars: MAX_TOOL_OUTPUT_CHARS,
             })
         })

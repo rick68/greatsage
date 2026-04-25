@@ -44,7 +44,7 @@ use {
         agent::Agent,
         provider::{ModelConfig, openai_compat::OpenAiCompatProvider},
         skills::SkillSet,
-        types::{AgentEvent, AgentMessage, StreamDelta, Usage},
+        types::{AgentEvent, AgentMessage, StreamDelta, ThinkingLevel, Usage},
     },
 };
 
@@ -77,6 +77,7 @@ impl Default for CodingAgentPromptChannel {
 fn setup(
     llm_config: Res<LlmConfig>,
     app_config: Res<AppConfig>,
+    permission: Res<PermissionConfig>,
     mut tui: Option<NonSendMut<TuiMain>>,
     app_cancel: Res<AppCancelToken>,
     agents_cancel: Res<AgentsCancelToken>,
@@ -101,17 +102,28 @@ fn setup(
     }
 
     let llm_config = llm_config.clone();
+    let allowed_dir = permission.allowed_dir.clone();
     let app_cancel = app_cancel.clone();
     let agents_cancel = agents_cancel.clone();
 
     let _: JoinHandle<()> = tokio_runtime.spawn_background_task(move |mut ctx| async move {
-        let model_config = ModelConfig::local(&llm_config.base_url, &llm_config.model);
+        let mut model_config = ModelConfig::local(&llm_config.base_url, &llm_config.model);
+        model_config.max_tokens = llm_config.max_tokens;
+        model_config.context_window = llm_config.context_window;
+        let thinking_level = match llm_config.thinking_level {
+            crate::config::ThinkingLevel::Off => ThinkingLevel::Off,
+            crate::config::ThinkingLevel::Minimal => ThinkingLevel::Minimal,
+            crate::config::ThinkingLevel::Low => ThinkingLevel::Low,
+            crate::config::ThinkingLevel::Medium => ThinkingLevel::Medium,
+            crate::config::ThinkingLevel::High => ThinkingLevel::High,
+        };
         let mut agent = Agent::new(OpenAiCompatProvider)
-            .with_model_config(model_config)
+            .with_model_config(model_config.clone())
             .with_system_prompt(SYSTEM_PROMPT)
             .with_model(&llm_config.model)
             .with_api_key(&llm_config.api_key)
-            .with_tools(build_tools());
+            .with_thinking(thinking_level)
+            .with_tools(build_tools(allowed_dir.clone()));
 
         if !runtime.skills.is_empty()
             && let Ok(skill_set) = SkillSet::load(runtime.skills.as_slice())

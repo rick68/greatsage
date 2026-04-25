@@ -24,7 +24,7 @@ use {
         Frame,
         layout::{Constraint, Layout, Rect},
         style::{Style, Stylize},
-        text::Line,
+        text::{Line, Span},
         widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     },
     std::{
@@ -32,7 +32,7 @@ use {
         time::Duration,
     },
     strum::{EnumCount, FromRepr},
-    unicode_width::UnicodeWidthStr,
+    unicode_width::{UnicodeWidthChar, UnicodeWidthStr},
 };
 
 const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
@@ -90,6 +90,59 @@ pub struct TuiMain<'a> {
 impl<'a> TuiMain<'a> {
     fn display_index(&self) -> usize {
         self.input[..self.byte_index].width()
+    }
+
+    fn input_display_lines(&self, inner_width: usize) -> Vec<String> {
+        let display_text = format!("{PROMPT_PREFIX}{}", self.input);
+        if inner_width == 0 {
+            return vec![display_text];
+        }
+        let mut lines: Vec<String> = Vec::new();
+        let mut current_line = String::new();
+        let mut current_width = 0usize;
+        for ch in display_text.chars() {
+            let ch_w = ch.width().unwrap_or(1);
+            if current_width + ch_w > inner_width && !current_line.is_empty() {
+                lines.push(std::mem::take(&mut current_line));
+                current_width = 0;
+            }
+            current_line.push(ch);
+            current_width += ch_w;
+        }
+        lines.push(current_line);
+        lines
+    }
+
+    fn hard_wrap_output_lines<'b>(lines: &'b [Line<'b>], inner_width: usize) -> Vec<Line<'static>> {
+        if inner_width == 0 {
+            return lines.iter().map(|l| Line::from(l.to_string())).collect();
+        }
+        let mut result: Vec<Line<'static>> = Vec::new();
+        for line in lines {
+            let mut current_spans: Vec<Span<'static>> = Vec::new();
+            let mut current_width = 0usize;
+            for span in &line.spans {
+                let style = span.style;
+                let mut buf = String::new();
+                for ch in span.content.chars() {
+                    let ch_w = ch.width().unwrap_or(1);
+                    if current_width + ch_w > inner_width && current_width > 0 {
+                        if !buf.is_empty() {
+                            current_spans.push(Span::styled(std::mem::take(&mut buf), style));
+                        }
+                        result.push(Line::from(std::mem::take(&mut current_spans)));
+                        current_width = 0;
+                    }
+                    buf.push(ch);
+                    current_width += ch_w;
+                }
+                if !buf.is_empty() {
+                    current_spans.push(Span::styled(buf, style));
+                }
+            }
+            result.push(Line::from(current_spans));
+        }
+        result
     }
 
     fn insert_char(&mut self, c: char) {
@@ -195,28 +248,61 @@ impl<'a> TuiMain<'a> {
         self.output_area.height.saturating_sub(BORDER) as usize
     }
 
+    fn total_visual_rows(&self) -> usize {
+        let inner_width = self.output_area.width.saturating_sub(2) as usize;
+        if inner_width == 0 {
+            return self.output.len();
+        }
+        let mut count = 0usize;
+        for line in &self.output {
+            let mut current_width = 0usize;
+            let mut has_content = false;
+            for span in &line.spans {
+                for ch in span.content.chars() {
+                    let ch_w = ch.width().unwrap_or(1);
+                    if current_width + ch_w > inner_width && has_content {
+                        count += 1;
+                        current_width = 0;
+                    }
+                    current_width += ch_w;
+                    has_content = true;
+                }
+            }
+            count += 1;
+        }
+        count
+    }
+
     fn max_scroll(&self) -> usize {
-        self.output.len().saturating_sub(self.output_area_height())
+        self.total_visual_rows()
+            .saturating_sub(self.output_area_height())
     }
 
     fn draw(&mut self, frame: &mut Frame, token_usage: Option<&CodingAgentTotalTokenUsage>) {
+        let area = frame.area();
+        let inner_width = area.width.saturating_sub(2) as usize;
+        let input_lines = self.input_display_lines(inner_width);
+        let input_height = (input_lines.len() as u16 + 2).max(3);
+
         let vertical = Layout::vertical([
             Constraint::Min(3),
             Constraint::Length(3),
-            Constraint::Length(3),
+            Constraint::Length(input_height),
         ]);
-        let area = frame.area();
         let [output_area, status_area, input_area] = vertical.areas(area);
         self.output_area = output_area;
 
-        let text = &self.output;
-        let output = Paragraph::new(text.clone())
+        let output_inner_width = output_area.width.saturating_sub(2) as usize;
+        let wrapped = Self::hard_wrap_output_lines(&self.output, output_inner_width);
+        let total_rows = wrapped.len();
+        let output = Paragraph::new(wrapped)
             .style(Style::default())
             .block(Block::bordered().title("Output"))
             .scroll((self.vertical_scroll as u16, 0));
+        let scroll_positions = total_rows.saturating_sub(self.output_area_height()) + 1;
         self.vertical_scroll_state = self
             .vertical_scroll_state
-            .content_length(self.max_scroll() + 1)
+            .content_length(scroll_positions)
             .viewport_content_length(self.output_area_height())
             .position(self.vertical_scroll);
 
@@ -244,15 +330,39 @@ impl<'a> TuiMain<'a> {
             .block(Block::bordered().title("Token Usage"));
         () = frame.render_widget(status, status_area);
 
-        let input = Paragraph::new(format!("{PROMPT_PREFIX}{}", self.input))
+        let input_text: Vec<ratatui::text::Line<'_>> = input_lines
+            .iter()
+            .map(|l| ratatui::text::Line::from(l.as_str()))
+            .collect();
+        let input = Paragraph::new(input_text)
             .style(Style::default())
             .block(Block::bordered().title("Input"));
         () = frame.render_widget::<Paragraph<'_>>(input, input_area);
 
         if self.show_cursor && self.focused == TuiMainFocus::InputArea {
+            let cursor_total = PROMPT_PREFIX.width() + self.display_index();
+            // Walk actual line widths instead of dividing by inner_width.
+            // Wide chars can leave a gap at line end, making simple division wrong.
+            let (cursor_row, cursor_col) = {
+                let mut accumulated = 0usize;
+                let mut result = (0usize, cursor_total);
+                for (row, line) in input_lines.iter().enumerate() {
+                    let line_w = line.width();
+                    if cursor_total <= accumulated + line_w {
+                        result = (row, cursor_total - accumulated);
+                        break;
+                    }
+                    if row + 1 < input_lines.len() {
+                        accumulated += line_w;
+                    } else {
+                        result = (row, cursor_total - accumulated);
+                    }
+                }
+                result
+            };
             () = frame.set_cursor_position((
-                input_area.left() + (self.display_index() + PROMPT_PREFIX.width()) as u16 + 1,
-                input_area.top() + 1,
+                input_area.left() + cursor_col as u16 + 1,
+                input_area.top() + cursor_row as u16 + 1,
             ));
         }
     }
@@ -283,9 +393,7 @@ impl<'a> TuiMain<'a> {
     }
 
     pub fn scroll_to_bottom(&mut self) {
-        if self.output.len() > self.output_area_height() {
-            self.vertical_scroll = self.max_scroll();
-        }
+        self.vertical_scroll = self.max_scroll();
     }
 }
 

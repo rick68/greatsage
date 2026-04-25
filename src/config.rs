@@ -42,6 +42,18 @@ pub fn default_config_path() -> PathBuf {
     base.join("greatsage").join("config.toml")
 }
 
+/// Thinking/reasoning intensity passed to `Agent::with_thinking`.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum ThinkingLevel {
+    #[default]
+    Off,
+    Minimal,
+    Low,
+    Medium,
+    High,
+}
+
 /// Context management strategy.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
@@ -58,6 +70,9 @@ pub enum ContextStrategy {
 pub struct LlmFileConfig {
     pub model: String,
     pub base_url: String,
+    pub max_tokens: u32,
+    pub context_window: u32,
+    pub thinking_level: ThinkingLevel,
 }
 
 impl Default for LlmFileConfig {
@@ -65,6 +80,9 @@ impl Default for LlmFileConfig {
         Self {
             model: String::from("claude-opus-4-7"),
             base_url: String::new(),
+            max_tokens: 4096,
+            context_window: 128_000,
+            thinking_level: ThinkingLevel::Off,
         }
     }
 }
@@ -178,6 +196,11 @@ impl AppConfig {
         match key {
             ConfigKey::LlmModel => self.llm.model.clone(),
             ConfigKey::LlmBaseUrl => self.llm.base_url.clone(),
+            ConfigKey::LlmMaxTokens => self.llm.max_tokens.to_string(),
+            ConfigKey::LlmContextWindow => self.llm.context_window.to_string(),
+            ConfigKey::LlmThinkingLevel => {
+                format!("{:?}", self.llm.thinking_level).to_lowercase()
+            }
             ConfigKey::AgentMaxRetryAttempts => self.agent.max_retry_attempts.to_string(),
             ConfigKey::AgentContextStrategy => {
                 format!("{:?}", self.agent.context_strategy).to_lowercase()
@@ -204,6 +227,37 @@ impl AppConfig {
         match key {
             ConfigKey::LlmModel => self.llm.model = value.to_string(),
             ConfigKey::LlmBaseUrl => self.llm.base_url = value.to_string(),
+            ConfigKey::LlmMaxTokens => {
+                self.llm.max_tokens = if value.is_empty() {
+                    0
+                } else {
+                    parse_uint(value)? as u32
+                };
+            }
+            ConfigKey::LlmContextWindow => {
+                self.llm.context_window = if value.is_empty() {
+                    0
+                } else {
+                    parse_uint(value)? as u32
+                };
+            }
+            ConfigKey::LlmThinkingLevel => {
+                self.llm.thinking_level = match value {
+                    "off" => ThinkingLevel::Off,
+                    "minimal" => ThinkingLevel::Minimal,
+                    "low" => ThinkingLevel::Low,
+                    "medium" => ThinkingLevel::Medium,
+                    "high" => ThinkingLevel::High,
+                    _ => {
+                        return Err(ConfigError::InvalidValue {
+                            key: key_name(),
+                            reason: format!(
+                                "'{value}' is not valid; expected off/minimal/low/medium/high"
+                            ),
+                        });
+                    }
+                };
+            }
             ConfigKey::AgentMaxRetryAttempts => {
                 self.agent.max_retry_attempts = parse_uint(value)?;
             }
@@ -275,6 +329,12 @@ pub enum ConfigKey {
     LlmModel,
     #[value(name = "llm.base_url")]
     LlmBaseUrl,
+    #[value(name = "llm.max_tokens")]
+    LlmMaxTokens,
+    #[value(name = "llm.context_window")]
+    LlmContextWindow,
+    #[value(name = "llm.thinking_level")]
+    LlmThinkingLevel,
     #[value(name = "agent.max_retry_attempts")]
     AgentMaxRetryAttempts,
     #[value(name = "agent.context_strategy")]
@@ -339,7 +399,7 @@ pub fn validate_required(config: &AppConfig) -> ConfigResult<()> {
     {
         () = missing.push("API_KEY (environment variable)");
     }
-    // BASE_URL: env OR config file
+    // BASE_URL: env var takes priority, config file as fallback
     if env::var("BASE_URL")
         .map(|v| v.trim().is_empty())
         .unwrap_or(true)

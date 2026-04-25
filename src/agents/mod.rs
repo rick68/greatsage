@@ -6,7 +6,7 @@ pub use tools::build_tools;
 
 use {
     self::coding::coding_agent_plugin,
-    crate::{config::AppConfig, tokio::AppCancelToken},
+    crate::{config::{AppConfig, ThinkingLevel}, tokio::AppCancelToken},
     anyhow::Context,
     backon::{BlockingRetryable, ConstantBuilder},
     bevy::{
@@ -89,6 +89,9 @@ pub struct LlmConfig {
     pub base_url: String,
     pub model: String,
     pub api_key: String,
+    pub max_tokens: u32,
+    pub context_window: u32,
+    pub thinking_level: ThinkingLevel,
 }
 
 impl bevy::ecs::world::FromWorld for LlmConfig {
@@ -104,11 +107,35 @@ impl bevy::ecs::world::FromWorld for LlmConfig {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| cfg.llm.model.clone());
         let api_key = dotenvy::var("API_KEY").unwrap_or_default();
+        let max_tokens = env::var("MAX_TOKENS")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(cfg.llm.max_tokens);
+        let context_window = env::var("CONTEXT_WINDOW")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(cfg.llm.context_window);
+        let thinking_level = env::var("THINKING_LEVEL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|s| match s.to_lowercase().as_str() {
+                "minimal" => ThinkingLevel::Minimal,
+                "low" => ThinkingLevel::Low,
+                "medium" => ThinkingLevel::Medium,
+                "high" => ThinkingLevel::High,
+                _ => ThinkingLevel::Off,
+            })
+            .unwrap_or(cfg.llm.thinking_level);
 
         Self {
             base_url,
             model,
             api_key,
+            max_tokens,
+            context_window,
+            thinking_level,
         }
     }
 }
@@ -137,6 +164,12 @@ impl PermissionConfig {
     /// Validate a given string path against the permission config.
     /// Returns Ok(()) if allowed, otherwise Err with a human‑readable message.
     pub fn validate_path(&self, path_str: &str) -> Result<(), PermissionError> {
+        let debug = env::var("PERMISSION_DEBUG").map(|v| v == "1").unwrap_or(false);
+        // Empty string or bare '/' are not meaningful file targets — allow.
+        let trimmed = path_str.trim();
+        if trimmed.is_empty() || trimmed == "/" {
+            return Ok(());
+        }
         let deny = || PermissionError::PathDenied(path_str.to_string());
         // Expand leading `~` to the user's home directory for convenience.
         let expanded = if path_str.starts_with('~') {
@@ -151,7 +184,7 @@ impl PermissionConfig {
             path_str.to_string()
         };
         let path = std::path::Path::new(&expanded);
-        match path.canonicalize() {
+        let result = match path.canonicalize() {
             Ok(canonical_target) => {
                 if self.is_path_allowed(&canonical_target) {
                     Ok(())
@@ -186,7 +219,14 @@ impl PermissionConfig {
                     Err(deny())
                 }
             }
+        };
+        if debug {
+            match &result {
+                Ok(()) => eprintln!("[permission] validate_path OK: {path_str} (allowed_dir={:?})", self.allowed_dir),
+                Err(e) => eprintln!("[permission] validate_path DENIED: {path_str} (allowed_dir={:?}) — {e}", self.allowed_dir),
+            }
         }
+        result
     }
 
     /// Validate a bash command string by checking any path‑like tokens.
@@ -209,9 +249,19 @@ impl PermissionConfig {
     /// checked against the allowed directory.
     #[allow(clippy::while_let_on_iterator)]
     pub fn validate_command(&self, command: &str) -> anyhow::Result<()> {
+        let debug = env::var("PERMISSION_DEBUG").map(|v| v == "1").unwrap_or(false);
         // Split the command into whitespace‑separated tokens and iterate.
         let mut tokens = command.split_whitespace().peekable();
+        let mut first_token = true;
         while let Some(token) = tokens.next() {
+            // Skip the executable itself (first token) — it's a system binary, not user data.
+            if first_token {
+                first_token = false;
+                if debug {
+                    eprintln!("[permission] skip executable: {token}");
+                }
+                continue;
+            }
             // Skip flags.
             if token.starts_with('-') {
                 continue;
@@ -236,8 +286,25 @@ impl PermissionConfig {
                 if stripped.len() <= 1 {
                     continue;
                 }
-                self.validate_path(stripped)
-                    .with_context(|| format!("Token '{}' disallowed", token))?;
+                // Skip nix store paths — read-only, system-managed, never user data.
+                if stripped.starts_with("/nix/store/") {
+                    if debug {
+                        eprintln!("[permission] skip nix store path: {stripped}");
+                    }
+                    continue;
+                }
+                if debug {
+                    eprintln!("[permission] validating path token: {stripped}");
+                }
+                let result = self.validate_path(stripped)
+                    .with_context(|| format!("Token '{token}' disallowed"));
+                if debug {
+                    match &result {
+                        Ok(()) => eprintln!("[permission] allowed: {stripped}"),
+                        Err(e) => eprintln!("[permission] denied: {stripped} — {e}"),
+                    }
+                }
+                result?;
             }
         }
         Ok(())
