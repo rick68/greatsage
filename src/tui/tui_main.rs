@@ -277,16 +277,14 @@ impl<'a> TuiMain<'a> {
         let mut count = 0usize;
         for line in &self.output {
             let mut current_width = 0usize;
-            let mut has_content = false;
             for span in &line.spans {
                 for ch in span.content.chars() {
                     let ch_w = ch.width().unwrap_or(1);
-                    if current_width + ch_w > inner_width && has_content {
+                    if current_width + ch_w > inner_width && current_width > 0 {
                         count += 1;
                         current_width = 0;
                     }
                     current_width += ch_w;
-                    has_content = true;
                 }
             }
             count += 1;
@@ -316,6 +314,8 @@ impl<'a> TuiMain<'a> {
         let output_inner_width = output_area.width.saturating_sub(2) as usize;
         let wrapped = Self::hard_wrap_output_lines(&self.output, output_inner_width);
         let total_rows = wrapped.len();
+        let new_max = total_rows.saturating_sub(self.output_area_height());
+        self.vertical_scroll = self.vertical_scroll.min(new_max);
         let output = Paragraph::new(wrapped)
             .style(Style::default())
             .block(Block::bordered().title("Output"))
