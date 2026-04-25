@@ -279,4 +279,17 @@ mod tests {
             "log should contain task title"
         );
     }
+
+    #[test]
+    fn test_is_protected_path() {
+        use std::path::Path;
+        // Protected paths
+        assert!(is_protected_path(Path::new(".github/workflows/ci.yml")));
+        assert!(is_protected_path(Path::new("IDENTITY.md")));
+        assert!(is_protected_path(Path::new("scripts/util.sh")));
+        assert!(is_protected_path(Path::new("skills/communicate/SKILL.md")));
+        // Non‑protected paths
+        assert!(!is_protected_path(Path::new("src/main.rs")));
+        assert!(!is_protected_path(Path::new("README.md")));
+    }
 }
