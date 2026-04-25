@@ -9,14 +9,15 @@ const TIMEOUT_SECS: u64 = 1200;
 /// Collects basic self‑analysis data such as version, source file count,
 /// and a placeholder CI status. The operation is wrapped in a timeout of
 /// half the total evolve timeout.
-pub fn assessment_phase() -> Result<String, Box<dyn std::error::Error>> {
+pub fn assessment_phase(base_dir: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let base_dir = base_dir.to_path_buf();
     // Create a Tokio runtime to run the async timeout.
     let rt = Runtime::new()?;
     rt.block_on(async {
         // Wrap the actual assessment work in a timeout future.
         let work = async {
             // Read Cargo.toml version.
-            let cargo_toml = fs::read_to_string("Cargo.toml").await?;
+            let cargo_toml = fs::read_to_string(base_dir.join("Cargo.toml")).await?;
             let version_line = cargo_toml
                 .lines()
                 .find(|l| l.trim_start().starts_with("version"))
@@ -46,7 +47,7 @@ pub fn assessment_phase() -> Result<String, Box<dyn std::error::Error>> {
                     cnt
                 })
             }
-            let src_files = count_rs(Path::new("src").to_path_buf()).await;
+            let src_files = count_rs(base_dir.join("src")).await;
 
             // Placeholder for latest CI status.
             let ci_status = "unknown";
@@ -66,11 +67,14 @@ pub fn assessment_phase() -> Result<String, Box<dyn std::error::Error>> {
     })
 }
 
-pub fn run_evolve() -> Result<(), Box<dyn std::error::Error>> {
-    // Phase A1 – Assessment
-    let assessment = assessment_phase()?;
+pub fn run_evolve_with(base_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let assessment = assessment_phase(base_dir)?;
     println!("[greatsage] Assessment Phase Result:\n{assessment}");
     Ok(())
+}
+
+pub fn run_evolve() -> Result<(), Box<dyn std::error::Error>> {
+    run_evolve_with(Path::new("."))
 }
 
 #[cfg(test)]
@@ -79,7 +83,8 @@ mod tests {
 
     #[test]
     fn test_assessment_phase_returns_nonempty() {
-        let res = assessment_phase().expect("assessment_phase should succeed");
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let res = assessment_phase(base).expect("assessment_phase should succeed");
         assert!(
             !res.trim().is_empty(),
             "assessment result should not be empty"
@@ -90,6 +95,7 @@ mod tests {
     fn test_run_evolve_executes_without_error() {
         // Ensure that the evolve pipeline runs to completion without panicking.
         // The function prints to stdout; we only verify that it returns Ok.
-        () = run_evolve().expect("run_evolve should complete without error");
+        () = run_evolve_with(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+            .expect("run_evolve should complete without error");
     }
 }
