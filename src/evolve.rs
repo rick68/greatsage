@@ -5,6 +5,23 @@ use {
 
 const TIMEOUT_SECS: u64 = 1200;
 
+/// Extract the version string from Cargo.toml located at `base_dir`.
+/// Returns an error if the file cannot be read or the version line is missing.
+async fn extract_version(base_dir: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let cargo_path = base_dir.join("Cargo.toml");
+    let cargo_toml = fs::read_to_string(cargo_path).await?;
+    let version_line = cargo_toml
+        .lines()
+        .find(|l| l.trim_start().starts_with("version"))
+        .ok_or("Version not found in Cargo.toml")?;
+    let version = version_line
+        .split('"')
+        .nth(1)
+        .unwrap_or("unknown")
+        .to_string();
+    Ok(version)
+}
+
 /// Perform the Assessment Phase (A1) of the evolve pipeline.
 /// Collects basic self‑analysis data such as version, source file count,
 /// and a placeholder CI status. The operation is wrapped in a timeout of
@@ -16,17 +33,8 @@ pub fn assessment_phase(base_dir: &Path) -> Result<String, Box<dyn std::error::E
     rt.block_on(async {
         // Wrap the actual assessment work in a timeout future.
         let work = async {
-            // Read Cargo.toml version.
-            let cargo_toml = fs::read_to_string(base_dir.join("Cargo.toml")).await?;
-            let version_line = cargo_toml
-                .lines()
-                .find(|l| l.trim_start().starts_with("version"))
-                .ok_or("Version not found in Cargo.toml")?;
-            let version = version_line
-                .split('"')
-                .nth(1)
-                .unwrap_or("unknown")
-                .to_string();
+            // Extract version from Cargo.toml using helper.
+            let version = extract_version(&base_dir).await?;
 
             // Count .rs source files recursively under src/.
             fn count_rs(

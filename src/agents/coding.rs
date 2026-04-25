@@ -75,6 +75,7 @@ impl Default for CodingAgentPromptChannel {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn setup(
     llm_config: Res<LlmConfig>,
     app_config: Res<AppConfig>,
