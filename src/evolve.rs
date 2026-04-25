@@ -128,7 +128,7 @@ pub fn run_evolve_with(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::er
 fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
     let plan_dir = base_dir.as_ref().join("session_plan");
     // Guard against protected paths.
-    let canonical_plan_dir = fs::canonicalize(&plan_dir).unwrap_or_else(|_| plan_dir.clone());
+    let canonical_plan_dir = fs::canonicalize(&plan_dir).unwrap_or(plan_dir.clone());
     if is_protected_path(&canonical_plan_dir) {
         return Err(Box::new(std::io::Error::other(format!(
             "execute_tasks aborted: protected path {}",
@@ -136,8 +136,10 @@ fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::E
         ))));
     }
 
-    // Open (or create) the evolve.log file in the base directory.
-    let log_path = base_dir.as_ref().join("evolve.log");
+    // Open (or create) the evolve.log file under .greatsage/.
+    let log_dir = base_dir.as_ref().join(".greatsage");
+    fs::create_dir_all(&log_dir)?;
+    let log_path = log_dir.join("evolve.log");
     let mut log_file = File::create(&log_path)?;
 
     // Iterate over markdown files in the session_plan directory.
@@ -146,7 +148,7 @@ fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::E
         let path = entry.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("md") {
             // Ensure the individual task file is not a protected path.
-            let canonical_task_path = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            let canonical_task_path = fs::canonicalize(&path).unwrap_or(path.clone());
             if is_protected_path(&canonical_task_path) {
                 return Err(Box::new(std::io::Error::other(format!(
                     "execute_tasks aborted: protected task file {}",
@@ -158,8 +160,8 @@ fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::E
             for line in content.lines() {
                 if line.starts_with("Title:") {
                     let title = line.trim_start_matches("Title:").trim();
-                    println!("Executing task: {}", title);
-                    writeln!(log_file, "Executing task: {}", title)?;
+                    println!("Executing task: {title}");
+                    writeln!(log_file, "Executing task: {title}")?;
                     break;
                 }
             }
@@ -197,7 +199,7 @@ pub fn planning_phase(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::err
         let file_path = plan_dir.join(format!("task_{:02}.md", i));
         // Additional safeguard: ensure each task file path is not protected
         let canonical_file_path =
-            fs::canonicalize(&file_path).unwrap_or_else(|_| file_path.clone());
+            fs::canonicalize(&file_path).unwrap_or(file_path.clone());
         if is_protected_path(&canonical_file_path) {
             return Err(Box::new(std::io::Error::other(format!(
                 "planning_phase aborted: protected task file {}",
@@ -264,13 +266,13 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("create temp dir");
         let base = tmp.path();
         let plan_dir = base.join("session_plan");
-        fs::create_dir_all(&plan_dir).expect("create session_plan dir");
+        () = fs::create_dir_all(&plan_dir).expect("create session_plan dir");
         let task_path = plan_dir.join("task_01.md");
-        fs::write(&task_path, "Title: Sample Task\nDetails: none\n").expect("write task file");
+        () = fs::write(&task_path, "Title: Sample Task\nDetails: none\n").expect("write task file");
         // Execute tasks phase.
-        execute_tasks(base).expect("execute_tasks should succeed");
+        () = execute_tasks(base).expect("execute_tasks should succeed");
         // Verify evolve.log contains the task title.
-        let log_path = base.join("evolve.log");
+        let log_path = base.join(".greatsage").join("evolve.log");
         assert!(log_path.is_file(), "evolve.log should be created");
         let log_content = fs::read_to_string(&log_path).expect("read evolve.log");
         assert!(
