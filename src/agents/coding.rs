@@ -309,12 +309,15 @@ fn spawn_agent_task(
 /// If error handling is enabled, logs the error and returns `Ok(())`.
 /// Otherwise, returns an `Err` with the error message.
 #[allow(dead_code)]
-pub fn handle_error<E: std::fmt::Display>(err: E, error_handling: bool) -> Result<(), String> {
+pub fn handle_error<E>(err: E, error_handling: bool) -> anyhow::Result<()>
+where
+    E: fmt::Display + std::error::Error + Send + Sync + 'static,
+{
     if error_handling {
-        eprintln!("Error: {}", err);
+        eprintln!("Error: {err}");
         Ok(())
     } else {
-        Err(err.to_string())
+        Err(anyhow::anyhow!(err))
     }
 }
 
