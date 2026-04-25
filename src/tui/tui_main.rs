@@ -356,6 +356,58 @@ fn handle_global_input(
     }
 }
 
+fn handle_git_command(_tui: &mut TuiMain, cmd: &str) -> Line<'static> {
+    // Executes a git command and returns a colored line indicating success or error.
+    // The `tui` parameter is currently unused but kept for future extensions.
+    if cmd.trim() == "git stage" {
+        match crate::git::stage_all() {
+            Ok(_) => Line::from("✅ Staged all changes").green(),
+            Err(e) => Line::from(format!("❌ git stage failed: {e}")).red(),
+        }
+    } else if cmd.trim_start().starts_with("git commit") {
+        // Parse commit message similar to previous inline logic.
+        let parts: Vec<&str> = cmd.splitn(4, ' ').collect();
+        let msg_opt = parts.iter().skip(2).find_map(|p| {
+            if p.starts_with("-m") {
+                let msg = p.trim_start_matches("-m");
+                if msg.is_empty() {
+                    None
+                } else {
+                    Some(msg.trim_matches('"').trim_matches('\'').trim())
+                }
+            } else {
+                None
+            }
+        });
+        let msg = if let Some(m) = msg_opt {
+            m.to_string()
+        } else if let Some(idx) = cmd.find("-m ") {
+            cmd[idx + 3..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string()
+        } else {
+            String::new()
+        };
+        if msg.is_empty() {
+            Line::from("❌ git commit missing -m message").red()
+        } else {
+            match crate::git::commit(&msg) {
+                Ok(_) => Line::from(format!("✅ Commit: {msg}")).green(),
+                Err(e) => Line::from(format!("❌ git commit failed: {e}")).red(),
+            }
+        }
+    } else if cmd.trim() == "git revert" {
+        match crate::git::revert_last() {
+            Ok(_) => Line::from("✅ Reverted last commit").green(),
+            Err(e) => Line::from(format!("❌ git revert failed: {e}")).red(),
+        }
+    } else {
+        Line::from("❌ Unknown git command").red()
+    }
+}
+
 fn handle_input_area_input(
     mut messages: MessageReader<KeyMessage>,
     mut tui_main: NonSendMut<TuiMain>,
@@ -431,54 +483,7 @@ fn handle_input_area_input(
                     let input = tui_main.input.clone();
 
                     if input.trim_start().starts_with("git ") {
-                        let output_line = if input.trim() == "git stage" {
-                            match crate::git::stage_all() {
-                                Ok(_) => Line::from("✅ Staged all changes").green(),
-                                Err(e) => Line::from(format!("❌ git stage failed: {e}")).red(),
-                            }
-                        } else if input.trim_start().starts_with("git commit") {
-                            let parts: Vec<&str> = input.splitn(4, ' ').collect();
-                            let msg_opt = parts.iter().skip(2).find_map(|p| {
-                                if p.starts_with("-m") {
-                                    let msg = p.trim_start_matches("-m");
-                                    if msg.is_empty() {
-                                        None
-                                    } else {
-                                        Some(msg.trim_matches('"').trim_matches('\'').trim())
-                                    }
-                                } else {
-                                    None
-                                }
-                            });
-                            let msg = if let Some(m) = msg_opt {
-                                m.to_string()
-                            } else if let Some(idx) = input.find("-m ") {
-                                input[idx + 3..]
-                                    .trim()
-                                    .trim_matches('"')
-                                    .trim_matches('\'')
-                                    .to_string()
-                            } else {
-                                String::new()
-                            };
-                            if msg.is_empty() {
-                                Line::from("❌ git commit missing -m message").red()
-                            } else {
-                                match crate::git::commit(&msg) {
-                                    Ok(_) => Line::from(format!("✅ Commit: {msg}")).green(),
-                                    Err(e) => {
-                                        Line::from(format!("❌ git commit failed: {e}")).red()
-                                    }
-                                }
-                            }
-                        } else if input.trim() == "git revert" {
-                            match crate::git::revert_last() {
-                                Ok(_) => Line::from("✅ Reverted last commit").green(),
-                                Err(e) => Line::from(format!("❌ git revert failed: {e}")).red(),
-                            }
-                        } else {
-                            Line::from("❌ Unknown git command").red()
-                        };
+                        let output_line = handle_git_command(&mut tui_main, input.trim());
                         () = tui_main.push_history(&input);
                         () = tui_main.output.push(output_line);
                         () = tui_main.clear_input();
@@ -500,9 +505,18 @@ fn handle_input_area_input(
                                 () = tui_main.clear_input();
                                 () = tui_main.scroll_to_bottom();
                                 // Send input to the coding agent; handle potential disconnection gracefully.
-                                if let Err(e) = channel.sender.send(input) {
-                                    // Log the error; the REPL can continue without crashing.
-                                    eprintln!("Failed to send REPL input to agent: {e}");
+                                match channel.sender.send(input) {
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        // Log the error and surface it in the REPL.
+                                        eprintln!("Failed to send REPL input to agent: {e}");
+                                        let err_line =
+                                            Line::from(format!("❌ Failed to send input: {e}"))
+                                                .red();
+                                        () = tui_main.output.push(err_line);
+                                        // Ensure scroll reflects new line.
+                                        () = tui_main.scroll_to_bottom();
+                                    }
                                 }
                             }
                         }
