@@ -80,7 +80,7 @@ pub struct Args {
     #[arg(long, action = ArgAction::SetTrue)]
     pub evolve: bool,
     /// Enable verbose output
-    #[arg(long, action = ArgAction::SetTrue)]
+    #[arg(short = 'v', long, action = ArgAction::SetTrue)]
     pub verbose: bool,
     /// Enable REPL error handling validation
     #[arg(long, action = ArgAction::SetTrue)]
