@@ -292,7 +292,7 @@ mod tests {
         // Verify that task files were created.
         let plan_dir = base.join("session_plan");
         for i in 1..=3 {
-            let task_file = plan_dir.join(format!("task_{:02}.md", i));
+            let task_file = plan_dir.join(format!("task_{i:02}.md"));
             assert!(task_file.is_file(), "{task_file:?} should exist");
         }
         // Verify evolve.log contains titles of placeholder tasks.
