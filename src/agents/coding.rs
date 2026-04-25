@@ -35,6 +35,7 @@ use {
         text::{Line, Span, Text},
     },
     std::{
+        fmt,
         io::{Write, stdout},
         sync::Arc,
     },
