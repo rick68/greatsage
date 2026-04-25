@@ -2,14 +2,12 @@
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::Path};
+    use {std::fs, tempfile::TempDir};
 
     #[test]
     fn test_placeholder_task_3_content() {
-        let base = Path::new(env!("CARGO_MANIFEST_DIR"));
-        // Clean any existing plan dir to ensure fresh generation
-        let _ = fs::remove_dir_all(base.join("session_plan"));
-        // Run planning_phase to generate tasks
+        let tmp = TempDir::new().expect("create temp dir");
+        let base = tmp.path();
         crate::evolve::planning_phase(base).expect("planning_phase should succeed");
         let task_path = base.join("session_plan").join("task_03.md");
         assert!(task_path.is_file(), "task_03.md should exist");
