@@ -1,13 +1,18 @@
 use {
-    std::fs::{self, File},
-    std::io::Write,
-    std::{future::Future, io::ErrorKind, path::Path, pin::Pin, time::Duration},
+    std::{
+        fs::{self, File},
+        future::Future,
+        io::{ErrorKind, Write},
+        path::Path,
+        pin::Pin,
+        time::Duration,
+    },
     tokio::{fs as async_fs, runtime::Runtime, time},
 };
 
 /// Returns true if the given path is within a protected location that
 /// should not be modified by the evolve pipeline.
-fn is_protected_path(path: &Path) -> bool {
+fn is_protected_path(path: impl AsRef<Path>) -> bool {
     // Define protected paths relative to the repository root.
     // We treat both files and directories uniformly.
     let protected = [
@@ -20,7 +25,7 @@ fn is_protected_path(path: &Path) -> bool {
     // Convert the path into its components for precise matching.
     // This avoids false positives where a protected name appears as a
     // substring of a different component (e.g., "scripts_backup").
-    let components: Vec<_> = path.components().map(|c| c.as_os_str()).collect();
+    let components: Vec<_> = path.as_ref().components().map(|c| c.as_os_str()).collect();
 
     for prot in &protected {
         let prot_comps: Vec<_> = prot.components().map(|c| c.as_os_str()).collect();
