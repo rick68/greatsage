@@ -16,21 +16,29 @@ pub const STYLES: Styles = Styles::styled()
     .valid(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
     .invalid(AnsiColor::Yellow.on_default().effects(Effects::BOLD));
 
-const REPL_HELP: &str = "\
-REPL Commands:
+fn repl_help() -> String {
+    let h = STYLES.get_header();
+    let l = STYLES.get_literal();
+    let (hr, lr) = (h.render(), l.render());
+    let (hx, lx) = (h.render_reset(), l.render_reset());
+    format!(
+        "\
+{hr}REPL Commands:{hx}
 
-  Session:
-    /help              Show this help
-    /clear             Clear output
-    /quit, /exit       Exit greatsage
+  {hr}Session:{hx}
+    {lr}/help{lx}              Show this help
+    {lr}/clear{lx}             Clear output
+    {lr}/quit{lx}, {lr}/exit{lx}       Exit greatsage
 
-  Git:
-    /git stage         Stage all changes
-    /git commit -m …   Commit staged changes
-    /git revert        Revert last commit";
+  {hr}Git:{hx}
+    {lr}/git stage{lx}         Stage all changes
+    {lr}/git commit -m …{lx}   Commit staged changes
+    {lr}/git revert{lx}        Revert last commit"
+    )
+}
 
 #[derive(Clone, Debug, Parser)]
-#[command(version, about, long_about = None, styles = STYLES, after_help = REPL_HELP, term_width = 0)]
+#[command(version, about, long_about = None, styles = STYLES, after_help = repl_help(), term_width = 0)]
 pub struct Args {
     /// Path to config file
     #[arg(long, value_name = "PATH", default_value_os_t = default_config_path())]
