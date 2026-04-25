@@ -14,11 +14,11 @@ pub fn stage_all() -> Result<(), git2::Error> {
 /// Commit staged changes with the given message using `git2`.
 /// Returns `Ok(())` on success or an `Err` containing a description.
 #[allow(dead_code)]
-pub fn commit(message: &str) -> Result<(), git2::Error> {
+pub fn commit(message: impl AsRef<str>) -> Result<(), git2::Error> {
     let repo = Repository::discover(".")?;
     let mut index = repo.index()?;
     let tree_id = index.write_tree()?;
-    drop(index);
+    () = drop(index);
     let tree = repo.find_tree(tree_id)?;
 
     // Call repo.head() once; reuse for both the "nothing to commit" check and parent resolution.
@@ -53,7 +53,14 @@ pub fn commit(message: &str) -> Result<(), git2::Error> {
         }
     };
     let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
-    _ = repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)?;
+    _ = repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        message.as_ref(),
+        &tree,
+        &parent_refs,
+    )?;
     Ok(())
 }
 
@@ -117,7 +124,7 @@ mod tests {
         index.write().expect("Failed to write index");
         let tree_id = index.write_tree().expect("Failed to write tree");
         let tree = repo.find_tree(tree_id).expect("Failed to find tree");
-        drop(index);
+        () = drop(index);
         let sig = repo.signature().expect("Failed to create git signature");
         _ = repo
             .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
@@ -141,7 +148,7 @@ mod tests {
     fn git_revert_last_restores_previous_state() {
         let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let temp_dir = tempdir().expect("Failed to create temp dir");
-        init_git_repo(&temp_dir);
+        () = init_git_repo(&temp_dir);
         let _cwd = CwdGuard(env::current_dir().expect("Failed to get current dir"));
         () = env::set_current_dir(temp_dir.path()).expect("Failed to set current dir");
 
@@ -165,7 +172,7 @@ mod tests {
     fn git_commit_without_changes_returns_error() {
         let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let temp_dir = tempdir().expect("Failed to create temp dir");
-        init_git_repo(&temp_dir);
+        () = init_git_repo(&temp_dir);
         let _cwd = CwdGuard(env::current_dir().expect("Failed to get current dir"));
         () = env::set_current_dir(temp_dir.path()).expect("Failed to set current dir");
         let file_path = temp_dir.path().join("readme.txt");
