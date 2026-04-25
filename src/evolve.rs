@@ -5,6 +5,50 @@ use {
     tokio::{fs as async_fs, runtime::Runtime, time},
 };
 
+/// Returns true if the given path is within a protected location that
+/// should not be modified by the evolve pipeline.
+fn is_protected_path(path: &Path) -> bool {
+    // Define protected paths relative to the repository root.
+    // We treat both files and directories uniformly.
+    let protected = [
+        Path::new(".github/workflows"),
+        Path::new("IDENTITY.md"),
+        Path::new("scripts"),
+        Path::new("skills"),
+    ];
+
+    // Convert the path into its components for precise matching.
+    // This avoids false positives where a protected name appears as a
+    // substring of a different component (e.g., "scripts_backup").
+    let components: Vec<_> = path.components().map(|c| c.as_os_str()).collect();
+
+    for prot in &protected {
+        let prot_comps: Vec<_> = prot.components().map(|c| c.as_os_str()).collect();
+        let prot_len = prot_comps.len();
+        if prot_len == 0 {
+            continue;
+        }
+        // Single‑component protection (e.g., "scripts", "skills", "IDENTITY.md")
+        // matches if any component equals it.
+        if prot_len == 1 {
+            if components.iter().any(|c| *c == prot_comps[0]) {
+                return true;
+            }
+            continue;
+        }
+        // Multi‑component protection (e.g., ".github/workflows") matches if the
+        // sequence of components appears consecutively anywhere in the path.
+        if components.len() >= prot_len {
+            for start in 0..=components.len() - prot_len {
+                if components[start..start + prot_len] == prot_comps[..] {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 const TIMEOUT_SECS: u64 = 1200;
 
 /// Perform the Assessment Phase (A1) of the evolve pipeline.
@@ -71,6 +115,14 @@ pub fn run_evolve_with(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::er
 pub fn planning_phase(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
     // Create session_plan directory
     let plan_dir = base_dir.as_ref().join("session_plan");
+    // Resolve canonical path to detect protected locations even via symlinks
+    let canonical_plan_dir = fs::canonicalize(&plan_dir).unwrap_or_else(|_| plan_dir.clone());
+    if is_protected_path(&canonical_plan_dir) {
+        return Err(Box::new(std::io::Error::other(format!(
+            "planning_phase aborted: protected path {}",
+            canonical_plan_dir.display()
+        ))));
+    }
     if plan_dir.exists() {
         // Clean existing task files
         for entry in fs::read_dir(&plan_dir)? {
@@ -87,6 +139,15 @@ pub fn planning_phase(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::err
     // Generate up to three placeholder tasks
     for i in 1..=3 {
         let file_path = plan_dir.join(format!("task_{:02}.md", i));
+        // Additional safeguard: ensure each task file path is not protected
+        let canonical_file_path =
+            fs::canonicalize(&file_path).unwrap_or_else(|_| file_path.clone());
+        if is_protected_path(&canonical_file_path) {
+            return Err(Box::new(std::io::Error::other(format!(
+                "planning_phase aborted: protected task file {}",
+                canonical_file_path.display()
+            ))));
+        }
         let mut file = File::create(&file_path)?;
         writeln!(file, "Title: Placeholder Task {}", i)?;
         writeln!(file, "Files: none")?;
@@ -140,5 +201,23 @@ mod tests {
                 "Task file should contain placeholder title"
             );
         }
+    }
+
+    #[test]
+    fn test_planning_phase_protected_path_fails() {
+        // Create a temporary directory with a protected subdirectory 'scripts'
+        let tmp_base = std::env::temp_dir().join("greatsage_test_protected");
+        let protected_dir = tmp_base.join("scripts");
+        // Ensure clean state
+        let _ = fs::remove_dir_all(&tmp_base);
+        fs::create_dir_all(&protected_dir).expect("create protected dir");
+        // planning_phase should error because the plan directory would be inside a protected path
+        let result = planning_phase(&protected_dir);
+        assert!(
+            result.is_err(),
+            "planning_phase should reject protected path"
+        );
+        // Cleanup
+        let _ = fs::remove_dir_all(&tmp_base);
     }
 }
