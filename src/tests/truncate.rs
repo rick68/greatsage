@@ -2,8 +2,10 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::agents::coding::truncate;
-    use pretty_assertions::assert_eq;
+    use {
+        crate::agents::coding::truncate,
+        pretty_assertions::assert_eq
+    };
 
     #[test]
     fn truncates_short_ascii() {

@@ -82,10 +82,6 @@ pub fn handle_prompt(prompt: String, error_handling: bool) -> Result<(), Box<dyn
     Ok(())
 }
 
-#[cfg(test)]
-#[path = "tests/truncate.rs"]
-mod truncate_tests;
-
 fn main() {
     () = complete();
 
@@ -262,6 +258,7 @@ pub fn validate_env_vars() -> Result<(), String> {
 mod tests {
     mod cli_stats;
     mod repl_error_handling;
+    mod truncate;
 
     use {super::*, temp_env_vars::temp_env_vars};
 
