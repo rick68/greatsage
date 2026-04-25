@@ -376,4 +376,34 @@ mod tests {
         assert!(!is_protected_path(Path::new("src/main.rs")));
         assert!(!is_protected_path(Path::new("README.md")));
     }
+
+    #[test]
+    fn test_execute_task_placeholder3() {
+        // Setup temporary base directory with a session_plan and a task file for placeholder 3.
+        let tmp = tempfile::TempDir::new().expect("create temp dir");
+        let base = tmp.path();
+        let plan_dir = base.join("session_plan");
+        fs::create_dir_all(&plan_dir).expect("create session_plan dir");
+        let task_path = plan_dir.join("task_03.md");
+        let task_content = "Title: Placeholder Task 3\nDetails: none\n";
+        fs::write(&task_path, task_content).expect("write task file");
+        // Execute tasks phase.
+        execute_tasks(base).expect("execute_tasks should succeed");
+        // Verify evolve.log contains the task title.
+        let log_path = base.join(".greatsage").join("evolve.log");
+        assert!(log_path.is_file(), "evolve.log should be created");
+        let log_content = fs::read_to_string(&log_path).expect("read evolve.log");
+        assert!(
+            log_content.contains("Placeholder Task 3"),
+            "log should contain task title"
+        );
+        // Verify placeholder marker file created.
+        let placeholder_path = base.join(".greatsage").join("placeholder3.txt");
+        assert!(
+            placeholder_path.is_file(),
+            "placeholder3.txt should be created"
+        );
+        let marker = fs::read_to_string(&placeholder_path).expect("read placeholder file");
+        assert_eq!(marker, "Task 3 completed");
+    }
 }
