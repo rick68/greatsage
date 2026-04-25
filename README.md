@@ -7,6 +7,11 @@ Rimuru's Unique Skill, you know the one.
 greatsage [OPTIONS] [prompt]
 ```
 
+Run the self‑evolution pipeline with:
+```bash
+greatsage evolve
+```
+
 Start the REPL (no arguments), or pass a prompt to run once and exit:
 
 ```bash

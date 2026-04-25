@@ -3,19 +3,14 @@
 #[cfg(test)]
 mod tests {
     use {
-        crate::evolve::{is_protected_path, planning_phase, execute_tasks},
-        std::{fs, path::Path, io::Write},
+        crate::evolve::{execute_tasks, is_protected_path, planning_phase},
+        std::{fs, io::Write, path::Path},
         tempfile::TempDir,
     };
 
     #[test]
     fn protects_known_paths() {
-        let protected = [
-            ".github/workflows",
-            "IDENTITY.md",
-            "scripts",
-            "skills",
-        ];
+        let protected = [".github/workflows", "IDENTITY.md", "scripts", "skills"];
         for p in protected.iter() {
             let path = Path::new(p);
             assert!(is_protected_path(path), "{p} should be protected");
@@ -44,7 +39,10 @@ mod tests {
         () = fs::create_dir_all(&base).expect("create protected dir");
         // Attempt planning_phase with the protected base directory.
         let result = planning_phase(&base);
-        assert!(result.is_err(), "planning_phase should abort on protected path");
+        assert!(
+            result.is_err(),
+            "planning_phase should abort on protected path"
+        );
     }
 
     #[test]
@@ -63,6 +61,9 @@ mod tests {
         writeln!(file, "Title: Bad Task").expect("write task");
         // Run execute_tasks; it should detect the protected task file and error.
         let result = execute_tasks(base);
-        assert!(result.is_err(), "execute_tasks should abort on protected task file");
+        assert!(
+            result.is_err(),
+            "execute_tasks should abort on protected task file"
+        );
     }
 }

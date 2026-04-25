@@ -141,8 +141,7 @@ pub(crate) fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn st
             for sub in fs::read_dir(&path)? {
                 let sub = sub?;
                 let sub_path = sub.path();
-                if sub_path.is_file()
-                    && sub_path.extension().and_then(|s| s.to_str()) == Some("md")
+                if sub_path.is_file() && sub_path.extension().and_then(|s| s.to_str()) == Some("md")
                 {
                     return Err(Box::new(std::io::Error::other(format!(
                         "execute_tasks aborted: task file in protected directory {}",
