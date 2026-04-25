@@ -174,10 +174,13 @@ impl AppConfig {
     /// Missing fields in an existing file are filled with defaults and written back.
     pub fn load_or_create(path: &Path) -> Self {
         if path.exists() {
-            let cfg = fs::read_to_string(path)
-                .ok()
-                .and_then(|s| toml::from_str::<AppConfig>(&s).ok())
-                .unwrap_or_default();
+            let cfg = if let Ok(path) = fs::read_to_string(path)
+                && let Ok(cfg) = toml::from_str::<AppConfig>(&path)
+            {
+                cfg
+            } else {
+                AppConfig::default()
+            };
             // Write back to fill in any fields added since the file was created.
             _ = cfg.save(path);
             cfg
@@ -190,10 +193,10 @@ impl AppConfig {
 
     pub fn save(&self, path: &Path) -> ConfigResult<()> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            () = fs::create_dir_all(parent)?;
         }
         let content = toml::to_string_pretty(self)?;
-        fs::write(path, content)?;
+        () = fs::write(path, content)?;
         Ok(())
     }
 
