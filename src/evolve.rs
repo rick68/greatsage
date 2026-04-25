@@ -12,7 +12,7 @@ use {
 
 /// Returns true if the given path is within a protected location that
 /// should not be modified by the evolve pipeline.
-fn is_protected_path(path: impl AsRef<Path>) -> bool {
+pub(crate) fn is_protected_path(path: impl AsRef<Path>) -> bool {
     // Define protected paths relative to the repository root.
     // We treat both files and directories uniformly.
     let protected = [
@@ -125,8 +125,35 @@ pub fn run_evolve_with(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::er
 /// Reads markdown files in `session_plan/`, parses the `Title:` line,
 /// prints a message for each task, and logs the execution to `evolve.log`.
 /// Only processes files ending with `.md` and aborts if any path is protected.
-fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
-    let plan_dir = base_dir.as_ref().join("session_plan");
+pub(crate) fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
+    let base_dir = base_dir.as_ref();
+    // Pre-flight: reject if any .md files exist inside a protected subdirectory
+    // of base_dir. This prevents task files from being smuggled into protected
+    // locations and silently ignored by the session_plan-scoped loop below.
+    for entry in fs::read_dir(base_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let canonical = fs::canonicalize(&path).unwrap_or(path.clone());
+        if is_protected_path(&canonical) {
+            for sub in fs::read_dir(&path)? {
+                let sub = sub?;
+                let sub_path = sub.path();
+                if sub_path.is_file()
+                    && sub_path.extension().and_then(|s| s.to_str()) == Some("md")
+                {
+                    return Err(Box::new(std::io::Error::other(format!(
+                        "execute_tasks aborted: task file in protected directory {}",
+                        sub_path.display()
+                    ))));
+                }
+            }
+        }
+    }
+
+    let plan_dir = base_dir.join("session_plan");
     // Guard against protected paths.
     let canonical_plan_dir = fs::canonicalize(&plan_dir).unwrap_or(plan_dir.clone());
     if is_protected_path(&canonical_plan_dir) {
@@ -137,7 +164,7 @@ fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::E
     }
 
     // Open (or create) the evolve.log file under .greatsage/.
-    let log_dir = base_dir.as_ref().join(".greatsage");
+    let log_dir = base_dir.join(".greatsage");
     fs::create_dir_all(&log_dir)?;
     let log_path = log_dir.join("evolve.log");
     let mut log_file = File::create(&log_path)?;

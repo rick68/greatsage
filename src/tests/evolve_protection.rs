@@ -2,9 +2,11 @@
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::Path, io::Write};
-    use tempfile::TempDir;
-    use super::*; // bring is_protected_path, planning_phase, execute_tasks into scope
+    use {
+        crate::evolve::{is_protected_path, planning_phase, execute_tasks},
+        std::{fs, path::Path, io::Write},
+        tempfile::TempDir,
+    };
 
     #[test]
     fn protects_known_paths() {
@@ -39,7 +41,7 @@ mod tests {
         // Create a temporary directory that mimics a protected location.
         let tmp = TempDir::new().expect("create temp dir");
         let base = tmp.path().join(".github").join("workflows");
-        fs::create_dir_all(&base).expect("create protected dir");
+        () = fs::create_dir_all(&base).expect("create protected dir");
         // Attempt planning_phase with the protected base directory.
         let result = planning_phase(&base);
         assert!(result.is_err(), "planning_phase should abort on protected path");
@@ -52,10 +54,10 @@ mod tests {
         let base = tmp.path();
         // Create session_plan directory.
         let plan_dir = base.join("session_plan");
-        fs::create_dir_all(&plan_dir).expect("create session_plan");
+        () = fs::create_dir_all(&plan_dir).expect("create session_plan");
         // Create a protected task file inside a protected path.
         let protected_dir = base.join("scripts");
-        fs::create_dir_all(&protected_dir).expect("create protected dir");
+        () = fs::create_dir_all(&protected_dir).expect("create protected dir");
         let task_path = protected_dir.join("task_01.md");
         let mut file = fs::File::create(&task_path).expect("create task file");
         writeln!(file, "Title: Bad Task").expect("write task");
