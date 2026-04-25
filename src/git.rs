@@ -88,6 +88,14 @@ mod tests {
     // Serialise tests that mutate the process-global cwd via set_current_dir.
     static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
+    /// RAII guard that restores the working directory on drop (even on panic).
+    struct CwdGuard(std::path::PathBuf);
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = env::set_current_dir(&self.0);
+        }
+    }
+
     /// Helper to initialize a git repository in the given directory using `git2`.
     fn init_git_repo(dir: &TempDir) {
         let repo = Repository::init(dir.path()).expect("git init failed");
@@ -119,23 +127,22 @@ mod tests {
     #[test]
     #[temp_env_vars]
     fn git_stage_all_on_clean_repo() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        let original_dir = env::current_dir().expect("Failed to get current dir");
+        let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let temp_dir = tempdir().expect("Failed to create temp dir");
         () = init_git_repo(&temp_dir);
+        let _cwd = CwdGuard(env::current_dir().expect("Failed to get current dir"));
         () = env::set_current_dir(temp_dir.path()).expect("Failed to set current dir");
         let result = crate::git::stage_all();
         assert_eq!(result, Ok(()));
-        () = env::set_current_dir(&original_dir).expect("Failed to restore cwd");
     }
 
     #[test]
     #[temp_env_vars]
     fn git_revert_last_restores_previous_state() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        let original_dir = env::current_dir().expect("Failed to get current dir");
+        let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let temp_dir = tempdir().expect("Failed to create temp dir");
         init_git_repo(&temp_dir);
+        let _cwd = CwdGuard(env::current_dir().expect("Failed to get current dir"));
         () = env::set_current_dir(temp_dir.path()).expect("Failed to set current dir");
 
         // Add a file and commit it.
@@ -151,17 +158,15 @@ mod tests {
             !file_path.exists(),
             "revert should have removed the file from the working tree"
         );
-
-        () = env::set_current_dir(&original_dir).expect("Failed to restore cwd");
     }
 
     #[test]
     #[temp_env_vars]
     fn git_commit_without_changes_returns_error() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        let original_dir = env::current_dir().expect("Failed to get current dir");
+        let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let temp_dir = tempdir().expect("Failed to create temp dir");
         init_git_repo(&temp_dir);
+        let _cwd = CwdGuard(env::current_dir().expect("Failed to get current dir"));
         () = env::set_current_dir(temp_dir.path()).expect("Failed to set current dir");
         let file_path = temp_dir.path().join("readme.txt");
         () = fs::write(&file_path, b"initial").expect("write failed");
@@ -169,6 +174,5 @@ mod tests {
         () = commit("initial commit").expect("initial commit failed");
         let result = crate::git::commit("empty commit");
         assert!(result.is_err());
-        () = env::set_current_dir(&original_dir).expect("Failed to restore cwd");
     }
 }
