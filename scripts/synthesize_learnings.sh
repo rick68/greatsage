@@ -64,10 +64,12 @@ Apply iteration-weighted compression tiers:
 
 Keep total under ~200 lines. Preserve the most actionable and unique insights.
 
-Write the result to memory/active_learnings.md. Start with:
+Use the write_file tool to write the result to memory/active_learnings.md. Start the file with:
 # Active Learnings
 
 Self-reflection — what I've learned about how I work, what I value, and how I'm growing.
+
+Do not output the file content as text in your response. Only confirm the file was written.
 SYNTHEOF
 
 timeout 180 "$GREATSAGE_BIN" --model "$MODEL" --skills ./skills < "$PROMPT" || {
@@ -91,10 +93,12 @@ Apply time-weighted compression tiers:
 
 Keep total under ~100 lines.
 
-Write the result to memory/active_social_learnings.md. Start with:
+Use the write_file tool to write the result to memory/active_social_learnings.md. Start the file with:
 # Active Social Learnings
 
 What I've learned about people from talking with them.
+
+Do not output the file content as text in your response. Only confirm the file was written.
 SYNTHEOF
 
 timeout 180 "$GREATSAGE_BIN" --model "$MODEL" --skills ./skills < "$PROMPT" || {
