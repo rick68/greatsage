@@ -112,7 +112,7 @@ pub fn run_evolve_with(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::er
     let assessment = assessment_phase(&base_dir)?;
     println!("[greatsage] Assessment Phase Result:\n{assessment}");
     // New: planning phase
-    planning_phase(&base_dir)?;
+    () = planning_phase(&base_dir)?;
     println!("[greatsage] Planning Phase completed. Task files created in session_plan/.");
     Ok(())
 }
@@ -121,7 +121,7 @@ pub fn planning_phase(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::err
     // Create session_plan directory
     let plan_dir = base_dir.as_ref().join("session_plan");
     // Resolve canonical path to detect protected locations even via symlinks
-    let canonical_plan_dir = fs::canonicalize(&plan_dir).unwrap_or_else(|_| plan_dir.clone());
+    let canonical_plan_dir = fs::canonicalize(&plan_dir).unwrap_or(plan_dir.clone());
     if is_protected_path(&canonical_plan_dir) {
         return Err(Box::new(std::io::Error::other(format!(
             "planning_phase aborted: protected path {}",
@@ -191,9 +191,8 @@ mod tests {
 
     #[test]
     fn test_planning_phase_creates_tasks() {
-        let base = Path::new(env!("CARGO_MANIFEST_DIR"));
-        // Clean any existing plan dir
-        let _ = fs::remove_dir_all(base.join("session_plan"));
+        let tmp = tempfile::TempDir::new().expect("create temp dir");
+        let base = tmp.path();
         () = planning_phase(base).expect("planning_phase should succeed");
         let plan_dir = base.join("session_plan");
         assert!(plan_dir.is_dir(), "session_plan directory should exist");
@@ -215,7 +214,7 @@ mod tests {
         let protected_dir = tmp_base.join("scripts");
         // Ensure clean state
         let _ = fs::remove_dir_all(&tmp_base);
-        fs::create_dir_all(&protected_dir).expect("create protected dir");
+        () = fs::create_dir_all(&protected_dir).expect("create protected dir");
         // planning_phase should error because the plan directory would be inside a protected path
         let result = planning_phase(&protected_dir);
         assert!(
@@ -223,6 +222,6 @@ mod tests {
             "planning_phase should reject protected path"
         );
         // Cleanup
-        let _ = fs::remove_dir_all(&tmp_base);
+        _ = fs::remove_dir_all(&tmp_base);
     }
 }
