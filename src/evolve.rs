@@ -164,7 +164,7 @@ pub(crate) fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn st
 
     // Open (or create) the evolve.log file under .greatsage/.
     let log_dir = base_dir.join(".greatsage");
-    fs::create_dir_all(&log_dir)?;
+    () = fs::create_dir_all(&log_dir)?;
     let log_path = log_dir.join("evolve.log");
     let mut log_file = File::create(&log_path)?;
 
@@ -195,7 +195,7 @@ pub(crate) fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn st
                         if let Some(parent) = placeholder_path.parent() {
                             let _ = fs::create_dir_all(parent);
                         }
-                        fs::write(&placeholder_path, "Task 1 completed")?;
+                        () = fs::write(&placeholder_path, "Task 1 completed")?;
                     }
                     // Special handling for Placeholder Task 2: create a second marker file.
                     if title == "Placeholder Task 2" {
@@ -203,7 +203,7 @@ pub(crate) fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn st
                         if let Some(parent) = placeholder_path.parent() {
                             let _ = fs::create_dir_all(parent);
                         }
-                        fs::write(&placeholder_path, "Task 2 completed")?;
+                        () = fs::write(&placeholder_path, "Task 2 completed")?;
                     }
                     // Special handling for Placeholder Task 3: create a third marker file.
                     if title == "Placeholder Task 3" {
@@ -211,7 +211,7 @@ pub(crate) fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn st
                         if let Some(parent) = placeholder_path.parent() {
                             let _ = fs::create_dir_all(parent);
                         }
-                        fs::write(&placeholder_path, "Task 3 completed")?;
+                        () = fs::write(&placeholder_path, "Task 3 completed")?;
                     }
                     break;
                 }
