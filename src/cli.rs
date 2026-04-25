@@ -73,14 +73,18 @@ pub struct Args {
     /// Sampling temperature (0.0-1.0)
     #[arg(long, value_name = "f")]
     pub temperature: Option<f32>,
-    /// Print status messages to stderr in non-interactive mode
-    #[arg(short = 'v', long)]
-    pub verbose: bool,
+    /// Run a subcommand (e.g., config)
     #[command(subcommand)]
     pub command: Option<Command>,
     /// Run evolve mode (placeholder)
     #[arg(long, action = ArgAction::SetTrue)]
     pub evolve: bool,
+    /// Enable verbose output
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub verbose: bool,
+    /// Enable REPL error handling validation
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub error_handling: bool,
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -90,6 +94,9 @@ pub enum Command {
         #[command(subcommand)]
         cmd: ConfigSubcommand,
     },
+    /// Display basic project statistics (version, source files, CI status)
+    #[command(about = "Display basic project statistics (version, source files, CI status)")]
+    Stats,
 }
 
 pub fn complete() {

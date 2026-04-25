@@ -41,13 +41,42 @@ use std::error::Error;
 
 build_info::build_info!(fn build_info);
 
-fn handle_prompt(prompt: String) -> Result<(), Box<dyn Error>> {
-    // Currently, we simply treat empty prompts as a no-op.
-    // Future logic can include more validation.
+pub fn handle_prompt(prompt: String, error_handling: bool) -> Result<(), Box<dyn Error>> {
+    // Treat empty prompts as a no-op.
     if prompt.trim().is_empty() {
         return Ok(());
     }
-    // No other side‑effects here; sending is handled elsewhere.
+
+    // If error handling flag is enabled, perform validation.
+    if error_handling {
+        // Determine if the prompt looks like a file reference.
+        // Recognize "file:" prefix or known file extensions.
+        let trimmed = prompt.trim();
+        let path_candidate = if let Some(stripped) = trimmed.strip_prefix("file:") {
+            stripped.trim()
+        } else {
+            trimmed
+        };
+        const KNOWN_EXTS: &[&str] = &[".rs", ".txt", ".md", ".json", ".jsonl", ".toml"]; // extend as needed
+        let looks_like_file = KNOWN_EXTS.iter().any(|ext| path_candidate.ends_with(ext));
+        if looks_like_file {
+            // Verify file exists and is readable.
+            match std::fs::metadata(path_candidate) {
+                Ok(meta) if meta.is_file() => {
+                    // try opening for reading to ensure readability
+                    std::fs::File::open(path_candidate)?;
+                }
+                _ => {
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("File not found or unreadable: {}", path_candidate),
+                    )));
+                }
+            }
+        }
+    }
+
+    // No further side‑effects here; sending is handled elsewhere.
     Ok(())
 }
 
@@ -68,6 +97,19 @@ fn main() {
             _ = process::exit(1);
         }
         return;
+    }
+    // Stats subcommand: display assessment information.
+    if let Some(Command::Stats) = args.command {
+        match evolve::assessment_phase(std::path::Path::new(".")) {
+            Ok(info) => {
+                println!("{}", info);
+                _ = process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                _ = process::exit(1);
+            }
+        }
     }
 
     // CLI overrides for config-file values.
@@ -101,6 +143,9 @@ fn main() {
         .chain(args.mcp.iter().cloned())
         .collect();
     app_config.runtime.verbose = args.verbose;
+    app_config.runtime.error_handling = args.error_handling;
+    // Capture error handling flag before moving app_config into Bevy resource.
+    let error_handling_flag = app_config.runtime.error_handling;
 
     if let Err(e) = validate_required(&app_config) {
         eprintln!("error: {e:#}");
@@ -151,12 +196,13 @@ fn main() {
     if let Some(prompt) = invocation_prompt {
         // Use helper to handle the prompt with error handling.
         let prompt_clone = prompt.clone();
+        let error_handling = error_handling_flag;
         _ = app.add_systems(
             Update,
             (
                 (move |channel: Res<CodingAgentPromptChannel>| {
                     // First, handle prompt validation.
-                    if let Err(e) = handle_prompt(prompt_clone.clone()) {
+                    if let Err(e) = handle_prompt(prompt_clone.clone(), error_handling) {
                         eprintln!("Prompt handling error: {e}");
                         return;
                     }
@@ -262,9 +308,5 @@ mod tests {
         assert!(args.evolve);
     }
 
-    #[test]
-    fn test_handle_prompt_empty() {
-        // Empty prompt should be handled without error.
-        assert!(handle_prompt("".to_string()).is_ok());
-    }
+    mod repl_error_handling;
 }

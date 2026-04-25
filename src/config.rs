@@ -14,6 +14,7 @@ pub struct RuntimeConfig {
     pub skills: Vec<PathBuf>,
     pub mcp_servers: Vec<String>,
     pub verbose: bool,
+    pub error_handling: bool,
 }
 
 #[non_exhaustive]
