@@ -8,7 +8,7 @@ use {
 /// Returns true if the given path is within a protected location that
 /// should not be modified by the evolve pipeline.
 fn is_protected_path(path: &Path) -> bool {
-    // Define protected prefixes relative to the repository root.
+    // Define protected paths relative to the repository root.
     // We treat both files and directories uniformly.
     let protected = [
         Path::new(".github/workflows"),
@@ -16,14 +16,33 @@ fn is_protected_path(path: &Path) -> bool {
         Path::new("scripts"),
         Path::new("skills"),
     ];
-    // Convert path to string for simple containment check.
-    // This approach works for absolute paths as well, matching any segment.
-    if let Some(s) = path.to_str() {
-        for prot in &protected {
-            if let Some(p) = prot.to_str()
-                && s.contains(p)
-            {
+
+    // Convert the path into its components for precise matching.
+    // This avoids false positives where a protected name appears as a
+    // substring of a different component (e.g., "scripts_backup").
+    let components: Vec<_> = path.components().map(|c| c.as_os_str()).collect();
+
+    for prot in &protected {
+        let prot_comps: Vec<_> = prot.components().map(|c| c.as_os_str()).collect();
+        let prot_len = prot_comps.len();
+        if prot_len == 0 {
+            continue;
+        }
+        // Single‑component protection (e.g., "scripts", "skills", "IDENTITY.md")
+        // matches if any component equals it.
+        if prot_len == 1 {
+            if components.iter().any(|c| *c == prot_comps[0]) {
                 return true;
+            }
+            continue;
+        }
+        // Multi‑component protection (e.g., ".github/workflows") matches if the
+        // sequence of components appears consecutively anywhere in the path.
+        if components.len() >= prot_len {
+            for start in 0..=components.len() - prot_len {
+                if components[start..start + prot_len] == prot_comps[..] {
+                    return true;
+                }
             }
         }
     }
