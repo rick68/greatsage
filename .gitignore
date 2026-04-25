@@ -28,3 +28,7 @@ target
 
 # Yoyo agent directory
 .yoyo/
+
+# Greatsage runtime artifacts
+.greatsage/
+session_plan/
