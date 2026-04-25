@@ -22,7 +22,14 @@ use {
         prelude::Deref,
     },
     bevy_tokio_tasks::{TaskContext, TokioTasksRuntime},
-    std::{cell::Cell, env, future::Future, path::PathBuf, sync::Arc, time::Duration},
+    std::{
+        cell::Cell,
+        env,
+        future::Future,
+        path::{Path, PathBuf},
+        sync::Arc,
+        time::Duration,
+    },
     tokio::task::JoinHandle,
     tokio_util::sync::CancellationToken,
     url::Url,
@@ -51,7 +58,7 @@ where
     let attempt = Cell::new(0_usize);
     (|| -> Result<T, E> {
         // Increment attempt count before each try.
-        attempt.set(attempt.get() + 1);
+        () = attempt.set(attempt.get() + 1);
         f()
     })
     .retry(builder)
@@ -103,46 +110,66 @@ impl bevy::ecs::world::FromWorld for LlmConfig {
     fn from_world(world: &mut World) -> Self {
         let cfg = world.resource::<AppConfig>();
         // Env vars override config file values; API_KEY is env-only.
-        let base_url = env::var("BASE_URL")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| cfg.llm.base_url.clone());
-        let model = env::var("MODEL")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| cfg.llm.model.clone());
+        let base_url = if let Ok(base_url) = env::var("BASE_URL")
+            && !base_url.is_empty()
+        {
+            base_url
+        } else {
+            cfg.llm.base_url.clone()
+        };
+        let model = if let Ok(model) = env::var("MODEL")
+            && !model.is_empty()
+        {
+            model
+        } else {
+            cfg.llm.model.clone()
+        };
         let api_key = dotenvy::var("API_KEY").unwrap_or_default();
-        let max_tokens = env::var("MAX_TOKENS")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(cfg.llm.max_tokens);
-        let context_window = env::var("CONTEXT_WINDOW")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(cfg.llm.context_window);
-        let thinking_level = env::var("THINKING_LEVEL")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(|s| match s.to_lowercase().as_str() {
+        let max_tokens = if let Ok(max_tokens) = env::var("MAX_TOKENS")
+            && !max_tokens.is_empty()
+            && let Ok(max_tokens) = max_tokens.parse()
+        {
+            max_tokens
+        } else {
+            cfg.llm.max_tokens
+        };
+        let context_window = if let Ok(context_window) = env::var("CONTEXT_WINDOW")
+            && !context_window.is_empty()
+            && let Ok(context_window) = context_window.parse()
+        {
+            context_window
+        } else {
+            cfg.llm.context_window
+        };
+        let thinking_level = if let Ok(thinking_level) = env::var("THINKING_LEVEL")
+            && !thinking_level.is_empty()
+        {
+            match thinking_level.to_lowercase().as_str() {
                 "minimal" => ThinkingLevel::Minimal,
                 "low" => ThinkingLevel::Low,
                 "medium" => ThinkingLevel::Medium,
                 "high" => ThinkingLevel::High,
                 _ => ThinkingLevel::Off,
-            })
-            .unwrap_or(cfg.llm.thinking_level);
-        let temperature = env::var("TEMPERATURE")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .and_then(|s| s.parse().ok())
-            .or(cfg.llm.temperature);
-        let max_turns = env::var("MAX_TURNS")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(cfg.agent.max_turns);
+            }
+        } else {
+            cfg.llm.thinking_level
+        };
+        let temperature = if let Ok(temperature) = env::var("TEMPERATURE")
+            && !temperature.is_empty()
+            && let Ok(temperature) = temperature.parse()
+        {
+            Some(temperature)
+        } else {
+            cfg.llm.temperature
+        };
+        let max_turns = if let Ok(max_turns) = env::var("MAX_TURNS")
+            && !max_turns.is_empty()
+            && let Ok(max_turns) = max_turns.parse()
+        {
+            max_turns
+        } else {
+            cfg.agent.max_turns
+        };
 
         Self {
             base_url,
@@ -167,10 +194,10 @@ pub struct PermissionConfig {
 
 #[allow(dead_code)]
 impl PermissionConfig {
-    pub fn is_path_allowed(&self, path: &std::path::Path) -> bool {
+    pub fn is_path_allowed(&self, path: impl AsRef<Path>) -> bool {
         // Canonicalize both paths to handle relative components
         if let Ok(canonical_allowed) = self.allowed_dir.canonicalize()
-            && let Ok(canonical_target) = path.canonicalize()
+            && let Ok(canonical_target) = path.as_ref().canonicalize()
         {
             canonical_target.starts_with(&canonical_allowed)
         } else {
@@ -180,32 +207,32 @@ impl PermissionConfig {
 
     /// Validate a given string path against the permission config.
     /// Returns Ok(()) if allowed, otherwise Err with a human‑readable message.
-    pub fn validate_path(&self, path_str: &str) -> Result<(), PermissionError> {
+    pub fn validate_path(&self, path_str: impl AsRef<str>) -> Result<(), PermissionError> {
         let debug = env::var("PERMISSION_DEBUG")
             .map(|v| v == "1")
             .unwrap_or(false);
         // Empty string or bare '/' are not meaningful file targets — allow.
-        let trimmed = path_str.trim();
+        let trimmed = path_str.as_ref().trim();
         if trimmed.is_empty() || trimmed == "/" {
             return Ok(());
         }
-        let deny = || PermissionError::PathDenied(path_str.to_string());
+        let deny = || PermissionError::PathDenied(String::from(path_str.as_ref()));
         // Expand leading `~` to the user's home directory for convenience.
-        let expanded = if path_str.starts_with('~') {
+        let expanded = if path_str.as_ref().starts_with('~') {
             if let Some(home) = dirs::home_dir() {
-                let without_tilde = path_str.trim_start_matches('~');
+                let without_tilde = path_str.as_ref().trim_start_matches('~');
                 let stripped = without_tilde.strip_prefix('/').unwrap_or(without_tilde);
                 home.join(stripped).to_string_lossy().into_owned()
             } else {
-                path_str.to_string()
+                String::from(path_str.as_ref())
             }
         } else {
-            path_str.to_string()
+            String::from(path_str.as_ref())
         };
-        let path = std::path::Path::new(&expanded);
+        let path = Path::new(&expanded);
         let result = match path.canonicalize() {
             Ok(canonical_target) => {
-                if self.is_path_allowed(&canonical_target) {
+                if self.is_path_allowed(canonical_target) {
                     Ok(())
                 } else {
                     Err(deny())
@@ -227,7 +254,7 @@ impl PermissionConfig {
                             // Parent also cannot be resolved. If the token contains '..', deny
                             // (potential traversal attack). Otherwise allow — it's almost certainly
                             // not a real path (e.g., a GitHub "user/repo" reference).
-                            if path_str.contains("..") {
+                            if path_str.as_ref().contains("..") {
                                 Err(deny())
                             } else {
                                 Ok(())
@@ -242,11 +269,13 @@ impl PermissionConfig {
         if debug {
             match &result {
                 Ok(()) => eprintln!(
-                    "[permission] validate_path OK: {path_str} (allowed_dir={:?})",
+                    "[permission] validate_path OK: {} (allowed_dir={:?})",
+                    path_str.as_ref(),
                     self.allowed_dir
                 ),
                 Err(e) => eprintln!(
-                    "[permission] validate_path DENIED: {path_str} (allowed_dir={:?}) — {e}",
+                    "[permission] validate_path DENIED: {} (allowed_dir={:?}) — {e}",
+                    path_str.as_ref(),
                     self.allowed_dir
                 ),
             }
@@ -273,12 +302,12 @@ impl PermissionConfig {
     /// This reduces over‑rejection while preserving security – only clearly path‑like arguments are
     /// checked against the allowed directory.
     #[allow(clippy::while_let_on_iterator)]
-    pub fn validate_command(&self, command: &str) -> anyhow::Result<()> {
+    pub fn validate_command(&self, command: impl AsRef<str>) -> anyhow::Result<()> {
         let debug = env::var("PERMISSION_DEBUG")
             .map(|v| v == "1")
             .unwrap_or(false);
         // Split the command into whitespace‑separated tokens and iterate.
-        let mut tokens = command.split_whitespace().peekable();
+        let mut tokens = command.as_ref().split_whitespace().peekable();
         let mut first_token = true;
         while let Some(token) = tokens.next() {
             // Skip the executable itself (first token) — it's a system binary, not user data.
@@ -343,22 +372,23 @@ impl bevy::ecs::world::FromWorld for PermissionConfig {
     fn from_world(world: &mut World) -> Self {
         let cfg = world.resource::<AppConfig>();
         // ALLOWED_DIR env var overrides config file; config overrides cwd default.
-        let raw = env::var("ALLOWED_DIR")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                let dir = &cfg.permissions.allowed_dir;
-                if dir.is_empty() {
-                    None
-                } else {
-                    Some(dir.clone())
-                }
-            });
+        let raw = if let Ok(allowed_dir) = env::var("ALLOWED_DIR")
+            && !allowed_dir.is_empty()
+        {
+            Some(allowed_dir)
+        } else {
+            let dir = &cfg.permissions.allowed_dir;
+            if dir.is_empty() {
+                None
+            } else {
+                Some(dir.clone())
+            }
+        };
         let allowed = match raw {
             Some(dir) => {
-                let path = PathBuf::from(dir);
+                let path = Path::new(&dir);
                 path.canonicalize()
-                    .unwrap_or_else(|_| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+                    .unwrap_or(env::current_dir().unwrap_or(PathBuf::from(".")))
             }
             None => env::current_dir().unwrap_or(PathBuf::from(".")),
         };
@@ -447,7 +477,7 @@ mod tests {
         // Create a file outside allowed directory
         let denied_dir = tempdir().expect("failed to create denied temp dir");
         let denied_path = denied_dir.path().join("outside.txt");
-        std::fs::write(&denied_path, b"nope").expect("failed to write denied file");
+        () = std::fs::write(&denied_path, b"nope").expect("failed to write denied file");
         let perm = PermissionConfig {
             allowed_dir: allowed_path,
         };
@@ -481,9 +511,9 @@ mod tests {
         let allowed_path = allowed_dir.path().to_path_buf();
         // Create a subdirectory to use with -C flag
         let sub_dir = allowed_path.join("sub");
-        std::fs::create_dir_all(&sub_dir).expect("create sub dir");
+        () = std::fs::create_dir_all(&sub_dir).expect("create sub dir");
         let config = PermissionConfig {
-            allowed_dir: allowed_path.clone(),
+            allowed_dir: allowed_path,
         };
         let cmd = format!("git -C {} status", sub_dir.to_str().unwrap());
         assert!(config.validate_command(&cmd).is_ok());
@@ -507,10 +537,10 @@ mod tests {
     fn command_mixed_allowed_and_disallowed_tokens() {
         let allowed_dir = tempdir().expect("create allowed temp dir");
         let allowed_file = allowed_dir.path().join("good.txt");
-        std::fs::write(&allowed_file, b"ok").expect("write allowed file");
+        () = std::fs::write(&allowed_file, b"ok").expect("write allowed file");
         let denied_dir = tempdir().expect("create denied temp dir");
         let denied_file = denied_dir.path().join("bad.txt");
-        std::fs::write(&denied_file, b"no").expect("write denied file");
+        () = std::fs::write(&denied_file, b"no").expect("write denied file");
         let config = PermissionConfig {
             allowed_dir: allowed_dir.path().to_path_buf(),
         };
@@ -572,7 +602,7 @@ mod tests {
     #[test]
     fn test_retry_failure_all_attempts() {
         // Count attempts
-        let mut attempts = 0usize;
+        let mut attempts = 0_usize;
         let result: Result<(), ()> = retry(|| {
             attempts += 1;
             Err(())
