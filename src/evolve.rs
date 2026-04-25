@@ -383,12 +383,12 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("create temp dir");
         let base = tmp.path();
         let plan_dir = base.join("session_plan");
-        fs::create_dir_all(&plan_dir).expect("create session_plan dir");
+        () = fs::create_dir_all(&plan_dir).expect("create session_plan dir");
         let task_path = plan_dir.join("task_03.md");
         let task_content = "Title: Placeholder Task 3\nDetails: none\n";
-        fs::write(&task_path, task_content).expect("write task file");
+        () = fs::write(&task_path, task_content).expect("write task file");
         // Execute tasks phase.
-        execute_tasks(base).expect("execute_tasks should succeed");
+        () = execute_tasks(base).expect("execute_tasks should succeed");
         // Verify evolve.log contains the task title.
         let log_path = base.join(".greatsage").join("evolve.log");
         assert!(log_path.is_file(), "evolve.log should be created");
