@@ -88,6 +88,27 @@ pub struct TuiMain<'a> {
 }
 
 impl<'a> TuiMain<'a> {
+    #[cfg(test)]
+    pub(crate) fn set_input_public(&mut self, s: String) {
+        self.set_input(s);
+    }
+    #[cfg(test)]
+    pub(crate) fn push_history_public(&mut self, s: &str) {
+        self.push_history(s);
+    }
+    #[cfg(test)]
+    pub(crate) fn clear_input_public(&mut self) {
+        self.clear_input();
+    }
+    #[cfg(test)]
+    pub(crate) fn input_is_empty(&self) -> bool {
+        self.input.is_empty()
+    }
+    #[cfg(test)]
+    pub(crate) fn last_history(&self) -> Option<&str> {
+        self.history.last().map(|s| s.as_str())
+    }
+
     fn display_index(&self) -> usize {
         self.input[..self.byte_index].width()
     }
@@ -356,7 +377,7 @@ fn handle_global_input(
     }
 }
 
-fn handle_git_command(_tui: &mut TuiMain, cmd: &str) -> Line<'static> {
+pub(crate) fn handle_git_command(_tui: &mut TuiMain, cmd: &str) -> Line<'static> {
     // Executes a git command and returns a colored line indicating success or error.
     // The `tui` parameter is currently unused but kept for future extensions.
     if cmd.trim() == "git stage" {
