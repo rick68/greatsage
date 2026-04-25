@@ -82,6 +82,10 @@ pub fn handle_prompt(prompt: String, error_handling: bool) -> Result<(), Box<dyn
     Ok(())
 }
 
+#[cfg(test)]
+#[path = "tests/truncate.rs"]
+mod truncate_tests;
+
 fn main() {
     () = complete();
 
@@ -171,7 +175,6 @@ fn main() {
             positional_prompt,
             ..
         } = &args;
-
         if !stdin.is_terminal() && prompt.is_none() && positional_prompt.is_none() {
             let mut buf = String::new();
             _ = stdin.lock().read_to_string(&mut buf).unwrap();
@@ -213,12 +216,8 @@ fn main() {
                         std::panic::catch_unwind(|| channel.sender.send(prompt_clone.clone()));
                     match result {
                         Ok(Ok(())) => {}
-                        Ok(Err(e)) => {
-                            eprintln!("Error sending prompt: {e:?}");
-                        }
-                        Err(panic) => {
-                            eprintln!("Panic while sending prompt: {panic:?}");
-                        }
+                        Ok(Err(e)) => eprintln!("Error sending prompt: {e:?}"),
+                        Err(panic) => eprintln!("Panic while sending prompt: {panic:?}"),
                     }
                 })
                 .run_if(run_once),

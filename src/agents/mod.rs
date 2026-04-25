@@ -1,6 +1,5 @@
-mod coding;
+pub mod coding;
 pub use coding::{CodingAgentPromptChannel, CodingAgentTask, CodingAgentTotalTokenUsage};
-
 mod tools;
 pub use tools::build_tools;
 
