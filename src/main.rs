@@ -10,7 +10,6 @@ mod evolve;
 mod git;
 mod tokio;
 mod tui;
-
 use {
     crate::{
         agents::{CodingAgentPromptChannel, CodingAgentTask, agents_plugin},
@@ -72,7 +71,7 @@ pub fn handle_prompt(prompt: String, error_handling: bool) -> Result<(), Box<dyn
                 _ => {
                     return Err(Box::new(std::io::Error::new(
                         std::io::ErrorKind::NotFound,
-                        format!("File not found or unreadable: {}", path_candidate),
+                        format!("File not found or unreadable: {path_candidate}"),
                     )));
                 }
             }
@@ -105,7 +104,7 @@ fn main() {
     if let Some(Command::Stats) = args.command {
         match evolve::assessment_phase(std::path::Path::new(".")) {
             Ok(info) => {
-                println!("{}", info);
+                println!("{info}");
                 _ = process::exit(0);
             }
             Err(e) => {
@@ -158,7 +157,7 @@ fn main() {
     // Evolve mode placeholder
     if args.evolve {
         if let Err(e) = evolve::run_evolve() {
-            eprintln!("{}", e);
+            eprintln!("{e}");
             _ = process::exit(1);
         }
         _ = process::exit(0);
@@ -262,6 +261,9 @@ pub fn validate_env_vars() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    mod cli_stats;
+    mod repl_error_handling;
+
     use {super::*, temp_env_vars::temp_env_vars};
 
     #[test]
@@ -310,6 +312,4 @@ mod tests {
         let args = Args::parse_from(["test_bin", "--evolve"]);
         assert!(args.evolve);
     }
-
-    mod repl_error_handling;
 }
