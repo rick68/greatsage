@@ -1,6 +1,9 @@
 mod tui_main;
 pub use tui_main::TuiMain;
 
+#[cfg(test)]
+mod tests;
+
 use {
     bevy::{
         app::{App, PreUpdate},
