@@ -97,6 +97,9 @@ pub enum Command {
     /// Display basic project statistics (version, source files, CI status)
     #[command(about = "Display basic project statistics (version, source files, CI status)")]
     Stats,
+    /// Run the self‑evolution pipeline
+    #[command(about = "Run the self‑evolution pipeline")]
+    Evolve,
 }
 
 pub fn complete() {

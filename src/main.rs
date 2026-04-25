@@ -154,8 +154,17 @@ fn main() {
         _ = process::exit(1);
     }
 
-    // Evolve mode placeholder
+    // Evolve subcommand
+    if let Some(Command::Evolve) = args.command {
+        if let Err(e) = evolve::run_evolve() {
+            eprintln!("{e}");
+            _ = process::exit(1);
+        }
+        _ = process::exit(0);
+    }
+    // Evolve mode placeholder (deprecated flag)
     if args.evolve {
+        eprintln!("warning: --evolve flag is deprecated, use 'evolve' subcommand instead");
         if let Err(e) = evolve::run_evolve() {
             eprintln!("{e}");
             _ = process::exit(1);

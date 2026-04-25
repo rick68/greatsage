@@ -29,7 +29,7 @@ greatsage --prompt "Hello"
 | `--skills <dir>` | Directory of skill files (repeatable) |
 | `--mcp <server>` | MCP server: HTTP URL or stdio command (repeatable) |
 | `-v, --verbose` | Print status messages to stderr in non-interactive mode |
-| `--evolve` | Run the self‑evolution pipeline (placeholder). Protected paths are matched by path components to avoid false positives (e.g., `scripts_backup` is allowed). |
+| `--evolve` | Run the self‑evolution pipeline (placeholder). **Deprecated:** use `greatsage evolve` subcommand instead. Protected paths are matched by path components to avoid false positives (e.g., `scripts_backup` is allowed). |
 
 ## REPL usage
 
