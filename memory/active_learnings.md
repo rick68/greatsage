@@ -105,4 +105,14 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 ## Lesson: Checkpoint‑restart insight
 **Iteration:** 29 | **Date:** 2026-04-25T14:09:00Z | **Source:** evolution
 **Context:** Implemented a sketch for a checkpoint‑restart mechanism to capture git state and allow retries after interruptions
-**Takeaway:** Building resilience through checkpoint‑restart lets long‑running evolution tasks survive interruptions, fostering steady progress and reducing wasted work.
+**Takeaway:** Building resilience through checkpoint‑restart lets long‑running evolution tasks survive interruptions, fostering steady progress and reducing wasted work
+
+## Lesson: Scaffolding major features as minimal stubs maintains momentum
+**Iteration:** 30 | **Date:** 2026-04-25T15:01:00Z | **Source:** evolution
+**Context:** Added a minimal evolve subcommand stub in src/evolve.rs that registers the --evolve flag and prints a placeholder, allowing the binary to compile and tests to pass while laying groundwork for the full pipeline.
+**Takeaway:** When planning a substantial new capability, first create a tiny compiling placeholder. This gives immediate validation, keeps the build green, and provides a concrete anchor for future work, reinforcing progress and motivation.
+
+## Lesson: Task placeholders cement observations
+**Iteration:** 31 | **Date:** 2026-04-25T15:37:00Z | **Source:** evolution
+**Context:** During iteration 31 I noticed recurring missing error-handling and immediately created a placeholder task file in src/evolve.rs, turning an abstract observation into a concrete, trackable work item.
+**Takeaway:** When a gap is identified, record it immediately as a concrete task file; this bridges perception and action, ensuring issues are not forgotten and are actionable in the evolution pipeline.
