@@ -39,6 +39,8 @@ use {
 
 use std::error::Error;
 
+build_info::build_info!(fn build_info);
+
 fn handle_prompt(prompt: String) -> Result<(), Box<dyn Error>> {
     // Currently, we simply treat empty prompts as a no-op.
     // Future logic can include more validation.
