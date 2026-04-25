@@ -205,6 +205,14 @@ pub(crate) fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn st
                         }
                         fs::write(&placeholder_path, "Task 2 completed")?;
                     }
+                    // Special handling for Placeholder Task 3: create a third marker file.
+                    if title == "Placeholder Task 3" {
+                        let placeholder_path = base_dir.join(".greatsage").join("placeholder3.txt");
+                        if let Some(parent) = placeholder_path.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        fs::write(&placeholder_path, "Task 3 completed")?;
+                    }
                     break;
                 }
             }
@@ -320,10 +328,16 @@ mod tests {
         let log_path = base.join(".greatsage").join("evolve.log");
         assert!(log_path.is_file(), "evolve.log should be created");
         let log_content = fs::read_to_string(&log_path).expect("read evolve.log");
-        assert!(log_content.contains("Placeholder Task 1"), "log should contain task title");
+        assert!(
+            log_content.contains("Placeholder Task 1"),
+            "log should contain task title"
+        );
         // Verify placeholder marker file created.
         let placeholder_path = base.join(".greatsage").join("placeholder1.txt");
-        assert!(placeholder_path.is_file(), "placeholder1.txt should be created");
+        assert!(
+            placeholder_path.is_file(),
+            "placeholder1.txt should be created"
+        );
         let marker = fs::read_to_string(&placeholder_path).expect("read placeholder file");
         assert_eq!(marker, "Task 1 completed");
     }
@@ -343,7 +357,10 @@ mod tests {
         }
         // Verify placeholder marker file created for Task 2.
         let placeholder2_path = base.join(".greatsage").join("placeholder2.txt");
-        assert!(placeholder2_path.is_file(), "placeholder2.txt should be created");
+        assert!(
+            placeholder2_path.is_file(),
+            "placeholder2.txt should be created"
+        );
         let marker2 = fs::read_to_string(&placeholder2_path).expect("read placeholder2 file");
         assert_eq!(marker2, "Task 2 completed");
     }
