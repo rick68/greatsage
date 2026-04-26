@@ -145,9 +145,9 @@ fn main() {
         .chain(args.mcp.iter().cloned())
         .collect();
     app_config.runtime.verbose = args.verbose;
-    app_config.runtime.error_handling = args.error_handling;
+    app_config.runtime.strict_errors = args.strict_errors;
     // Capture error handling flag before moving app_config into Bevy resource.
-    let error_handling_flag = app_config.runtime.error_handling;
+    let error_handling_flag = app_config.runtime.strict_errors;
 
     if let Err(e) = validate_required(&app_config) {
         eprintln!("error: {e:#}");

@@ -82,9 +82,12 @@ pub struct Args {
     /// Enable verbose output
     #[arg(short = 'v', long, action = ArgAction::SetTrue)]
     pub verbose: bool,
-    /// Enable REPL error handling validation
+    /// Enable REPL error handling validation (experimental)
     #[arg(long, action = ArgAction::SetTrue)]
     pub error_handling: bool,
+    /// Exit REPL on internal errors (strict mode)
+    #[arg(long = "strict-errors", action = ArgAction::SetTrue)]
+    pub strict_errors: bool,
 }
 
 #[derive(Subcommand, Clone, Debug)]

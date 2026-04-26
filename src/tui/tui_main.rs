@@ -198,7 +198,9 @@ impl ToolCallEntry {
                 SPINNER[(self.start_instant.elapsed().as_millis() as usize / 100) % SPINNER.len()];
             Line::from(vec![
                 Span::from(self.summary.clone()).yellow(),
-                Span::from(format!("  {frame}  {elapsed_str}")).yellow().dim(),
+                Span::from(format!("  {frame}  {elapsed_str}"))
+                    .yellow()
+                    .dim(),
             ])
         } else if self.is_error {
             let mut spans = vec![
@@ -250,8 +252,7 @@ impl ResponseBlock {
     }
 
     fn has_spinner(&self) -> bool {
-        self.thinkings.iter().any(|tb| tb.streaming)
-            || self.tool_calls.iter().any(|tc| tc.running)
+        self.thinkings.iter().any(|tb| tb.streaming) || self.tool_calls.iter().any(|tc| tc.running)
     }
 
     /// Render all content lines for this turn.
@@ -318,8 +319,7 @@ impl ResponseBlock {
             actions.push(ClickAction::Select);
             let mut lines = lines;
             lines.push(Line::from(
-                Span::from("▌─────────────────────────────────────────────────")
-                    .light_blue(),
+                Span::from("▌─────────────────────────────────────────────────").light_blue(),
             ));
             (lines, actions)
         } else {
@@ -422,14 +422,19 @@ impl TuiMain {
     /// Return a mutable reference to the most recent `Response` block.
     fn current_response_mut(&mut self) -> Option<&mut ResponseBlock> {
         self.blocks.iter_mut().rev().find_map(|b| {
-            if let OutputBlock::Response(r) = b { Some(r) } else { None }
+            if let OutputBlock::Response(r) = b {
+                Some(r)
+            } else {
+                None
+            }
         })
     }
 
     /// Open a new agent response turn.  Must be called before any
     /// `begin_thinking` / `begin_tool_call` / `begin_streaming_text` for that turn.
     pub fn begin_response(&mut self) {
-        self.blocks.push(OutputBlock::Response(ResponseBlock::new()));
+        self.blocks
+            .push(OutputBlock::Response(ResponseBlock::new()));
     }
 
     /// Seal the current response turn once all streaming has finished.
@@ -575,9 +580,7 @@ impl TuiMain {
     /// `None` = row belongs to a `Lines` block.  The LineMap is propagated
     /// through `hard_wrap_output_lines_with_map` so that after wrapping each
     /// terminal row still knows which block it belongs to and what a click does.
-    fn rendered_flat_lines(
-        &self,
-    ) -> (Vec<Line<'static>>, Vec<Option<(usize, ClickAction)>>) {
+    fn rendered_flat_lines(&self) -> (Vec<Line<'static>>, Vec<Option<(usize, ClickAction)>>) {
         let mut lines: Vec<Line<'static>> = Vec::new();
         let mut map: Vec<Option<(usize, ClickAction)>> = Vec::new();
         for (i, block) in self.blocks.iter().enumerate() {
@@ -628,8 +631,7 @@ impl TuiMain {
                     let ch_w = ch.width().unwrap_or(1);
                     if current_width + ch_w > inner_width && current_width > 0 {
                         if !buf.is_empty() {
-                            current_spans
-                                .push(Span::styled(std::mem::take(&mut buf), style));
+                            current_spans.push(Span::styled(std::mem::take(&mut buf), style));
                         }
                         result.push(Line::from(std::mem::take(&mut current_spans)));
                         result_map.push(block_idx);
@@ -672,7 +674,6 @@ impl TuiMain {
         lines.push(current_line);
         lines
     }
-
 
     fn insert_char(&mut self, c: char) {
         self.input.insert(self.byte_index, c);
@@ -1011,16 +1012,12 @@ fn handle_global_input(
             // Toggle ThinkingBlock — targets the selected ResponseBlock when one is
             // selected, otherwise falls through to the last response turn.
             // Works from any focus area so the user needn't Tab after clicking.
-            KeyCode::Char('t')
-                if !in_input && matches!(kind, KeyEventKind::Press) =>
-            {
+            KeyCode::Char('t') if !in_input && matches!(kind, KeyEventKind::Press) => {
                 () = tui_main.toggle_last_thinking();
                 **dirty = true;
             }
             // Expand / collapse all ThinkingBlocks across every response turn.
-            KeyCode::Char('A')
-                if !in_input && matches!(kind, KeyEventKind::Press) =>
-            {
+            KeyCode::Char('A') if !in_input && matches!(kind, KeyEventKind::Press) => {
                 () = tui_main.expand_all_thinking();
                 **dirty = true;
             }
@@ -1264,7 +1261,9 @@ fn handle_mouse_input(
     use ratatui::layout::Position;
 
     for message in messages.read() {
-        let MouseEvent { kind, column, row, .. } = &**message;
+        let MouseEvent {
+            kind, column, row, ..
+        } = &**message;
         match kind {
             MouseEventKind::ScrollUp => {
                 () = tui_main.scroll_up();
@@ -1280,15 +1279,16 @@ fn handle_mouse_input(
             //   • Click anywhere else in a ResponseBlock → select / deselect.
             MouseEventKind::Down(MouseButton::Left) => {
                 let output_area = tui_main.output_area;
-                if output_area.contains(Position { x: *column, y: *row }) {
+                if output_area.contains(Position {
+                    x: *column,
+                    y: *row,
+                }) {
                     // Convert terminal row to a wrapped-line index, accounting
                     // for the 1-row top border and the current scroll offset.
-                    let inner_row =
-                        (*row).saturating_sub(output_area.top() + 1) as usize;
+                    let inner_row = (*row).saturating_sub(output_area.top() + 1) as usize;
                     let map_row = inner_row + tui_main.vertical_scroll;
 
-                    if let Some(Some((block_idx, action))) =
-                        tui_main.line_map.get(map_row).copied()
+                    if let Some(Some((block_idx, action))) = tui_main.line_map.get(map_row).copied()
                     {
                         match action {
                             ClickAction::ToggleThinking(ti) => {

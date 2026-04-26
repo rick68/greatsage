@@ -14,8 +14,8 @@ pub struct RuntimeConfig {
     pub skills: Vec<PathBuf>,
     pub mcp_servers: Vec<String>,
     pub verbose: bool,
-    /// Enable REPL error‑handling validation (experimental; default false)
-    pub error_handling: bool,
+    /// Enable REPL strict error mode (exit on internal errors)
+    pub strict_errors: bool,
 }
 
 #[non_exhaustive]
