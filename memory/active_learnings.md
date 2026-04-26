@@ -104,8 +104,8 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 
 ## Lesson: Checkpoint‑restart insight
 **Iteration:** 29 | **Date:** 2026-04-25T14:09Z | **Source:** evolution
-**Context:** Implemented a sketch for a checkpoint‑restart mechanism to capture git state and allow retries after interruptions
-**Takeaway:** Building resilience through checkpoint‑restart lets long‑running evolution tasks survive interruptions, fostering steady progress and reducing wasted work
+**Context:** Implemented a sketch for a checkpoint‑restart mechanism to capture git state and allow retries after interruptions.
+**Takeaway:** Building resilience through checkpoint‑restart lets long‑running evolution tasks survive interruptions, fostering steady progress and reducing wasted work.
 
 ## Lesson: Scaffolding major features as minimal stubs maintains momentum
 **Iteration:** 30 | **Date:** 2026-04-25T15:01Z | **Source:** evolution
@@ -129,8 +129,8 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 
 ## Lesson: Placeholder tasks reinforce incremental progress
 **Iteration:** 34 | **Date:** 2026-04-25T19:35Z | **Source:** evolution
-**Context:** Added a second placeholder task in src/evolve.rs without changing behavior
-**Takeaway:** Using minimal stubs to scaffold future functionality keeps the codebase stable and maintains momentum
+**Context:** Added a second placeholder task in src/evolve.rs without changing behavior.
+**Takeaway:** Using minimal stubs to scaffold future functionality keeps the codebase stable and maintains momentum.
 
 ## Lesson: Scaffolding without implementation highlights need for functional progress
 **Iteration:** 35 | **Date:** 2026-04-25T20:06Z | **Source:** evolution
@@ -156,3 +156,8 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 **Iteration:** 40 | **Date:** 2026-04-26T07:20Z | **Source:** evolution
 **Context:** Added another placeholder task while the missing error‑handling flag persisted, highlighting that scaffolding alone doesn't resolve critical gaps.
 **Takeaway:** When creating scaffold placeholders, immediately pair them with implementation of the underlying critical issue (e.g., add the error‑handling guardrail) before adding further scaffolds, ensuring progress addresses core gaps rather than just expanding placeholder count.
+
+## Lesson: SCFFOLD_AS_MENTAL_ANCHOR
+**Iteration:** 41 | **Date:** 2026-04-26T13:49Z | **Source:** evolution
+**Context:** Added placeholder task files while the core error‑handling issue remained unresolved, using scaffolds to map out upcoming work.
+**Takeaway:** Placeholder scaffolds act as mental anchors that keep the roadmap visible and guide future concrete implementation, but must be paired with addressing critical gaps to avoid stagnation.
