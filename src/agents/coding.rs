@@ -302,23 +302,22 @@ fn spawn_agent_task(
                     () = ctx
                         .run_on_main_thread(move |ctx| {
                             let world: &mut World = ctx.world;
-                            if let Some(usage) = final_usage {
-                                if let Some(mut total) =
+                            if let Some(usage) = final_usage
+                                && let Some(mut total) =
                                     world.get_resource_mut::<CodingAgentTotalTokenUsage>()
-                                {
-                                    let CodingAgentTotalTokenUsage(Usage {
-                                        input: dst_in,
-                                        output: dst_out,
-                                        cache_read: dst_cr,
-                                        cache_write: dst_cw,
-                                        total_tokens: dst_tt,
-                                    }) = &mut *total;
-                                    *dst_in += usage.input;
-                                    *dst_out += usage.output;
-                                    *dst_cr += usage.cache_read;
-                                    *dst_cw += usage.cache_write;
-                                    *dst_tt += usage.total_tokens;
-                                }
+                            {
+                                let CodingAgentTotalTokenUsage(Usage {
+                                    input: dst_in,
+                                    output: dst_out,
+                                    cache_read: dst_cr,
+                                    cache_write: dst_cw,
+                                    total_tokens: dst_tt,
+                                }) = &mut *total;
+                                *dst_in += usage.input;
+                                *dst_out += usage.output;
+                                *dst_cr += usage.cache_read;
+                                *dst_cw += usage.cache_write;
+                                *dst_tt += usage.total_tokens;
                             }
                             _ = world.remove_resource::<CodingAgentTask>();
                             () = world
