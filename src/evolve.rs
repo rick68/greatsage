@@ -12,7 +12,7 @@ use {
 
 /// Returns true if the given path is within a protected location that
 /// should not be modified by the evolve pipeline.
-pub(crate) fn is_protected_path(path: impl AsRef<Path>) -> bool {
+pub fn is_protected_path(path: impl AsRef<Path>) -> bool {
     // Define protected paths relative to the repository root.
     // We treat both files and directories uniformly.
     let protected = [
@@ -196,7 +196,7 @@ pub fn planning_phase_with_assessment(
 /// Reads markdown files in `session_plan/`, parses the `Title:` line,
 /// prints a message for each task, and logs the execution to `evolve.log`.
 /// Only processes files ending with `.md` and aborts if any path is protected.
-pub(crate) fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
     let base_dir = base_dir.as_ref();
     // Pre-flight: reject if any .md files exist inside a protected subdirectory
     // of base_dir. This prevents task files from being smuggled into protected
