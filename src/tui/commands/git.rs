@@ -1,7 +1,4 @@
-use ratatui::{
-    style::Stylize,
-    text::Line,
-};
+use ratatui::{style::Stylize, text::Line};
 
 /// Parses the content from a Git commit message argument.
 pub fn parse_commit_message(arg: &str) -> String {

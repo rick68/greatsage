@@ -1,11 +1,6 @@
 use {
     bevy::prelude::*,
-    ratatui::{
-        prelude::Stylize,
-        layout::Rect,
-        text::Line,
-        widgets::ScrollbarState,
-    },
+    ratatui::{layout::Rect, prelude::Stylize, text::Line, widgets::ScrollbarState},
     std::time::Instant,
     strum::{EnumCount, FromRepr},
 };
@@ -40,7 +35,11 @@ impl Iterator for TuiMainFocus {
 impl std::iter::ExactSizeIterator for TuiMainFocus {}
 impl std::iter::DoubleEndedIterator for TuiMainFocus {
     fn next_back(&mut self) -> Option<Self::Item> {
-        let next = if (*self as u8) == 0 { (Self::COUNT - 1) as u8 } else { (*self as u8) - 1 };
+        let next = if (*self as u8) == 0 {
+            (Self::COUNT - 1) as u8
+        } else {
+            (*self as u8) - 1
+        };
         TuiMainFocus::from_repr(next).inspect(|item| *self = *item)
     }
 }
@@ -151,7 +150,8 @@ pub mod action_system;
 
 impl TuiMain {
     pub fn max_scroll(&self) -> usize {
-        self.total_visual_rows().saturating_sub(self.output_area_height())
+        self.total_visual_rows()
+            .saturating_sub(self.output_area_height())
     }
 
     pub fn scroll_to_bottom(&mut self) {
@@ -165,14 +165,18 @@ impl TuiMain {
     }
 
     pub fn delete_before(&mut self) {
-        if self.byte_index == 0 { return; }
+        if self.byte_index == 0 {
+            return;
+        }
         let c = self.input[..self.byte_index].chars().next_back().unwrap();
         self.byte_index -= c.len_utf8();
         self.input.remove(self.byte_index);
     }
 
     pub fn delete_after(&mut self) {
-        if self.byte_index < self.input.len() { self.input.remove(self.byte_index); }
+        if self.byte_index < self.input.len() {
+            self.input.remove(self.byte_index);
+        }
     }
 
     pub fn cursor_left(&mut self) {
@@ -187,8 +191,12 @@ impl TuiMain {
         }
     }
 
-    pub fn cursor_to_start(&mut self) { self.byte_index = 0; }
-    pub fn cursor_to_end(&mut self) { self.byte_index = self.input.len(); }
+    pub fn cursor_to_start(&mut self) {
+        self.byte_index = 0;
+    }
+    pub fn cursor_to_end(&mut self) {
+        self.byte_index = self.input.len();
+    }
 
     pub fn set_input(&mut self, s: String) {
         self.input = s;
@@ -227,7 +235,9 @@ impl TuiMain {
     }
 
     pub fn history_prev(&mut self) {
-        if self.history.is_empty() { return; }
+        if self.history.is_empty() {
+            return;
+        }
         let new_pos = match self.history_pos {
             None => {
                 self.history_draft = self.input.clone();
@@ -267,7 +277,9 @@ impl TuiMain {
 
     pub fn scroll_down(&mut self) {
         let max = self.max_scroll();
-        if self.vertical_scroll < max { self.vertical_scroll += 1; }
+        if self.vertical_scroll < max {
+            self.vertical_scroll += 1;
+        }
     }
 
     #[allow(dead_code)]
@@ -283,13 +295,17 @@ impl TuiMain {
         self.vertical_scroll = (self.vertical_scroll + h).min(max);
     }
 
-    pub fn scroll_to_top(&mut self) { self.vertical_scroll = 0; }
+    pub fn scroll_to_top(&mut self) {
+        self.vertical_scroll = 0;
+    }
 
     pub fn total_visual_rows(&self) -> usize {
         use unicode_width::UnicodeWidthChar;
         let inner_width = self.output_area.width.saturating_sub(2) as usize;
         let (flat, _) = crate::tui::renderer::display_utils::rendered_flat_lines(self, &SPINNER);
-        if inner_width == 0 { return flat.len(); }
+        if inner_width == 0 {
+            return flat.len();
+        }
         let mut count = 0usize;
         for line in &flat {
             let mut current_width = 0usize;
@@ -310,7 +326,9 @@ impl TuiMain {
 
     pub fn toggle_last_thinking(&mut self) {
         let target = self.selected_block.or_else(|| {
-            self.blocks.iter().rposition(|b| matches!(b, OutputBlock::Response(_)))
+            self.blocks
+                .iter()
+                .rposition(|b| matches!(b, OutputBlock::Response(_)))
         });
         if let Some(idx) = target.and_then(|idx| {
             if let Some(OutputBlock::Response(resp)) = self.blocks.get_mut(idx) {
@@ -332,7 +350,11 @@ impl TuiMain {
     pub fn expand_all_thinking(&mut self) {
         for block in self.blocks.iter_mut() {
             if let OutputBlock::Response(resp) = block {
-                for tb in resp.thinkings.iter_mut() { if !tb.streaming { tb.expanded = true; } }
+                for tb in resp.thinkings.iter_mut() {
+                    if !tb.streaming {
+                        tb.expanded = true;
+                    }
+                }
             }
         }
     }
@@ -340,7 +362,11 @@ impl TuiMain {
     pub fn collapse_all_thinking(&mut self) {
         for block in self.blocks.iter_mut() {
             if let OutputBlock::Response(resp) = block {
-                for tb in resp.thinkings.iter_mut() { if !tb.streaming { tb.expanded = false; } }
+                for tb in resp.thinkings.iter_mut() {
+                    if !tb.streaming {
+                        tb.expanded = false;
+                    }
+                }
             }
         }
     }
@@ -361,35 +387,50 @@ impl TuiMain {
 
     pub fn current_response_mut(&mut self) -> Option<&mut ResponseBlock> {
         self.blocks.iter_mut().rev().find_map(|b| {
-            if let OutputBlock::Response(r) = b { Some(r) } else { None }
+            if let OutputBlock::Response(r) = b {
+                Some(r)
+            } else {
+                None
+            }
         })
     }
 
     pub fn begin_response(&mut self) {
-        self.blocks.push(OutputBlock::Response(ResponseBlock::new()));
+        self.blocks
+            .push(OutputBlock::Response(ResponseBlock::new()));
     }
 
     pub fn end_response(&mut self) {
-        if let Some(resp) = self.current_response_mut() { resp.sealed = true; }
+        if let Some(resp) = self.current_response_mut() {
+            resp.sealed = true;
+        }
     }
 
     pub fn begin_thinking(&mut self) {
-        if let Some(resp) = self.current_response_mut() { resp.thinkings.push(ThinkingBlock::new()); }
+        if let Some(resp) = self.current_response_mut() {
+            resp.thinkings.push(ThinkingBlock::new());
+        }
     }
 
     pub fn append_thinking(&mut self, raw: &str) {
-        if let Some(tb) = self.current_response_mut().and_then(|resp| {
-            resp.thinkings.iter_mut().rev().find(|tb| tb.streaming)
-        }) {
+        if let Some(tb) = self
+            .current_response_mut()
+            .and_then(|resp| resp.thinkings.iter_mut().rev().find(|tb| tb.streaming))
+        {
             tb.raw.push_str(raw);
-            tb.lines = tb.raw.lines().map(|l| Line::from(ratatui::text::Span::from(l.to_string()).dim())).collect();
+            tb.lines = tb
+                .raw
+                .lines()
+                .map(|l| Line::from(ratatui::text::Span::from(l.to_string()).dim()))
+                .collect();
         }
     }
 
     pub fn end_thinking(&mut self, token_count: u32) {
-        if let Some(tb) = self.current_response_mut().and_then(|resp| {
-            resp.thinkings.iter_mut().rev().find(|tb| tb.streaming)
-        }) {
+        if let Some(tb) = self
+            .current_response_mut()
+            .and_then(|resp| resp.thinkings.iter_mut().rev().find(|tb| tb.streaming))
+        {
             tb.elapsed_secs = tb.start_instant.elapsed().as_secs_f32();
             tb.token_count = token_count;
             tb.streaming = false;
@@ -409,9 +450,10 @@ impl TuiMain {
     }
 
     pub fn finish_tool_call(&mut self, is_error: bool, error_snippet: String) {
-        if let Some(tc) = self.current_response_mut().and_then(|resp| {
-            resp.tool_calls.iter_mut().rev().find(|tc| tc.running)
-        }) {
+        if let Some(tc) = self
+            .current_response_mut()
+            .and_then(|resp| resp.tool_calls.iter_mut().rev().find(|tc| tc.running))
+        {
             tc.running = false;
             tc.is_error = is_error;
             tc.error_snippet = error_snippet;
@@ -419,14 +461,20 @@ impl TuiMain {
     }
 
     pub fn begin_streaming_text(&mut self) {
-        if let Some(resp) = self.current_response_mut() { resp.text_streaming = true; }
+        if let Some(resp) = self.current_response_mut() {
+            resp.text_streaming = true;
+        }
     }
 
     pub fn update_streaming_text(&mut self, new_lines: Vec<Line<'static>>) {
-        if let Some(resp) = self.current_response_mut() { resp.text_lines = new_lines; }
+        if let Some(resp) = self.current_response_mut() {
+            resp.text_lines = new_lines;
+        }
     }
 
     pub fn finalize_streaming_text(&mut self) {
-        if let Some(resp) = self.current_response_mut() { resp.text_streaming = false; }
+        if let Some(resp) = self.current_response_mut() {
+            resp.text_streaming = false;
+        }
     }
 }

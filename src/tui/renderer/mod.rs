@@ -21,10 +21,10 @@ use {
     },
     bevy_ratatui::RatatuiContext,
     ratatui::{
+        Frame,
         layout::{Constraint, Layout},
         style::Style,
         widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation},
-        Frame,
     },
     std::time::Duration,
 };
@@ -93,21 +93,60 @@ fn render_tui(
     let output_height = output_area.height.saturating_sub(2) as usize;
     let new_max = total_rows.saturating_sub(output_height);
     tui.vertical_scroll = tui.vertical_scroll.min(new_max);
-    let output_border_color = if tui.focused == TuiMainFocus::OutputArea { COLOR_BORDER_FOCUSED } else { COLOR_BORDER_UNFOCUSED };
-    let output = Paragraph::new(wrapped).style(Style::default()).block(Block::bordered().title("Output").border_style(Style::default().fg(output_border_color))).scroll((tui.vertical_scroll as u16, 0));
+    let output_border_color = if tui.focused == TuiMainFocus::OutputArea {
+        COLOR_BORDER_FOCUSED
+    } else {
+        COLOR_BORDER_UNFOCUSED
+    };
+    let output = Paragraph::new(wrapped)
+        .style(Style::default())
+        .block(
+            Block::bordered()
+                .title("Output")
+                .border_style(Style::default().fg(output_border_color)),
+        )
+        .scroll((tui.vertical_scroll as u16, 0));
     let scroll_positions = total_rows.saturating_sub(output_height) + 1;
-    tui.vertical_scroll_state = tui.vertical_scroll_state.content_length(scroll_positions).viewport_content_length(output_height).position(tui.vertical_scroll);
+    tui.vertical_scroll_state = tui
+        .vertical_scroll_state
+        .content_length(scroll_positions)
+        .viewport_content_length(output_height)
+        .position(tui.vertical_scroll);
     frame.render_widget(output, output_area);
-    frame.render_stateful_widget(Scrollbar::new(ScrollbarOrientation::VerticalRight).begin_symbol(Some("↑")).end_symbol(Some("↓")), output_area, &mut tui.vertical_scroll_state);
+    frame.render_stateful_widget(
+        Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("↑"))
+            .end_symbol(Some("↓")),
+        output_area,
+        &mut tui.vertical_scroll_state,
+    );
     let status_text = if let Some(usage) = token_usage {
         let CodingAgentTotalTokenUsage(usage) = usage;
-        format!(" 🎯 Input: {} | Output: {} | Cache Read: {} | Cache Write: {}", usage.input, usage.output, usage.cache_read, usage.cache_write)
-    } else { " 🎯 Token usage: Waiting for first response...".to_string() };
-    let status = Paragraph::new(status_text).style(Style::default().fg(ratatui::style::Color::Rgb(100, 150, 200))).block(Block::bordered().title("Token Usage"));
+        format!(
+            " 🎯 Input: {} | Output: {} | Cache Read: {} | Cache Write: {}",
+            usage.input, usage.output, usage.cache_read, usage.cache_write
+        )
+    } else {
+        " 🎯 Token usage: Waiting for first response...".to_string()
+    };
+    let status = Paragraph::new(status_text)
+        .style(Style::default().fg(ratatui::style::Color::Rgb(100, 150, 200)))
+        .block(Block::bordered().title("Token Usage"));
     frame.render_widget(status, status_area);
-    let input_text: Vec<ratatui::text::Line<'_>> = input_lines.iter().map(|l| ratatui::text::Line::from(l.as_str())).collect();
-    let input_border_color = if tui.focused == TuiMainFocus::InputArea { COLOR_BORDER_FOCUSED } else { COLOR_BORDER_UNFOCUSED };
-    let input = Paragraph::new(input_text).style(Style::default()).block(Block::bordered().title("Input").border_style(Style::default().fg(input_border_color)));
+    let input_text: Vec<ratatui::text::Line<'_>> = input_lines
+        .iter()
+        .map(|l| ratatui::text::Line::from(l.as_str()))
+        .collect();
+    let input_border_color = if tui.focused == TuiMainFocus::InputArea {
+        COLOR_BORDER_FOCUSED
+    } else {
+        COLOR_BORDER_UNFOCUSED
+    };
+    let input = Paragraph::new(input_text).style(Style::default()).block(
+        Block::bordered()
+            .title("Input")
+            .border_style(Style::default().fg(input_border_color)),
+    );
     frame.render_widget(input, input_area);
     if tui.show_cursor && tui.focused == TuiMainFocus::InputArea {
         use unicode_width::UnicodeWidthStr;
@@ -117,12 +156,21 @@ fn render_tui(
             let mut result = (0usize, cursor_total);
             for (row, line) in input_lines.iter().enumerate() {
                 let line_w = line.width();
-                if cursor_total <= accumulated + line_w { result = (row, cursor_total - accumulated); break; }
-                if row + 1 < input_lines.len() { accumulated += line_w; }
-                else { result = (row, cursor_total - accumulated); }
+                if cursor_total <= accumulated + line_w {
+                    result = (row, cursor_total - accumulated);
+                    break;
+                }
+                if row + 1 < input_lines.len() {
+                    accumulated += line_w;
+                } else {
+                    result = (row, cursor_total - accumulated);
+                }
             }
             result
         };
-        frame.set_cursor_position((input_area.left() + cursor_col as u16 + 1, input_area.top() + cursor_row as u16 + 1));
+        frame.set_cursor_position((
+            input_area.left() + cursor_col as u16 + 1,
+            input_area.top() + cursor_row as u16 + 1,
+        ));
     }
 }

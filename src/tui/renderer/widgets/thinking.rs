@@ -14,14 +14,22 @@ pub fn render_thinking_header(tb: &ThinkingBlock, spinner: &[&str]) -> Line<'sta
         Line::from(vec![
             Span::from("💭 Thinking  "),
             Span::from(frame.to_string()).yellow(),
-            Span::from(format!("  {:.1}s", tb.start_instant.elapsed().as_secs_f32())).dim(),
+            Span::from(format!(
+                "  {:.1}s",
+                tb.start_instant.elapsed().as_secs_f32()
+            ))
+            .dim(),
         ])
     } else {
         let arrow = if tb.expanded { "▼" } else { "▶" };
         let hint = if tb.expanded { "" } else { "  (t)" };
         Line::from(vec![
             Span::from(format!("💭 Thinking  {arrow}  ")),
-            Span::from(format!("[{:.1}s · {} tokens]", tb.elapsed_secs, tb.token_count)).dim(),
+            Span::from(format!(
+                "[{:.1}s · {} tokens]",
+                tb.elapsed_secs, tb.token_count
+            ))
+            .dim(),
             Span::from(hint).dark_gray(),
         ])
     }

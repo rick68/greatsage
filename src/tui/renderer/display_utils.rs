@@ -1,7 +1,5 @@
 use {
-    crate::tui::core::{
-        ClickAction, OutputBlock, TuiMain,
-    },
+    crate::tui::core::{ClickAction, OutputBlock, TuiMain},
     unicode_width::{UnicodeWidthChar, UnicodeWidthStr},
 };
 
@@ -30,7 +28,10 @@ pub fn hard_wrap_output_lines_with_map(
     lines: &[ratatui::text::Line<'_>],
     map: &[Option<(usize, ClickAction)>],
     inner_width: usize,
-) -> (Vec<ratatui::text::Line<'static>>, Vec<Option<(usize, ClickAction)>>) {
+) -> (
+    Vec<ratatui::text::Line<'static>>,
+    Vec<Option<(usize, ClickAction)>>,
+) {
     use ratatui::text::{Line, Span};
     let mut wrapped = Vec::new();
     let mut wrapped_map = Vec::new();
@@ -45,8 +46,12 @@ pub fn hard_wrap_output_lines_with_map(
                 for (idx, c) in span_text.char_indices() {
                     let c_width = c.width().unwrap_or(0);
                     if current_width + word_width + c_width > inner_width {
-                        if word_width > 0 { break_idx = idx; }
-                        else { break_idx = idx + c.len_utf8(); word_width += c_width; }
+                        if word_width > 0 {
+                            break_idx = idx;
+                        } else {
+                            break_idx = idx + c.len_utf8();
+                            word_width += c_width;
+                        }
                         break;
                     }
                     word_width += c_width;
@@ -75,7 +80,13 @@ pub fn display_index(tui: &TuiMain) -> usize {
 }
 
 /// Flattens all content blocks into visual lines.
-pub fn rendered_flat_lines(tui: &TuiMain, spinner: &[&str]) -> (Vec<ratatui::text::Line<'static>>, Vec<Option<(usize, ClickAction)>>) {
+pub fn rendered_flat_lines(
+    tui: &TuiMain,
+    spinner: &[&str],
+) -> (
+    Vec<ratatui::text::Line<'static>>,
+    Vec<Option<(usize, ClickAction)>>,
+) {
     let mut all_lines = Vec::new();
     let mut map = Vec::new();
     for (block_idx, block) in tui.blocks.iter().enumerate() {
@@ -88,7 +99,12 @@ pub fn rendered_flat_lines(tui: &TuiMain, spinner: &[&str]) -> (Vec<ratatui::tex
             }
             OutputBlock::Response(resp) => {
                 let is_selected = tui.selected_block == Some(block_idx);
-                let (lines, actions) = crate::tui::renderer::widgets::response::render_response_lines(resp, is_selected, spinner);
+                let (lines, actions) =
+                    crate::tui::renderer::widgets::response::render_response_lines(
+                        resp,
+                        is_selected,
+                        spinner,
+                    );
                 for (line, action) in lines.into_iter().zip(actions) {
                     all_lines.push(line);
                     map.push(Some((block_idx, action)));

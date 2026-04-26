@@ -1,7 +1,4 @@
-use ratatui::{
-    style::Stylize,
-    text::Line,
-};
+use ratatui::{style::Stylize, text::Line};
 
 /// Generates help text lines.
 pub fn help_lines() -> Vec<Line<'static>> {

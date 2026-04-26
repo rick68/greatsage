@@ -1,7 +1,4 @@
-use {
-    bevy::prelude::Resource,
-    bevy::ecs::message::Message,
-};
+use {bevy::ecs::message::Message, bevy::prelude::Resource};
 
 /// Core resource for triggering UI redraws.
 #[derive(bevy::prelude::Deref, bevy::prelude::DerefMut, Resource)]
@@ -37,7 +34,10 @@ pub enum TuiAction {
     Submit,
     ScrollUp,
     ScrollDown,
-    ToggleThinking { block_index: usize, thinking_index: usize },
+    ToggleThinking {
+        block_index: usize,
+        thinking_index: usize,
+    },
     ToggleLastThinking,
     ExpandAllThinking,
     CollapseAllThinking,

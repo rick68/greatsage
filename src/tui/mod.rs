@@ -1,8 +1,8 @@
+pub mod commands;
 pub mod core;
 pub mod events;
 pub mod input;
 pub mod renderer;
-pub mod commands;
 
 pub use self::core::{TuiMain, TuiMainFocus};
 pub use self::events::RenderNeeded;
@@ -11,22 +11,22 @@ pub use self::events::RenderNeeded;
 mod tests;
 
 use {
+    crate::tui::events::{TuiAction, TuiCommandEvent},
     bevy::{
         app::{App, AppExit, PreUpdate, Startup, Update},
         ecs::{
-            change_detection::ResMut, 
-            message::MessageReader, 
+            change_detection::ResMut,
+            message::MessageReader,
             schedule::{IntoScheduleConfigs, common_conditions::resource_exists},
         },
         state::{app::AppExtStates, condition::in_state},
         utils::default,
     },
     bevy_ratatui::{
-        RatatuiPlugins, 
+        RatatuiPlugins,
+        crossterm::{cursor::SetCursorStyle, execute},
         event::ResizeMessage,
-        crossterm::{execute, cursor::SetCursorStyle},
     },
-    crate::tui::events::{TuiAction, TuiCommandEvent},
     std::io::stdout,
 };
 
@@ -77,6 +77,6 @@ pub fn tui_plugin(app: &mut App) {
             (
                 core::action_system::tui_action_system,
                 renderer::draw_scene_system.run_if(resource_exists::<RenderNeeded>),
-            )
+            ),
         );
 }

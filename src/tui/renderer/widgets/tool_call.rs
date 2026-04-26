@@ -15,7 +15,9 @@ pub fn render_tool_call(tc: &ToolCallEntry, spinner: &[&str]) -> Line<'static> {
         let frame = spinner[(ms / 100) % spinner.len()];
         Line::from(vec![
             Span::from(tc.summary.clone()).yellow(),
-            Span::from(format!("  {}  {}", frame, elapsed_str)).yellow().dim(),
+            Span::from(format!("  {}  {}", frame, elapsed_str))
+                .yellow()
+                .dim(),
         ])
     } else if tc.is_error {
         let mut spans = vec![
