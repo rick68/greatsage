@@ -235,13 +235,21 @@ fn main() {
                         eprintln!("Prompt handling error: {e}");
                         return;
                     }
-                    // Wrap send in panic catcher and forward errors.
-                    let result =
-                        std::panic::catch_unwind(|| channel.sender.send(prompt_clone.clone()));
-                    match result {
-                        Ok(Ok(())) => {}
-                        Ok(Err(e)) => eprintln!("Error sending prompt: {e:?}"),
-                        Err(panic) => eprintln!("Panic while sending prompt: {panic:?}"),
+                    // Conditionally wrap send in panic catcher based on REPL error handling flag.
+                    if error_handling {
+                        // Wrap send in panic catcher and forward errors.
+                        let result =
+                            std::panic::catch_unwind(|| channel.sender.send(prompt_clone.clone()));
+                        match result {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => eprintln!("Error sending prompt: {e:?}"),
+                            Err(panic) => eprintln!("Panic while sending prompt: {panic:?}"),
+                        }
+                    } else {
+                        // Direct send without panic catching.
+                        if let Err(e) = channel.sender.send(prompt_clone.clone()) {
+                            eprintln!("Error sending prompt: {e:?}");
+                        }
                     }
                 })
                 .run_if(run_once),

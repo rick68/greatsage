@@ -108,7 +108,11 @@ pub fn breathing_cursor_style(phase: f32) -> Style {
     let bg_t = 0.05 + 0.95 * brightness;
     let bg = Color::Indexed(232 + (bg_t * 23.0).round() as u8);
     // Adaptive contrast: pick whichever text colour contrasts the background.
-    let fg = if brightness > 0.5 { Color::Black } else { Color::White };
+    let fg = if brightness > 0.5 {
+        Color::Black
+    } else {
+        Color::White
+    };
     Style::default().bg(bg).fg(fg)
 }
 
