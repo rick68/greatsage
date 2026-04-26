@@ -1,3 +1,10 @@
+#![allow(
+    dead_code,
+    unused,
+    clippy::collapsible_if,
+    clippy::single_match,
+    clippy::needless_borrow
+)]
 //! # TUI Main — Output Rendering Architecture
 //!
 //! ## OutputBlock model

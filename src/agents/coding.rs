@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if, clippy::needless_borrow)]
 //! # Coding Agent — Event Handling
 //!
 //! ## Agent event flow
