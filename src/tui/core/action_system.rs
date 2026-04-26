@@ -7,15 +7,12 @@ use {
             events::{RenderNeeded, TuiAction},
         },
     },
+    bevy::app::AppExit,
     bevy::ecs::{
         change_detection::{NonSendMut, Res, ResMut},
         message::{MessageReader, MessageWriter},
     },
-    bevy::app::AppExit,
-    ratatui::{
-        prelude::Stylize,
-        text::Line,
-    },
+    ratatui::{prelude::Stylize, text::Line},
 };
 
 /// Listens for TuiAction events and performs corresponding data operations on TuiMain.
@@ -104,13 +101,18 @@ pub fn tui_action_system(
             } => {
                 let bi = *block_index;
                 let ti = *thinking_index;
-                if let Some(tb) = tui.blocks.get_mut(bi).and_then(|b| {
-                    if let OutputBlock::Response(resp) = b {
-                        resp.thinkings.get_mut(ti)
-                    } else {
-                        None
-                    }
-                }).filter(|tb| !tb.streaming) {
+                if let Some(tb) = tui
+                    .blocks
+                    .get_mut(bi)
+                    .and_then(|b| {
+                        if let OutputBlock::Response(resp) = b {
+                            resp.thinkings.get_mut(ti)
+                        } else {
+                            None
+                        }
+                    })
+                    .filter(|tb| !tb.streaming)
+                {
                     tb.expanded = !tb.expanded;
                 }
                 tui.selected_block = Some(bi);
