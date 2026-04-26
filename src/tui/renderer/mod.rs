@@ -5,10 +5,8 @@
 //! 1. [`draw_scene_system`] ticks the cursor-blink and spinner timers.
 //! 2. Calls [`render_tui`], which:
 //!    a. Computes input-box line count to determine layout.
-//!    b. Flattens all output blocks into a `Vec<Line>` + parallel `line_map`
-//!       via [`display_utils::rendered_flat_lines`].
-//!    c. Word-wraps both to the terminal width via
-//!       [`display_utils::hard_wrap_output_lines_with_map`].
+//!    b. Flattens all output blocks into a `Vec<Line>` + parallel `line_map` via [`display_utils::rendered_flat_lines`].
+//!    c. Word-wraps both to the terminal width via [`display_utils::hard_wrap_output_lines_with_map`].
 //!    d. Stores the wrapped `line_map` back into [`TuiMain`] for the mouse handler.
 //!    e. Renders Output / Status / Input panels with focus-based border colors.
 //!    f. Positions the software cursor inside the Input panel.
