@@ -384,10 +384,10 @@ pub(crate) fn truncate(s: &str, max: usize) -> &str {
 fn render_markdown(text: &str) -> Vec<Line<'static>> {
     let skin = termimad::MadSkin::default();
     let mut buf: Vec<u8> = Vec::new();
-    if skin.write_text_on(&mut buf, text).is_ok() {
-        if let Ok(parsed) = buf.into_text() {
-            return parsed.lines;
-        }
+    if skin.write_text_on(&mut buf, text).is_ok()
+        && let Ok(parsed) = buf.into_text()
+    {
+        return parsed.lines;
     }
     // Fallback: raw line splitting
     text.lines().map(|l| Line::raw(l.to_string())).collect()
@@ -588,7 +588,7 @@ fn handle_coding_agent_events(
                         // Render the full buffer as markdown before sealing the block.
                         // During streaming we use raw lines for speed; at the end we
                         // upgrade to fully rendered markdown via termimad → ansi-to-tui.
-                        let md_lines = render_markdown(&buf);
+                        let md_lines = render_markdown(buf);
                         () = tui.update_streaming_text(md_lines);
                         () = tui.finalize_streaming_text();
                     }

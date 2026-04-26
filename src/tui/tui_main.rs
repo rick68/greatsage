@@ -263,11 +263,11 @@ impl TuiMain {
     #[allow(dead_code)]
     pub fn replace_last_line(&mut self, line: Line<'static>) {
         for block in self.blocks.iter_mut().rev() {
-            if let OutputBlock::Lines(lines) = block {
-                if let Some(last) = lines.last_mut() {
-                    *last = line;
-                    return;
-                }
+            if let OutputBlock::Lines(lines) = block
+                && let Some(last) = lines.last_mut()
+            {
+                *last = line;
+                return;
             }
         }
     }
@@ -304,13 +304,12 @@ impl TuiMain {
                 error_snippet: es,
                 ..
             } = block
+                && *running
             {
-                if *running {
-                    *running = false;
-                    *ie = is_error;
-                    *es = error_snippet;
-                    return;
-                }
+                *running = false;
+                *ie = is_error;
+                *es = error_snippet;
+                return;
             }
         }
     }
@@ -337,13 +336,12 @@ impl TuiMain {
             .blocks
             .iter()
             .rposition(|b| matches!(b, OutputBlock::StreamingText { .. }))
+            && let OutputBlock::StreamingText { header, lines } = self.blocks.remove(idx)
         {
-            if let OutputBlock::StreamingText { header, lines } = self.blocks.remove(idx) {
-                let mut all = header;
-                all.extend(lines);
-                all.push(divider_line());
-                self.blocks.insert(idx, OutputBlock::Lines(all));
-            }
+            let mut all = header;
+            all.extend(lines);
+            all.push(divider_line());
+            self.blocks.insert(idx, OutputBlock::Lines(all));
         }
     }
 
@@ -391,11 +389,11 @@ impl TuiMain {
     /// Toggle expanded/collapsed on the most recent completed ThinkingBlock.
     fn toggle_last_thinking(&mut self) {
         for block in self.blocks.iter_mut().rev() {
-            if let OutputBlock::Thinking(tb) = block {
-                if !tb.streaming {
-                    tb.expanded = !tb.expanded;
-                    return;
-                }
+            if let OutputBlock::Thinking(tb) = block
+                && !tb.streaming
+            {
+                tb.expanded = !tb.expanded;
+                return;
             }
         }
     }
@@ -403,10 +401,10 @@ impl TuiMain {
     /// Expand all completed ThinkingBlocks.
     fn expand_all_thinking(&mut self) {
         for block in self.blocks.iter_mut() {
-            if let OutputBlock::Thinking(tb) = block {
-                if !tb.streaming {
-                    tb.expanded = true;
-                }
+            if let OutputBlock::Thinking(tb) = block
+                && !tb.streaming
+            {
+                tb.expanded = true;
             }
         }
     }
@@ -414,10 +412,10 @@ impl TuiMain {
     /// Collapse all completed ThinkingBlocks.
     fn collapse_all_thinking(&mut self) {
         for block in self.blocks.iter_mut() {
-            if let OutputBlock::Thinking(tb) = block {
-                if !tb.streaming {
-                    tb.expanded = false;
-                }
+            if let OutputBlock::Thinking(tb) = block
+                && !tb.streaming
+            {
+                tb.expanded = false;
             }
         }
     }
