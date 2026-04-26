@@ -39,7 +39,7 @@ use {
     super::RenderNeeded,
     crate::agents::{CodingAgentPromptChannel, CodingAgentTotalTokenUsage},
     bevy::{
-        app::{App, AppExit, PreUpdate, Update},
+        app::{App, AppExit, PreUpdate, Startup, Update},
         ecs::{
             change_detection::{NonSendMut, Res, ResMut},
             message::{MessageReader, MessageWriter},
@@ -1123,6 +1123,13 @@ pub(crate) fn handle_slash_command(cmd: &str) -> Vec<Line<'static>> {
     }
 }
 
+/// Restore the block cursor shape that crossterm/raw-mode may have overridden.
+/// Blinking is driven by our software timer (show_cursor toggle); the cursor
+/// shape itself should be a steady block so the show/hide cycle looks correct.
+fn setup_cursor() {
+    let _ = execute!(stdout(), SetCursorStyle::SteadyBlock);
+}
+
 fn handle_input_area_input(
     mut messages: MessageReader<KeyMessage>,
     mut tui_main: NonSendMut<TuiMain>,
@@ -1376,18 +1383,11 @@ fn draw_scene_system(
     Ok(())
 }
 
-/// Restore the block cursor shape that crossterm/raw-mode may have overridden.
-/// Blinking is driven by our software timer (show_cursor toggle); the cursor
-/// shape itself should be a steady block so the show/hide cycle looks correct.
-fn setup_cursor(_: bevy::ecs::system::Commands) {
-    let _ = execute!(stdout(), SetCursorStyle::SteadyBlock);
-}
-
 pub fn plugin(app: &mut App) {
     _ = app
         .init_non_send_resource::<TuiMain>()
         .init_state::<TuiMainFocus>()
-        .add_systems(bevy::app::Startup, setup_cursor)
+        .add_systems(Startup, setup_cursor)
         .add_systems(
             PreUpdate,
             (
