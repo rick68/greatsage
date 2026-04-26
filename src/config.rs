@@ -134,6 +134,7 @@ impl Default for ToolsFileConfig {
 pub struct TuiFileConfig {
     pub frames_per_second: f32,
     pub cursor_blink_ms: u64,
+    pub cursor_idle_to_breathing_ms: u64,
 }
 
 impl Default for TuiFileConfig {
@@ -141,6 +142,7 @@ impl Default for TuiFileConfig {
         Self {
             frames_per_second: 30.0,
             cursor_blink_ms: 530,
+            cursor_idle_to_breathing_ms: 60_000,
         }
     }
 }
@@ -219,6 +221,7 @@ impl AppConfig {
             ConfigKey::ToolsTruncationTailLines => self.tools.truncation_tail_lines.to_string(),
             ConfigKey::TuiFramesPerSecond => self.tui.frames_per_second.to_string(),
             ConfigKey::TuiCursorBlinkMs => self.tui.cursor_blink_ms.to_string(),
+            ConfigKey::TuiCursorIdleToBreathingMs => self.tui.cursor_idle_to_breathing_ms.to_string(),
             ConfigKey::PermissionsAllowedDir => self.permissions.allowed_dir.clone(),
             ConfigKey::McpSseTransports => self.mcp.sse_transports.join(", "),
             ConfigKey::McpStdioTransports => self.mcp.stdio_transports.join(", "),
@@ -307,6 +310,13 @@ impl AppConfig {
                         reason: format!("'{value}' is not a whole number"),
                     })?;
             }
+            ConfigKey::TuiCursorIdleToBreathingMs => {
+                self.tui.cursor_idle_to_breathing_ms =
+                    value.parse().map_err(|_| ConfigError::InvalidValue {
+                        key: key_name(),
+                        reason: format!("'{value}' is not a whole number"),
+                    })?;
+            }
             ConfigKey::PermissionsAllowedDir => {
                 self.permissions.allowed_dir = value.to_string();
             }
@@ -358,6 +368,8 @@ pub enum ConfigKey {
     TuiFramesPerSecond,
     #[value(name = "tui.cursor_blink_ms")]
     TuiCursorBlinkMs,
+    #[value(name = "tui.cursor_idle_to_breathing_ms")]
+    TuiCursorIdleToBreathingMs,
     #[value(name = "permissions.allowed_dir")]
     PermissionsAllowedDir,
     #[value(name = "mcp.sse_transports")]
