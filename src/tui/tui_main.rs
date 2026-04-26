@@ -68,6 +68,15 @@ use {
 };
 
 const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
+
+/// What happens when the user left-clicks a row in the output area.
+#[derive(Clone, Copy, PartialEq)]
+enum ClickAction {
+    /// Clicking this row selects / deselects the owning `ResponseBlock`.
+    Select,
+    /// Clicking this row toggles `thinkings[idx]` inside the `ResponseBlock`.
+    ToggleThinking(usize),
+}
 const PROMPT_PREFIX: &str = "🤖 > ";
 const SPINNER: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 
@@ -171,32 +180,163 @@ impl ThinkingBlock {
     }
 }
 
-/// A structural unit of TUI output.
+/// A single tool invocation within a [`ResponseBlock`].
+struct ToolCallEntry {
+    summary: String,
+    running: bool,
+    is_error: bool,
+    error_snippet: String,
+    start_instant: Instant,
+}
+
+impl ToolCallEntry {
+    fn render(&self) -> Line<'static> {
+        let elapsed = self.start_instant.elapsed().as_secs_f32();
+        let elapsed_str = format!("{elapsed:.1}s");
+        if self.running {
+            let frame =
+                SPINNER[(self.start_instant.elapsed().as_millis() as usize / 100) % SPINNER.len()];
+            Line::from(vec![
+                Span::from(self.summary.clone()).yellow(),
+                Span::from(format!("  {frame}  {elapsed_str}")).yellow().dim(),
+            ])
+        } else if self.is_error {
+            let mut spans = vec![
+                Span::from(self.summary.clone()).red(),
+                Span::from(format!("  ❌  {elapsed_str}")).red(),
+            ];
+            if !self.error_snippet.is_empty() {
+                spans.push(Span::from(format!("  {}", self.error_snippet)).red().dim());
+            }
+            Line::from(spans)
+        } else {
+            Line::from(vec![
+                Span::from(self.summary.clone()),
+                Span::from(format!("  ✅  {elapsed_str}")).dim(),
+            ])
+        }
+    }
+}
+
+/// One complete (or in-progress) agent response turn.
 ///
-/// Using `Vec<OutputBlock>` instead of a flat `Vec<Line>` lets blocks be
-/// updated or toggled in-place without rebuilding the entire line list.
-pub enum OutputBlock {
-    /// Static lines: status messages, completed responses.
-    Lines(Vec<Line<'static>>),
-    /// Agent text currently being streamed — `lines` is replaced on each delta.
-    StreamingText {
-        header: Vec<Line<'static>>,
-        lines: Vec<Line<'static>>,
-    },
-    /// Extended-thinking reasoning block.
-    Thinking(ThinkingBlock),
-    /// A single tool invocation — one line that updates from spinner to ✅/❌.
+/// Groups the extended-thinking block(s), all tool calls made during the turn,
+/// and the final text response into a single visual unit.
+///
+/// Click with the mouse to **select** a block; while selected, pressing `t`
+/// toggles the ThinkingBlock inside that specific turn.  `a`/`A` operate on
+/// all turns at once.
+pub struct ResponseBlock {
+    thinkings: Vec<ThinkingBlock>,
+    tool_calls: Vec<ToolCallEntry>,
+    /// Raw accumulated text; kept for future markdown re-render passes.
+    #[allow(dead_code)]
+    text_raw: String,
+    text_lines: Vec<Line<'static>>,
+    text_streaming: bool,
+    sealed: bool,
+}
+
+impl ResponseBlock {
+    fn new() -> Self {
+        Self {
+            thinkings: Vec::new(),
+            tool_calls: Vec::new(),
+            text_raw: String::new(),
+            text_lines: Vec::new(),
+            text_streaming: false,
+            sealed: false,
+        }
+    }
+
+    fn has_spinner(&self) -> bool {
+        self.thinkings.iter().any(|tb| tb.streaming)
+            || self.tool_calls.iter().any(|tc| tc.running)
+    }
+
+    /// Render all content lines for this turn.
     ///
-    /// On `begin_tool_call` the line shows a spinner and live elapsed time.
-    /// On `finish_tool_call` it transitions to a ✅/❌ with final elapsed time.
-    ToolCall {
-        summary: String,
-        running: bool,
-        is_error: bool,
-        /// Truncated error message for failed calls (empty for success).
-        error_snippet: String,
-        start_instant: Instant,
-    },
+    /// Returns `(lines, actions)` where every entry in `actions` corresponds
+    /// to the same-index entry in `lines` and describes what a left-click on
+    /// that row should do:
+    /// - `ClickAction::ToggleThinking(i)` — the row is the `i`-th thinking
+    ///   header; clicking it toggles `thinkings[i]`.
+    /// - `ClickAction::Select` — any other row; clicking selects the block.
+    ///
+    /// When `selected` is true every content line receives a cyan `▌ ` gutter
+    /// and the bottom rule becomes cyan.
+    fn render_lines(&self, selected: bool) -> (Vec<Line<'static>>, Vec<ClickAction>) {
+        let mut content: Vec<Line<'static>> = Vec::new();
+        let mut actions: Vec<ClickAction> = Vec::new();
+
+        // Thinking blocks — header row gets ToggleThinking, body rows get Select.
+        for (ti, tb) in self.thinkings.iter().enumerate() {
+            content.push(tb.render_header());
+            actions.push(ClickAction::ToggleThinking(ti));
+            if tb.streaming || tb.expanded {
+                for line in &tb.lines {
+                    let mut spans = vec![Span::from("  │ ").dim()];
+                    spans.extend(line.spans.iter().cloned());
+                    content.push(Line::from(spans));
+                    actions.push(ClickAction::Select);
+                }
+                if !tb.streaming {
+                    content.push(Line::from(Span::from("  └─").dim()));
+                    actions.push(ClickAction::Select);
+                }
+            }
+        }
+
+        // Tool calls
+        for tc in &self.tool_calls {
+            content.push(tc.render());
+            actions.push(ClickAction::Select);
+        }
+
+        // Text — blank separator before text when other content precedes it
+        if !self.text_lines.is_empty() || self.text_streaming {
+            if !self.thinkings.is_empty() || !self.tool_calls.is_empty() {
+                content.push(Line::from(""));
+                actions.push(ClickAction::Select);
+            }
+            for line in &self.text_lines {
+                content.push(line.clone());
+                actions.push(ClickAction::Select);
+            }
+        }
+
+        // Bottom rule (always Select)
+        if selected {
+            let lines: Vec<Line<'static>> = content
+                .into_iter()
+                .map(|line| {
+                    let mut spans = vec![Span::from("▌ ").light_blue()];
+                    spans.extend(line.spans);
+                    Line::from(spans)
+                })
+                .collect();
+            actions.push(ClickAction::Select);
+            let mut lines = lines;
+            lines.push(Line::from(
+                Span::from("▌─────────────────────────────────────────────────")
+                    .light_blue(),
+            ));
+            (lines, actions)
+        } else {
+            actions.push(ClickAction::Select);
+            let mut lines = content;
+            lines.push(divider_line());
+            (lines, actions)
+        }
+    }
+}
+
+/// A structural unit of TUI output.
+pub enum OutputBlock {
+    /// Static lines: status messages, startup info, slash command output.
+    Lines(Vec<Line<'static>>),
+    /// One complete (or in-progress) agent response turn.
+    Response(ResponseBlock),
 }
 
 fn divider_line() -> Line<'static> {
@@ -216,6 +356,12 @@ pub struct TuiMain {
     focused: TuiMainFocus,
     vertical_scroll: usize,
     vertical_scroll_state: ScrollbarState,
+    /// Maps each post-wrap output row to `(block_index, ClickAction)`.
+    /// `None` for rows that belong to a `Lines` block.  Updated every frame in `draw`.
+    line_map: Vec<Option<(usize, ClickAction)>>,
+    /// Index of the currently selected `Response` block (`None` = nothing selected).
+    /// Set by mouse click; used by `t` to target the right ThinkingBlock.
+    selected_block: Option<usize>,
 }
 
 impl TuiMain {
@@ -259,7 +405,6 @@ impl TuiMain {
     }
 
     /// Replace the last line in the most recent Lines block.
-    /// Kept as public API for future caller use (currently unused).
     #[allow(dead_code)]
     pub fn replace_last_line(&mut self, line: Line<'static>) {
         for block in self.blocks.iter_mut().rev() {
@@ -272,241 +417,235 @@ impl TuiMain {
         }
     }
 
-    /// Open a new StreamingText block for an agent response.
-    /// Must be followed by `update_streaming_text` calls then `finalize_streaming_text`.
-    pub fn begin_streaming_text(&mut self) {
-        // Minimal separator — no verbose "📝 Agent Response:" header.
-        self.blocks.push(OutputBlock::StreamingText {
-            header: vec![Line::from("")],
-            lines: Vec::new(),
-        });
+    // ── Response turn API ────────────────────────────────────────────────────
+
+    /// Return a mutable reference to the most recent `Response` block.
+    fn current_response_mut(&mut self) -> Option<&mut ResponseBlock> {
+        self.blocks.iter_mut().rev().find_map(|b| {
+            if let OutputBlock::Response(r) = b { Some(r) } else { None }
+        })
     }
 
-    /// Open a new ToolCall block showing a spinner while the tool runs.
-    /// Call `finish_tool_call` when the tool completes.
-    pub fn begin_tool_call(&mut self, summary: String) {
-        self.blocks.push(OutputBlock::ToolCall {
-            summary,
-            running: true,
-            is_error: false,
-            error_snippet: String::new(),
-            start_instant: Instant::now(),
-        });
+    /// Open a new agent response turn.  Must be called before any
+    /// `begin_thinking` / `begin_tool_call` / `begin_streaming_text` for that turn.
+    pub fn begin_response(&mut self) {
+        self.blocks.push(OutputBlock::Response(ResponseBlock::new()));
     }
 
-    /// Seal the most recent running ToolCall with its outcome.
-    /// `error_snippet` is a short truncated message for failed calls.
-    pub fn finish_tool_call(&mut self, is_error: bool, error_snippet: String) {
-        for block in self.blocks.iter_mut().rev() {
-            if let OutputBlock::ToolCall {
-                running,
-                is_error: ie,
-                error_snippet: es,
-                ..
-            } = block
-                && *running
-            {
-                *running = false;
-                *ie = is_error;
-                *es = error_snippet;
-                return;
-            }
+    /// Seal the current response turn once all streaming has finished.
+    pub fn end_response(&mut self) {
+        if let Some(resp) = self.current_response_mut() {
+            resp.sealed = true;
         }
     }
 
-    /// Replace the rendered lines inside the most recent StreamingText block.
-    ///
-    /// Scans backwards so it still works if other blocks were pushed after it.
-    pub fn update_streaming_text(&mut self, new_lines: Vec<Line<'static>>) {
-        for block in self.blocks.iter_mut().rev() {
-            if let OutputBlock::StreamingText { lines, .. } = block {
-                *lines = new_lines;
-                return;
-            }
-        }
-    }
-
-    /// Seal the StreamingText block into a static Lines block.
-    /// Call when the agent turn produces a tool call or finishes.
-    ///
-    /// Scans backwards so it works even if other blocks (ToolCall, Thinking)
-    /// were pushed after the StreamingText.
-    pub fn finalize_streaming_text(&mut self) {
-        if let Some(idx) = self
-            .blocks
-            .iter()
-            .rposition(|b| matches!(b, OutputBlock::StreamingText { .. }))
-            && let OutputBlock::StreamingText { header, lines } = self.blocks.remove(idx)
-        {
-            let mut all = header;
-            all.extend(lines);
-            all.push(divider_line());
-            self.blocks.insert(idx, OutputBlock::Lines(all));
-        }
-    }
-
-    /// Start a new ThinkingBlock in streaming state.
+    /// Open a new ThinkingBlock inside the current response turn.
     pub fn begin_thinking(&mut self) {
-        self.blocks
-            .push(OutputBlock::Thinking(ThinkingBlock::new()));
+        if let Some(resp) = self.current_response_mut() {
+            resp.thinkings.push(ThinkingBlock::new());
+        }
     }
 
     /// Append a thinking delta to the most recent streaming ThinkingBlock.
-    ///
-    /// Scans backwards so it can find the Thinking block even when other blocks
-    /// (e.g. a ToolCall that was just finished) sit after it.
     pub fn append_thinking(&mut self, raw: &str) {
-        for block in self.blocks.iter_mut().rev() {
-            if let OutputBlock::Thinking(tb) = block {
+        if let Some(resp) = self.current_response_mut() {
+            if let Some(tb) = resp.thinkings.iter_mut().rev().find(|tb| tb.streaming) {
                 tb.raw.push_str(raw);
                 tb.lines = tb
                     .raw
                     .lines()
                     .map(|l| Line::from(Span::from(l.to_string()).dim()))
                     .collect();
-                return;
             }
         }
     }
 
-    /// Mark the most recent ThinkingBlock as done and record metadata.
-    ///
-    /// Scans backwards so it still works when a ToolCall block was pushed after
-    /// the Thinking block (model calls a tool without emitting a Text delta first).
+    /// Seal the most recent streaming ThinkingBlock with its elapsed time and token count.
     pub fn end_thinking(&mut self, token_count: u32) {
-        for block in self.blocks.iter_mut().rev() {
-            if let OutputBlock::Thinking(tb) = block {
-                if tb.streaming {
-                    tb.elapsed_secs = tb.start_instant.elapsed().as_secs_f32();
-                    tb.token_count = token_count;
-                    tb.streaming = false;
-                }
-                return; // stop at the first Thinking block found
+        if let Some(resp) = self.current_response_mut() {
+            if let Some(tb) = resp.thinkings.iter_mut().rev().find(|tb| tb.streaming) {
+                tb.elapsed_secs = tb.start_instant.elapsed().as_secs_f32();
+                tb.token_count = token_count;
+                tb.streaming = false;
             }
         }
     }
 
-    /// Toggle expanded/collapsed on the most recent completed ThinkingBlock.
+    /// Open a new ToolCall inside the current response turn.
+    pub fn begin_tool_call(&mut self, summary: String) {
+        if let Some(resp) = self.current_response_mut() {
+            resp.tool_calls.push(ToolCallEntry {
+                summary,
+                running: true,
+                is_error: false,
+                error_snippet: String::new(),
+                start_instant: Instant::now(),
+            });
+        }
+    }
+
+    /// Seal the most recent running ToolCall with its outcome.
+    pub fn finish_tool_call(&mut self, is_error: bool, error_snippet: String) {
+        if let Some(resp) = self.current_response_mut() {
+            if let Some(tc) = resp.tool_calls.iter_mut().rev().find(|tc| tc.running) {
+                tc.running = false;
+                tc.is_error = is_error;
+                tc.error_snippet = error_snippet;
+            }
+        }
+    }
+
+    /// Mark the current response turn's text stream as started.
+    pub fn begin_streaming_text(&mut self) {
+        if let Some(resp) = self.current_response_mut() {
+            resp.text_streaming = true;
+        }
+    }
+
+    /// Replace the text lines in the current response turn (called on each delta).
+    pub fn update_streaming_text(&mut self, new_lines: Vec<Line<'static>>) {
+        if let Some(resp) = self.current_response_mut() {
+            resp.text_lines = new_lines;
+        }
+    }
+
+    /// Seal the text stream in the current response turn.
+    pub fn finalize_streaming_text(&mut self) {
+        if let Some(resp) = self.current_response_mut() {
+            resp.text_streaming = false;
+        }
+    }
+
+    // ── ThinkingBlock keyboard controls ─────────────────────────────────────
+
+    /// Toggle the most recent completed ThinkingBlock.
+    ///
+    /// If a `Response` block is currently selected (`selected_block`), the
+    /// toggle targets that specific block; otherwise it falls through to the
+    /// last `Response` block in the history.
     fn toggle_last_thinking(&mut self) {
-        for block in self.blocks.iter_mut().rev() {
-            if let OutputBlock::Thinking(tb) = block
-                && !tb.streaming
-            {
-                tb.expanded = !tb.expanded;
-                return;
+        let target = self.selected_block.or_else(|| {
+            self.blocks
+                .iter()
+                .rposition(|b| matches!(b, OutputBlock::Response(_)))
+        });
+        if let Some(idx) = target {
+            if let Some(OutputBlock::Response(resp)) = self.blocks.get_mut(idx) {
+                for tb in resp.thinkings.iter_mut().rev() {
+                    if !tb.streaming {
+                        tb.expanded = !tb.expanded;
+                        return;
+                    }
+                }
             }
         }
     }
 
-    /// Expand all completed ThinkingBlocks.
+    /// Expand all completed ThinkingBlocks across every response turn.
     fn expand_all_thinking(&mut self) {
         for block in self.blocks.iter_mut() {
-            if let OutputBlock::Thinking(tb) = block
-                && !tb.streaming
-            {
-                tb.expanded = true;
+            if let OutputBlock::Response(resp) = block {
+                for tb in resp.thinkings.iter_mut() {
+                    if !tb.streaming {
+                        tb.expanded = true;
+                    }
+                }
             }
         }
     }
 
-    /// Collapse all completed ThinkingBlocks.
+    /// Collapse all completed ThinkingBlocks across every response turn.
     fn collapse_all_thinking(&mut self) {
         for block in self.blocks.iter_mut() {
-            if let OutputBlock::Thinking(tb) = block
-                && !tb.streaming
-            {
-                tb.expanded = false;
+            if let OutputBlock::Response(resp) = block {
+                for tb in resp.thinkings.iter_mut() {
+                    if !tb.streaming {
+                        tb.expanded = false;
+                    }
+                }
             }
         }
     }
 
     // ── Rendering helpers ────────────────────────────────────────────────────
 
-    /// Flatten all blocks into a single `Vec<Line<'static>>` for wrapping and display.
-    /// ThinkingBlock bodies use a dim `│` prefix; ToolCall blocks render as one line.
-    fn rendered_flat_lines(&self) -> Vec<Line<'static>> {
-        let mut result = Vec::new();
-        for block in &self.blocks {
+    /// Flatten all blocks into lines for wrapping and display.
+    ///
+    /// Also returns a parallel LineMap of `Option<(block_index, ClickAction)>`.
+    /// `None` = row belongs to a `Lines` block.  The LineMap is propagated
+    /// through `hard_wrap_output_lines_with_map` so that after wrapping each
+    /// terminal row still knows which block it belongs to and what a click does.
+    fn rendered_flat_lines(
+        &self,
+    ) -> (Vec<Line<'static>>, Vec<Option<(usize, ClickAction)>>) {
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let mut map: Vec<Option<(usize, ClickAction)>> = Vec::new();
+        for (i, block) in self.blocks.iter().enumerate() {
             match block {
-                OutputBlock::Lines(lines) => result.extend_from_slice(lines),
-                OutputBlock::StreamingText { header, lines } => {
-                    result.extend_from_slice(header);
-                    result.extend_from_slice(lines);
-                    result.push(divider_line());
-                }
-                OutputBlock::Thinking(tb) => {
-                    result.push(tb.render_header());
-                    // While streaming: always show body so thinking content is
-                    // visible in real-time.  When done: respect expanded flag
-                    // (collapsed by default, `t` in OutputArea to toggle).
-                    if tb.streaming || tb.expanded {
-                        for line in &tb.lines {
-                            let mut spans = vec![Span::from("  │ ").dim()];
-                            spans.extend(line.spans.iter().cloned());
-                            result.push(Line::from(spans));
-                        }
-                        if !tb.streaming {
-                            result.push(Line::from(Span::from("  └─").dim()));
-                        }
+                OutputBlock::Lines(ls) => {
+                    for line in ls {
+                        lines.push(line.clone());
+                        map.push(None);
                     }
                 }
-                OutputBlock::ToolCall {
-                    summary,
-                    running,
-                    is_error,
-                    error_snippet,
-                    start_instant,
-                } => {
-                    result.push(Self::render_tool_call_line(
-                        summary,
-                        *running,
-                        *is_error,
-                        error_snippet,
-                        start_instant,
-                    ));
+                OutputBlock::Response(resp) => {
+                    let selected = self.selected_block == Some(i);
+                    let (block_lines, block_actions) = resp.render_lines(selected);
+                    for (line, action) in block_lines.into_iter().zip(block_actions) {
+                        lines.push(line);
+                        map.push(Some((i, action)));
+                    }
                 }
             }
         }
-        result
+        (lines, map)
     }
 
-    /// Render a ToolCall block as a single line:
-    ///   running  →  `summary  ⣾  0.3s`   (yellow)
-    ///   success  →  `summary  ✅  0.3s`  (default + dim elapsed)
-    ///   error    →  `summary  ❌  0.3s  snippet`  (red)
-    fn render_tool_call_line(
-        summary: &str,
-        running: bool,
-        is_error: bool,
-        error_snippet: &str,
-        start_instant: &Instant,
-    ) -> Line<'static> {
-        let elapsed = start_instant.elapsed().as_secs_f32();
-        let elapsed_str = format!("{elapsed:.1}s");
-        if running {
-            let frame =
-                SPINNER[(start_instant.elapsed().as_millis() as usize / 100) % SPINNER.len()];
-            Line::from(vec![
-                Span::from(summary.to_string()).yellow(),
-                Span::from(format!("  {frame}  {elapsed_str}"))
-                    .yellow()
-                    .dim(),
-            ])
-        } else if is_error {
-            let mut spans = vec![
-                Span::from(summary.to_string()).red(),
-                Span::from(format!("  ❌  {elapsed_str}")).red(),
-            ];
-            if !error_snippet.is_empty() {
-                spans.push(Span::from(format!("  {error_snippet}")).red().dim());
-            }
-            Line::from(spans)
-        } else {
-            Line::from(vec![
-                Span::from(summary.to_string()),
-                Span::from(format!("  ✅  {elapsed_str}")).dim(),
-            ])
+    /// Word-wrap `lines` to `inner_width` columns, propagating a parallel
+    /// `map` so that every wrapped row retains its source block index and
+    /// click action.
+    fn hard_wrap_output_lines_with_map(
+        lines: &[Line<'_>],
+        map: &[Option<(usize, ClickAction)>],
+        inner_width: usize,
+    ) -> (Vec<Line<'static>>, Vec<Option<(usize, ClickAction)>>) {
+        if inner_width == 0 {
+            return (
+                lines.iter().map(|l| Line::from(l.to_string())).collect(),
+                map.to_vec(),
+            );
         }
+        let mut result: Vec<Line<'static>> = Vec::new();
+        let mut result_map: Vec<Option<(usize, ClickAction)>> = Vec::new();
+        for (line, entry) in lines.iter().zip(map.iter()) {
+            let block_idx = *entry;
+            let mut current_spans: Vec<Span<'static>> = Vec::new();
+            let mut current_width = 0usize;
+            for span in &line.spans {
+                let style = span.style;
+                let mut buf = String::new();
+                for ch in span.content.chars() {
+                    let ch_w = ch.width().unwrap_or(1);
+                    if current_width + ch_w > inner_width && current_width > 0 {
+                        if !buf.is_empty() {
+                            current_spans
+                                .push(Span::styled(std::mem::take(&mut buf), style));
+                        }
+                        result.push(Line::from(std::mem::take(&mut current_spans)));
+                        result_map.push(block_idx);
+                        current_width = 0;
+                    }
+                    buf.push(ch);
+                    current_width += ch_w;
+                }
+                if !buf.is_empty() {
+                    current_spans.push(Span::styled(buf, style));
+                }
+            }
+            result.push(Line::from(current_spans));
+            result_map.push(block_idx);
+        }
+        (result, result_map)
     }
 
     fn display_index(&self) -> usize {
@@ -534,37 +673,6 @@ impl TuiMain {
         lines
     }
 
-    fn hard_wrap_output_lines<'b>(lines: &'b [Line<'b>], inner_width: usize) -> Vec<Line<'static>> {
-        if inner_width == 0 {
-            return lines.iter().map(|l| Line::from(l.to_string())).collect();
-        }
-        let mut result: Vec<Line<'static>> = Vec::new();
-        for line in lines {
-            let mut current_spans: Vec<Span<'static>> = Vec::new();
-            let mut current_width = 0usize;
-            for span in &line.spans {
-                let style = span.style;
-                let mut buf = String::new();
-                for ch in span.content.chars() {
-                    let ch_w = ch.width().unwrap_or(1);
-                    if current_width + ch_w > inner_width && current_width > 0 {
-                        if !buf.is_empty() {
-                            current_spans.push(Span::styled(std::mem::take(&mut buf), style));
-                        }
-                        result.push(Line::from(std::mem::take(&mut current_spans)));
-                        current_width = 0;
-                    }
-                    buf.push(ch);
-                    current_width += ch_w;
-                }
-                if !buf.is_empty() {
-                    current_spans.push(Span::styled(buf, style));
-                }
-            }
-            result.push(Line::from(current_spans));
-        }
-        result
-    }
 
     fn insert_char(&mut self, c: char) {
         self.input.insert(self.byte_index, c);
@@ -671,7 +779,7 @@ impl TuiMain {
 
     fn total_visual_rows(&self) -> usize {
         let inner_width = self.output_area.width.saturating_sub(2) as usize;
-        let flat = self.rendered_flat_lines();
+        let (flat, _) = self.rendered_flat_lines();
         if inner_width == 0 {
             return flat.len();
         }
@@ -713,8 +821,10 @@ impl TuiMain {
         self.output_area = output_area;
 
         let output_inner_width = output_area.width.saturating_sub(2) as usize;
-        let flat = self.rendered_flat_lines();
-        let wrapped = Self::hard_wrap_output_lines(&flat, output_inner_width);
+        let (flat, flat_map) = self.rendered_flat_lines();
+        let (wrapped, wrapped_map) =
+            Self::hard_wrap_output_lines_with_map(&flat, &flat_map, output_inner_width);
+        self.line_map = wrapped_map;
         let total_rows = wrapped.len();
         let new_max = total_rows.saturating_sub(self.output_area_height());
         self.vertical_scroll = self.vertical_scroll.min(new_max);
@@ -898,8 +1008,19 @@ fn handle_global_input(
                 () = tui_main.scroll_to_bottom();
                 **dirty = true;
             }
-            // Expand / collapse all ThinkingBlocks — usable from any focus area.
-            KeyCode::Char('A') if !in_input && matches!(kind, KeyEventKind::Press) => {
+            // Toggle ThinkingBlock — targets the selected ResponseBlock when one is
+            // selected, otherwise falls through to the last response turn.
+            // Works from any focus area so the user needn't Tab after clicking.
+            KeyCode::Char('t')
+                if !in_input && matches!(kind, KeyEventKind::Press) =>
+            {
+                () = tui_main.toggle_last_thinking();
+                **dirty = true;
+            }
+            // Expand / collapse all ThinkingBlocks across every response turn.
+            KeyCode::Char('A')
+                if !in_input && matches!(kind, KeyEventKind::Press) =>
+            {
                 () = tui_main.expand_all_thinking();
                 **dirty = true;
             }
@@ -1119,19 +1240,14 @@ fn handle_output_area_input(
     mut tui_main: NonSendMut<TuiMain>,
     mut dirty: ResMut<RenderNeeded>,
 ) {
-    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+    use crossterm::event::{KeyCode, KeyEvent};
 
     for message in messages.read() {
-        let KeyEvent { code, kind, .. } = &**message;
+        let KeyEvent { code, .. } = &**message;
 
         match code {
             KeyCode::Char(' ') => {
                 () = tui_main.scroll_page_down();
-                **dirty = true;
-            }
-            // Toggle the most recent completed ThinkingBlock.
-            KeyCode::Char('t') if matches!(kind, KeyEventKind::Press) => {
-                () = tui_main.toggle_last_thinking();
                 **dirty = true;
             }
             _ => (),
@@ -1144,10 +1260,11 @@ fn handle_mouse_input(
     mut tui_main: NonSendMut<TuiMain>,
     mut dirty: ResMut<RenderNeeded>,
 ) {
-    use crossterm::event::{MouseEvent, MouseEventKind};
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Position;
 
     for message in messages.read() {
-        let MouseEvent { kind, .. } = &**message;
+        let MouseEvent { kind, column, row, .. } = &**message;
         match kind {
             MouseEventKind::ScrollUp => {
                 () = tui_main.scroll_up();
@@ -1156,6 +1273,51 @@ fn handle_mouse_input(
             MouseEventKind::ScrollDown => {
                 () = tui_main.scroll_down();
                 **dirty = true;
+            }
+            // Left-click inside the output area.
+            //   • Click a ThinkingBlock header → toggle that thinking (and
+            //     select the owning ResponseBlock if not already selected).
+            //   • Click anywhere else in a ResponseBlock → select / deselect.
+            MouseEventKind::Down(MouseButton::Left) => {
+                let output_area = tui_main.output_area;
+                if output_area.contains(Position { x: *column, y: *row }) {
+                    // Convert terminal row to a wrapped-line index, accounting
+                    // for the 1-row top border and the current scroll offset.
+                    let inner_row =
+                        (*row).saturating_sub(output_area.top() + 1) as usize;
+                    let map_row = inner_row + tui_main.vertical_scroll;
+
+                    if let Some(Some((block_idx, action))) =
+                        tui_main.line_map.get(map_row).copied()
+                    {
+                        match action {
+                            ClickAction::ToggleThinking(ti) => {
+                                // Toggle the specific ThinkingBlock that was clicked.
+                                if let Some(OutputBlock::Response(resp)) =
+                                    tui_main.blocks.get_mut(block_idx)
+                                {
+                                    if let Some(tb) = resp.thinkings.get_mut(ti) {
+                                        if !tb.streaming {
+                                            tb.expanded = !tb.expanded;
+                                        }
+                                    }
+                                }
+                                // Also (re-)select the block so `t` targets it next.
+                                tui_main.selected_block = Some(block_idx);
+                            }
+                            ClickAction::Select => {
+                                // Toggle selection: same block → deselect; new → select.
+                                tui_main.selected_block =
+                                    if tui_main.selected_block == Some(block_idx) {
+                                        None
+                                    } else {
+                                        Some(block_idx)
+                                    };
+                            }
+                        }
+                    }
+                    **dirty = true;
+                }
             }
             _ => (),
         }
@@ -1189,8 +1351,7 @@ fn draw_scene_system(
         spinner_timer.get_or_insert(Timer::new(Duration::from_millis(100), TimerMode::Repeating));
     _ = spinner_timer.tick(time.delta());
     let has_spinner = tui.blocks.iter().any(|b| match b {
-        OutputBlock::Thinking(tb) => tb.streaming,
-        OutputBlock::ToolCall { running, .. } => *running,
+        OutputBlock::Response(resp) => resp.has_spinner(),
         _ => false,
     });
     if has_spinner && spinner_timer.just_finished() {
