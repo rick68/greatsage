@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
     #[allow(unused_imports)]
-    use {crate::handle_prompt, crate::maybe_set_strict_error_hook, std::io::Write, tempfile::Builder};
+    use {
+        crate::handle_prompt, crate::maybe_set_strict_error_hook, std::io::Write, tempfile::Builder,
+    };
 
     #[test]
     fn test_flag_disabled_accepts_any_prompt() {

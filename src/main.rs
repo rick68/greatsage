@@ -33,7 +33,7 @@ use {
     clap::Parser,
     std::{
         env,
-        io::{IsTerminal, Read, stdin, Write},
+        io::{IsTerminal, Read, Write, stdin},
         process,
         time::Duration,
     },
@@ -54,7 +54,6 @@ fn maybe_set_strict_error_hook(enabled: bool) {
         }));
     }
 }
-
 
 build_info::build_info!(fn build_info);
 
