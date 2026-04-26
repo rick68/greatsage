@@ -36,7 +36,7 @@ use {
     },
     std::{
         fmt,
-        io::{Write, stdout},
+        io::{Error as IoError, Write, stdout},
         sync::Arc,
     },
     termimad::MadSkin,
@@ -230,10 +230,13 @@ fn spawn_agent_task(
     channel: Res<'_, CodingAgentPromptChannel>,
     runtime: ResMut<'_, TokioTasksRuntime>,
     coding_agent: Res<'_, CodingAgent>,
+    app_config: Res<'_, AppConfig>,
     mut commands: Commands<'_, '_>,
     mut next_state: ResMut<'_, NextState<CodingAgentState>>,
 ) {
     if let Ok(prompt) = channel.receiver.try_recv() {
+        // Capture needed config values before moving into async task to avoid lifetime issues.
+        let error_handling = app_config.runtime.error_handling;
         let coding_agent = Arc::clone(&**coding_agent.into_inner());
         _ = runtime.spawn_background_task(move |mut ctx| async move {
             // // Try to prompt the LLM with retry logic.
@@ -273,21 +276,14 @@ fn spawn_agent_task(
                         .await;
                 }
                 Err(_e) => {
+                    // Use unified error handling respecting the runtime flag.
+                    // Propagate the error through handle_error; it will log if enabled or return Err.
+                    let simple_err = IoError::new(std::io::ErrorKind::Other, "LLM request failed");
+                    let _ = handle_error(simple_err, error_handling);
                     () = ctx
                         .run_on_main_thread(|ctx: MainThreadContext| {
-                            let err_log = "Error: LLM request failed";
-
                             let world = ctx.world;
-                            // Log error to TUI output if available, then set state Idle.
-                            if let Some(mut tui) =
-                                world.get_non_send_resource_mut::<NonSendMut<TuiMain>>()
-                            {
-                                () = tui.output.push(Line::from(String::from(err_log).red()));
-                            } else {
-                                // Since we don't have direct TUI access here, we simply print.
-                                eprintln!("{err_log}");
-                            }
-
+                            // Ensure resources are cleaned up and state set to Idle.
                             _ = world.remove_resource::<CodingAgentTask>();
                             () = world
                                 .get_resource_mut::<NextState<CodingAgentState>>()
