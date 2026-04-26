@@ -49,7 +49,7 @@ use {
 /// typing those characters in the input box.
 pub fn handle_global_input(
     mut messages: bevy::ecs::message::MessageReader<KeyMessage>,
-    tui_main: NonSendMut<TuiMain>,
+    mut tui_main: NonSendMut<TuiMain>,
     mut dirty: ResMut<RenderNeeded>,
     mut next_tui_main_focus: ResMut<NextState<TuiMainFocus>>,
     mut exit: MessageWriter<AppExit>,
@@ -70,9 +70,10 @@ pub fn handle_global_input(
         match code {
             // Tab cycles focus; updates the Bevy state so run-conditions apply.
             KeyCode::Tab => {
-                let mut current = tui_main.focused;
+                let mut current = *focus.get();
                 let next = current.next().unwrap();
                 next_tui_main_focus.set(next);
+                tui_main.focused = next;
                 **dirty = true;
             }
             // Ctrl-C exits unconditionally (mirrors Unix terminal convention).
