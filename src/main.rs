@@ -33,13 +33,28 @@ use {
     clap::Parser,
     std::{
         env,
-        io::{IsTerminal, Read, stdin},
+        io::{IsTerminal, Read, stdin, Write},
         process,
         time::Duration,
     },
 };
 
 use std::error::Error;
+
+/// Install a panic hook that aborts with a clear message and exit code 101
+/// when `--strict-errors` is enabled. This provides a guard‑rail so that REPL
+/// panics do not silently crash the process.
+fn maybe_set_strict_error_hook(enabled: bool) {
+    if enabled {
+        std::panic::set_hook(Box::new(|panic_info| {
+            // Write the panic information to stderr.
+            let _ = writeln!(std::io::stderr(), "panic: {}", panic_info);
+            // Exit with a non‑zero status to signal failure.
+            std::process::exit(101);
+        }));
+    }
+}
+
 
 build_info::build_info!(fn build_info);
 
@@ -148,6 +163,8 @@ fn main() {
     app_config.runtime.strict_errors = args.strict_errors;
     // Capture error handling flag before moving app_config into Bevy resource.
     let error_handling_flag = app_config.runtime.strict_errors;
+    // Install panic hook for strict error handling if enabled.
+    maybe_set_strict_error_hook(error_handling_flag);
 
     if let Err(e) = validate_required(&app_config) {
         eprintln!("error: {e:#}");
