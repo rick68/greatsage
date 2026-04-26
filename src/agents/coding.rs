@@ -31,7 +31,7 @@ use {
         },
         config::AppConfig,
         tokio::AppCancelToken,
-        tui::{RenderNeeded, TuiMain},
+        tui::{RenderNeeded, core::TuiMain},
     },
     ansi_to_tui::IntoText as _,
     anyhow::anyhow,

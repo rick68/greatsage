@@ -2,7 +2,7 @@
 #[cfg(test)]
 mod tests {
     use {
-        crate::tui::{TuiMain, tui_main::handle_slash_command},
+        crate::tui::{TuiMain, commands::handle_slash_command},
         std::env,
         tempfile::tempdir,
     };
@@ -14,13 +14,13 @@ mod tests {
         () = env::set_current_dir(dir.path()).expect("could not cd into temp dir");
 
         let mut tui = TuiMain::default();
-        () = tui.set_input_public("/git stage".to_string());
+        () = tui.set_input("/git stage".to_string());
         let lines = handle_slash_command("/git stage");
-        () = tui.push_history_public("/git stage");
+        () = tui.push_history("/git stage");
         for line in lines.clone() {
             tui.push_line(line);
         }
-        () = tui.clear_input_public();
+        () = tui.clear_input();
         () = tui.scroll_to_bottom();
 
         assert!(!lines.is_empty(), "expected at least one output line");
