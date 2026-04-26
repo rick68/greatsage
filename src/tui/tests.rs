@@ -17,8 +17,8 @@ mod tests {
         () = tui.set_input_public("/git stage".to_string());
         let lines = handle_slash_command("/git stage");
         () = tui.push_history_public("/git stage");
-        for line in &lines {
-            tui.output.push(line.clone());
+        for line in lines.clone() {
+            tui.push_line(line);
         }
         () = tui.clear_input_public();
         () = tui.scroll_to_bottom();
