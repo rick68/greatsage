@@ -410,11 +410,11 @@ fn handle_coding_agent_events(
             match &event {
                 AgentEvent::ToolExecutionStart { .. }
                 | AgentEvent::MessageUpdate { .. }
-                | AgentEvent::ToolExecutionEnd { .. } => {
-                    if !coding_agent_task.response_started {
-                        tui.begin_response();
-                        coding_agent_task.response_started = true;
-                    }
+                | AgentEvent::ToolExecutionEnd { .. }
+                    if !coding_agent_task.response_started =>
+                {
+                    tui.begin_response();
+                    coding_agent_task.response_started = true;
                 }
                 _ => {}
             }
