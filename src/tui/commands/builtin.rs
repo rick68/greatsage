@@ -1,6 +1,13 @@
+//! Built-in slash commands that don't interact with external tools.
+//!
+//! Currently only `/help` lives here.  As new built-in commands are added
+//! (e.g. `/config`, `/version`) they should go in this module.
+
 use ratatui::{style::Stylize, text::Line};
 
-/// Generates help text lines.
+/// Returns formatted help text listing all available commands and shortcuts.
+///
+/// Called by [`super::handle_slash_command`] when the user types `/help`.
 pub fn help_lines() -> Vec<Line<'static>> {
     vec![
         Line::raw(""),

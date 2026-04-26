@@ -1,3 +1,11 @@
+//! Action dispatch system — translates [`TuiAction`] messages into mutations
+//! on [`TuiMain`].
+//!
+//! This is the single place where business logic lives.  Input handlers are
+//! kept thin (event → message); this system owns the "what does it mean" layer.
+//!
+//! [`TuiAction`]: crate::tui::events::TuiAction
+
 use {
     crate::{
         agents::CodingAgentPromptChannel,
@@ -12,10 +20,13 @@ use {
         change_detection::{NonSendMut, Res, ResMut},
         message::{MessageReader, MessageWriter},
     },
-    ratatui::{prelude::Stylize, text::Line},
+    ratatui::{style::Stylize, text::Line},
 };
 
-/// Listens for TuiAction events and performs corresponding data operations on TuiMain.
+/// Reads all pending [`TuiAction`] messages and applies each one to [`TuiMain`].
+///
+/// Every branch sets `**dirty = true` to schedule a redraw; the renderer skips
+/// a frame if `dirty` is still `false` from the previous tick.
 pub fn tui_action_system(
     mut actions: MessageReader<TuiAction>,
     mut tui: NonSendMut<TuiMain>,
@@ -27,72 +38,73 @@ pub fn tui_action_system(
         let action = action_msg;
         match action {
             TuiAction::InsertChar(c) => {
-                tui.insert_char(*c);
+                () = tui.insert_char(*c);
                 **dirty = true;
             }
             TuiAction::Backspace => {
-                tui.delete_before();
+                () = tui.delete_before();
                 **dirty = true;
             }
             TuiAction::Delete => {
-                tui.delete_after();
+                () = tui.delete_after();
                 **dirty = true;
             }
             TuiAction::CursorLeft => {
-                tui.cursor_left();
+                () = tui.cursor_left();
                 **dirty = true;
             }
             TuiAction::CursorRight => {
-                tui.cursor_right();
+                () = tui.cursor_right();
                 **dirty = true;
             }
             TuiAction::CursorToStart => {
                 if tui.focused == TuiMainFocus::InputArea {
-                    tui.cursor_to_start();
+                    () = tui.cursor_to_start();
                 } else {
-                    tui.scroll_to_top();
+                    () = tui.scroll_to_top();
                 }
                 **dirty = true;
             }
             TuiAction::CursorToEnd => {
                 if tui.focused == TuiMainFocus::InputArea {
-                    tui.cursor_to_end();
+                    () = tui.cursor_to_end();
                 } else {
-                    tui.scroll_to_bottom();
+                    () = tui.scroll_to_bottom();
                 }
                 **dirty = true;
             }
             TuiAction::HistoryPrev => {
-                tui.history_prev();
+                () = tui.history_prev();
                 **dirty = true;
             }
             TuiAction::HistoryNext => {
-                tui.history_next();
+                () = tui.history_next();
                 **dirty = true;
             }
             TuiAction::ScrollUp => {
-                tui.scroll_up();
+                () = tui.scroll_up();
                 **dirty = true;
             }
             TuiAction::ScrollDown => {
-                tui.scroll_down();
+                () = tui.scroll_down();
                 **dirty = true;
             }
             TuiAction::ToggleLastThinking => {
-                tui.toggle_last_thinking();
+                () = tui.toggle_last_thinking();
                 **dirty = true;
             }
             TuiAction::ExpandAllThinking => {
-                tui.expand_all_thinking();
+                () = tui.expand_all_thinking();
                 **dirty = true;
             }
             TuiAction::CollapseAllThinking => {
-                tui.collapse_all_thinking();
+                () = tui.collapse_all_thinking();
                 **dirty = true;
             }
             TuiAction::Submit => {
                 handle_submit(&mut tui, &mut exit, &channel);
-                tui.scroll_to_bottom();
+                // Scroll to bottom so the user always sees their newly submitted prompt.
+                () = tui.scroll_to_bottom();
                 **dirty = true;
             }
             TuiAction::ToggleThinking {
@@ -101,6 +113,7 @@ pub fn tui_action_system(
             } => {
                 let bi = *block_index;
                 let ti = *thinking_index;
+                // Only toggle if the block is fully received (not still streaming).
                 if let Some(tb) = tui
                     .blocks
                     .get_mut(bi)
@@ -115,11 +128,13 @@ pub fn tui_action_system(
                 {
                     tb.expanded = !tb.expanded;
                 }
+                // Clicking a thinking header also selects its parent block.
                 tui.selected_block = Some(bi);
                 **dirty = true;
             }
             TuiAction::SelectBlock(idx) => {
                 let i = *idx;
+                // Clicking the same block again deselects it (toggle).
                 tui.selected_block = if tui.selected_block == Some(i) {
                     None
                 } else {
@@ -135,6 +150,14 @@ pub fn tui_action_system(
     }
 }
 
+/// Processes a submitted input line.
+///
+/// Dispatch order:
+/// 1. `/exit` / `/quit` → write [`AppExit`] message and clear input.
+/// 2. `/clear` → clear all output and input.
+/// 3. Any other `/…` command → route through [`commands::handle_slash_command`].
+/// 4. Plain text → push a dim echo line, clear input, and send to the agent
+///    via [`CodingAgentPromptChannel`].
 fn handle_submit(
     tui: &mut TuiMain,
     exit: &mut MessageWriter<AppExit>,
@@ -147,28 +170,30 @@ fn handle_submit(
     let trimmed = input.trim();
     match trimmed {
         "/exit" | "/quit" => {
-            tui.clear_input();
-            exit.write_default();
+            () = tui.clear_input();
+            _ = exit.write_default();
         }
         "/clear" => {
-            tui.clear_output();
-            tui.clear_input();
+            () = tui.clear_output();
+            () = tui.clear_input();
         }
         cmd if cmd.starts_with('/') => {
             let lines = commands::handle_slash_command(cmd);
-            tui.push_history(&input);
-            tui.push_lines(lines);
-            tui.clear_input();
+            () = tui.push_history(&input);
+            () = tui.push_lines(lines);
+            () = tui.clear_input();
         }
         _ => {
-            tui.push_history(&input);
-            tui.push_line(Line::from(format!("> {input}")).dark_gray());
-            tui.clear_input();
+            // Echo the prompt in dim gray so the user can see what they sent.
+            () = tui.push_history(&input);
+            () = tui.push_line(Line::from(format!("> {input}")).dark_gray());
+            () = tui.clear_input();
+            // Forward to the agent over the async channel.
             match channel.sender.send(input) {
                 Ok(_) => {}
                 Err(e) => {
                     let err_line = Line::from(format!("❌ Failed to send input: {e}")).red();
-                    tui.push_line(err_line);
+                    () = tui.push_line(err_line);
                 }
             }
         }

@@ -1,3 +1,19 @@
+//! Keyboard and mouse input handlers.
+//!
+//! Each handler translates raw crossterm events into [`TuiAction`] messages.
+//! The messages are consumed by [`crate::tui::core::action_system`] the same
+//! Bevy tick.
+//!
+//! # Handler responsibilities
+//!
+//! | Function | Runs when | Covers |
+//! |----------|-----------|--------|
+//! | [`handle_global_input`] | Always (PreUpdate) | Tab, Ctrl-C, scroll, `t`/`a`/`A` |
+//! | [`handle_input_area_input`] | Only in `InputArea` state | Text editing, history, Enter |
+//! | [`handle_mouse_input`] | Always (PreUpdate) | Scroll wheel, left click |
+//!
+//! [`TuiAction`]: crate::tui::events::TuiAction
+
 use bevy_ratatui::crossterm;
 use {
     crate::tui::{
@@ -13,6 +29,24 @@ use {
     bevy_ratatui::event::{KeyMessage, MouseMessage},
 };
 
+/// Handles keyboard events that are active regardless of which panel is focused.
+///
+/// # Key bindings
+///
+/// | Key | Condition | Action |
+/// |-----|-----------|--------|
+/// | Tab | always | Cycle focus (InputArea ↔ OutputArea) |
+/// | Ctrl-C | always | Exit the application |
+/// | ↑ / ↓ | OutputArea only | Scroll output one line |
+/// | PgUp / PgDn | always | Scroll output one line |
+/// | Home | OutputArea only | Scroll to top |
+/// | End | OutputArea only | Scroll to bottom |
+/// | `t` | OutputArea only | Toggle last (or selected) thinking block |
+/// | `A` | OutputArea only | Expand **all** thinking blocks |
+/// | `a` | OutputArea only | Collapse **all** thinking blocks |
+///
+/// The `t`/`a`/`A` keys require OutputArea focus so they don't interfere with
+/// typing those characters in the input box.
 pub fn handle_global_input(
     mut messages: bevy::ecs::message::MessageReader<KeyMessage>,
     tui_main: NonSendMut<TuiMain>,
@@ -23,6 +57,7 @@ pub fn handle_global_input(
     mut actions: MessageWriter<TuiAction>,
 ) {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+
     for message in messages.read() {
         let KeyEvent {
             code,
@@ -30,56 +65,85 @@ pub fn handle_global_input(
             modifiers,
             ..
         } = &**message;
+        // True when the text-entry box owns the keyboard.
         let in_input = focus.get() == &TuiMainFocus::InputArea;
         match code {
+            // Tab cycles focus; updates the Bevy state so run-conditions apply.
             KeyCode::Tab => {
                 let mut current = tui_main.focused;
                 let next = current.next().unwrap();
                 next_tui_main_focus.set(next);
                 **dirty = true;
             }
+            // Ctrl-C exits unconditionally (mirrors Unix terminal convention).
             KeyCode::Char('c')
                 if matches!(kind, KeyEventKind::Press)
                     && modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 exit.write_default();
             }
+            // Arrow keys scroll only when the output panel is focused; in the
+            // input panel they navigate command history (handled separately).
             KeyCode::Up
                 if !in_input && (kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat) =>
             {
-                actions.write(TuiAction::ScrollUp);
+                _ = actions.write(TuiAction::ScrollUp);
             }
             KeyCode::Down
                 if !in_input && (kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat) =>
             {
-                actions.write(TuiAction::ScrollDown);
+                _ = actions.write(TuiAction::ScrollDown);
             }
+            // Page keys scroll in both panels.
             KeyCode::PageUp => {
-                actions.write(TuiAction::ScrollUp);
+                _ = actions.write(TuiAction::ScrollUp);
             }
             KeyCode::PageDown => {
-                actions.write(TuiAction::ScrollDown);
+                _ = actions.write(TuiAction::ScrollDown);
             }
+            // Home/End jump to extremes of the output; in the input they move
+            // the cursor (handled by handle_input_area_input).
             KeyCode::Home if !in_input => {
-                actions.write(TuiAction::CursorToStart);
+                _ = actions.write(TuiAction::CursorToStart);
             }
             KeyCode::End if !in_input => {
-                actions.write(TuiAction::CursorToEnd);
+                _ = actions.write(TuiAction::CursorToEnd);
             }
+            // Thinking-block controls — only when not editing text.
+            // `t`: toggle the selected (or last) thinking block.
             KeyCode::Char('t') if !in_input && matches!(kind, KeyEventKind::Press) => {
-                actions.write(TuiAction::ToggleLastThinking);
+                _ = actions.write(TuiAction::ToggleLastThinking);
             }
+            // `A` (capital): expand every thinking block.
             KeyCode::Char('A') if !in_input && matches!(kind, KeyEventKind::Press) => {
-                actions.write(TuiAction::ExpandAllThinking);
+                _ = actions.write(TuiAction::ExpandAllThinking);
             }
+            // `a` (lowercase): collapse every thinking block.
             KeyCode::Char('a') if !in_input && matches!(kind, KeyEventKind::Press) => {
-                actions.write(TuiAction::CollapseAllThinking);
+                _ = actions.write(TuiAction::CollapseAllThinking);
             }
             _ => (),
         }
     }
 }
 
+/// Handles keyboard events specific to the input text box.
+///
+/// Only active when [`TuiMainFocus::InputArea`] is the current Bevy state.
+///
+/// # Key bindings
+///
+/// | Key | Action |
+/// |-----|--------|
+/// | printable char (no Ctrl) | Insert character |
+/// | Ctrl-A | Cursor to start (Emacs-style) |
+/// | Ctrl-E | Cursor to end (Emacs-style) |
+/// | Backspace | Delete before cursor |
+/// | Delete | Delete after cursor |
+/// | ← / → | Move cursor one scalar left/right |
+/// | Home / End | Cursor to start/end |
+/// | ↑ / ↓ | Navigate command history |
+/// | Enter | Submit input |
 pub fn handle_input_area_input(
     mut messages: bevy::ecs::message::MessageReader<KeyMessage>,
     mut actions: MessageWriter<TuiAction>,
@@ -92,55 +156,72 @@ pub fn handle_input_area_input(
             modifiers,
             ..
         } = &**message;
+        // Accept both Press and Repeat for keys that should auto-repeat when held.
         let is_active = kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat;
         match code {
+            // Regular character input; skip Ctrl-modified chars (they have dedicated bindings).
             KeyCode::Char(c) if is_active && !modifiers.contains(KeyModifiers::CONTROL) => {
-                actions.write(TuiAction::InsertChar(*c));
+                _ = actions.write(TuiAction::InsertChar(*c));
             }
+            // Emacs-style line-start shortcut (Ctrl-A).
             KeyCode::Char('a')
                 if matches!(kind, KeyEventKind::Press)
                     && modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                actions.write(TuiAction::CursorToStart);
+                _ = actions.write(TuiAction::CursorToStart);
             }
+            // Emacs-style line-end shortcut (Ctrl-E).
             KeyCode::Char('e')
                 if matches!(kind, KeyEventKind::Press)
                     && modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                actions.write(TuiAction::CursorToEnd);
+                _ = actions.write(TuiAction::CursorToEnd);
             }
             KeyCode::Backspace if is_active => {
-                actions.write(TuiAction::Backspace);
+                _ = actions.write(TuiAction::Backspace);
             }
             KeyCode::Delete if is_active => {
-                actions.write(TuiAction::Delete);
+                _ = actions.write(TuiAction::Delete);
             }
             KeyCode::Left if is_active => {
-                actions.write(TuiAction::CursorLeft);
+                _ = actions.write(TuiAction::CursorLeft);
             }
             KeyCode::Right if is_active => {
-                actions.write(TuiAction::CursorRight);
+                _ = actions.write(TuiAction::CursorRight);
             }
             KeyCode::Home if matches!(kind, KeyEventKind::Press) => {
-                actions.write(TuiAction::CursorToStart);
+                _ = actions.write(TuiAction::CursorToStart);
             }
             KeyCode::End if matches!(kind, KeyEventKind::Press) => {
-                actions.write(TuiAction::CursorToEnd);
+                _ = actions.write(TuiAction::CursorToEnd);
             }
+            // History navigation (no auto-repeat to avoid runaway history traversal).
             KeyCode::Up if matches!(kind, KeyEventKind::Press) => {
-                actions.write(TuiAction::HistoryPrev);
+                _ = actions.write(TuiAction::HistoryPrev);
             }
             KeyCode::Down if matches!(kind, KeyEventKind::Press) => {
-                actions.write(TuiAction::HistoryNext);
+                _ = actions.write(TuiAction::HistoryNext);
             }
             KeyCode::Enter if matches!(kind, KeyEventKind::Press) => {
-                actions.write(TuiAction::Submit);
+                _ = actions.write(TuiAction::Submit);
             }
             _ => (),
         }
     }
 }
 
+/// Handles mouse events from the terminal.
+///
+/// # Behaviour
+///
+/// * **Scroll wheel** — emits [`TuiAction::ScrollUp`] / [`TuiAction::ScrollDown`]
+///   regardless of where the cursor is on screen.
+/// * **Left click inside the output area** — looks up the clicked visual row in
+///   [`TuiMain::line_map`] and emits either:
+///   * [`TuiAction::ToggleThinking`] if the row is a thinking-block header (▶/▼), or
+///   * [`TuiAction::SelectBlock`] if the row belongs to a response block body.
+///
+/// Clicks outside the output area are silently ignored.
 pub fn handle_mouse_input(
     mut messages: bevy::ecs::message::MessageReader<MouseMessage>,
     tui_main: NonSendMut<TuiMain>,
@@ -155,28 +236,34 @@ pub fn handle_mouse_input(
         let kind = mouse_event.kind;
         match kind {
             MouseEventKind::ScrollUp => {
-                actions.write(TuiAction::ScrollUp);
+                _ = actions.write(TuiAction::ScrollUp);
             }
             MouseEventKind::ScrollDown => {
-                actions.write(TuiAction::ScrollDown);
+                _ = actions.write(TuiAction::ScrollDown);
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 let output_area = tui_main.output_area;
+                // Only act on clicks that land inside the output panel.
                 if output_area.contains(Position { x: column, y: row }) {
+                    // Convert terminal row to an inner row (subtract border + top offset).
                     let inner_row = (row).saturating_sub(output_area.top() + 1) as usize;
+                    // Add current scroll offset to get the absolute logical row index.
                     let map_row = inner_row + tui_main.vertical_scroll;
+                    // Look up the action associated with this row in the line map.
                     if let Some(Some((block_idx, click_action))) =
                         tui_main.line_map.get(map_row).copied()
                     {
                         match click_action {
+                            // Clicking a thinking header (▶/▼) toggles that specific block.
                             crate::tui::core::ClickAction::ToggleThinking(ti) => {
                                 actions.write(TuiAction::ToggleThinking {
                                     block_index: block_idx,
                                     thinking_index: ti,
                                 });
                             }
+                            // Clicking anywhere else in a response block selects/deselects it.
                             crate::tui::core::ClickAction::Select => {
-                                actions.write(TuiAction::SelectBlock(block_idx));
+                                _ = actions.write(TuiAction::SelectBlock(block_idx));
                             }
                         }
                     }

@@ -1,8 +1,19 @@
+//! Git slash-command handler (`/git stage`, `/git commit -m …`, `/git revert`).
+//!
+//! All commands delegate to the [`crate::git`] module which wraps libgit2
+//! operations.  Each function returns `Vec<Line<'static>>` with ✅/❌ icons
+//! to give instant visual feedback.
+
 use ratatui::{style::Stylize, text::Line};
 
-/// Parses the content from a Git commit message argument.
-pub fn parse_commit_message(arg: &str) -> String {
-    let arg = arg.trim();
+/// Extracts the commit message string from a `-m` argument.
+///
+/// Accepts both adjacent (`-m"msg"`) and spaced (`-m msg`) forms, stripping
+/// any surrounding single or double quotes.
+///
+/// Returns an empty string if no `-m` flag is found.
+pub fn parse_commit_message(arg: impl AsRef<str>) -> String {
+    let arg = arg.as_ref().trim();
     if let Some(after_m) = arg.strip_prefix("-m") {
         after_m
             .trim()
@@ -20,9 +31,19 @@ pub fn parse_commit_message(arg: &str) -> String {
     }
 }
 
-/// Handles Git subcommands.
-pub fn handle_git_subcmd(cmd: &str) -> Vec<Line<'static>> {
-    let rest = cmd.trim_start_matches("/git").trim();
+/// Dispatches `/git <subcommand>` to the correct git operation.
+///
+/// Supported subcommands:
+///
+/// | Subcommand | Example | Effect |
+/// |------------|---------|--------|
+/// | `stage`    | `/git stage` | Stage all changes (`git add -A`) |
+/// | `commit`   | `/git commit -m "msg"` | Commit staged changes |
+/// | `revert`   | `/git revert` | Revert the last commit |
+///
+/// Typing `/git` alone (no subcommand) shows the help text.
+pub fn handle_git_subcmd(cmd: impl AsRef<str>) -> Vec<Line<'static>> {
+    let rest = cmd.as_ref().trim_start_matches("/git").trim();
     let (subcmd, arg) = rest
         .split_once(' ')
         .map(|(s, a)| (s.trim(), a.trim()))
