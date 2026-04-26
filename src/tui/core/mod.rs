@@ -288,7 +288,7 @@ impl TuiMain {
     pub fn total_visual_rows(&self) -> usize {
         use unicode_width::UnicodeWidthChar;
         let inner_width = self.output_area.width.saturating_sub(2) as usize;
-        let (flat, _) = crate::tui::renderer::layout_utils::rendered_flat_lines(self, &SPINNER);
+        let (flat, _) = crate::tui::renderer::display_utils::rendered_flat_lines(self, &SPINNER);
         if inner_width == 0 { return flat.len(); }
         let mut count = 0usize;
         for line in &flat {

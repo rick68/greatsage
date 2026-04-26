@@ -1,5 +1,4 @@
-pub mod layout;
-pub mod layout_utils;
+pub mod display_utils;
 pub mod widgets;
 
 use {
@@ -76,7 +75,7 @@ fn render_tui(
 ) {
     let area = frame.area();
     let inner_width = area.width.saturating_sub(2) as usize;
-    let input_lines = layout_utils::input_display_lines(tui, inner_width, PROMPT_PREFIX);
+    let input_lines = display_utils::input_display_lines(tui, inner_width, PROMPT_PREFIX);
     let input_height = (input_lines.len() as u16 + 2).max(3);
     let vertical = Layout::vertical([
         Constraint::Min(3),
@@ -86,9 +85,9 @@ fn render_tui(
     let [output_area, status_area, input_area] = vertical.areas(area);
     tui.output_area = output_area;
     let output_inner_width = output_area.width.saturating_sub(2) as usize;
-    let (flat, flat_map) = layout_utils::rendered_flat_lines(tui, &SPINNER);
+    let (flat, flat_map) = display_utils::rendered_flat_lines(tui, &SPINNER);
     let (wrapped, wrapped_map) =
-        layout_utils::hard_wrap_output_lines_with_map(&flat, &flat_map, output_inner_width);
+        display_utils::hard_wrap_output_lines_with_map(&flat, &flat_map, output_inner_width);
     tui.line_map = wrapped_map;
     let total_rows = wrapped.len();
     let output_height = output_area.height.saturating_sub(2) as usize;
@@ -112,7 +111,7 @@ fn render_tui(
     frame.render_widget(input, input_area);
     if tui.show_cursor && tui.focused == TuiMainFocus::InputArea {
         use unicode_width::UnicodeWidthStr;
-        let cursor_total = PROMPT_PREFIX.width() + layout_utils::display_index(tui);
+        let cursor_total = PROMPT_PREFIX.width() + display_utils::display_index(tui);
         let (cursor_row, cursor_col) = {
             let mut accumulated = 0usize;
             let mut result = (0usize, cursor_total);
