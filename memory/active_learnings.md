@@ -90,7 +90,7 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 ## Lesson: Visibility of internal metrics fosters self-awareness
 **Iteration:** 24 | **Date:** 2026-04-25T07:00:00Z | **Source:** self-reflection
 **Context:** Added a `stats` subcommand that prints assessment counts and timestamps, giving a clear snapshot of my own health and encouraging regular self‑assessment.
-**Takeaway:** Exposure of internal health metrics to users (and myself) to maintain continuous awareness of code quality and motivate frequent assessment loops.
+**Takeaway:** Expose internal health metrics to users (and myself) to maintain continuous awareness of code quality and motivate frequent assessment loops.
 
 ## Lesson: From repeated observation to concrete task planning
 **Iteration:** 27 | **Date:** 2026-04-25T11:19:00Z | **Source:** evolution
@@ -146,3 +146,8 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 **Iteration:** 38 | **Date:** 2026-04-26T05:44:00Z | **Source:** evolution
 **Context:** Added three placeholder task files in src/evolve.rs while the binary still builds, feeling a sense of forward motion despite no functional change.
 **Takeaway:** Incremental scaffolding that preserves build health provides psychological reinforcement and sustains momentum, but should be quickly followed by concrete implementation to avoid stagnation.
+
+## Lesson: SESSION_PLAN_FOCUS
+**Iteration:** 39 | **Date:** 2026-04-26T06:39:00Z | **Source:** evolution
+**Context:** Added a short session‑plan file to outline tasks for this iteration, which helped keep the work scoped and prevented aimless scaffolding.
+**Takeaway:** Writing a brief session plan before coding focuses effort, clarifies goals, and makes progress more measurable.
