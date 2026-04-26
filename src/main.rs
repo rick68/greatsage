@@ -160,10 +160,11 @@ fn main() {
         .collect();
     app_config.runtime.verbose = args.verbose;
     app_config.runtime.strict_errors = args.strict_errors;
+    app_config.runtime.error_handling = args.error_handling;
     // Capture error handling flag before moving app_config into Bevy resource.
-    let error_handling_flag = app_config.runtime.strict_errors;
+    let error_handling_flag = app_config.runtime.error_handling;
     // Install panic hook for strict error handling if enabled.
-    maybe_set_strict_error_hook(error_handling_flag);
+    maybe_set_strict_error_hook(app_config.runtime.strict_errors);
 
     if let Err(e) = validate_required(&app_config) {
         eprintln!("error: {e:#}");

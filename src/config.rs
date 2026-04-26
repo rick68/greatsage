@@ -16,6 +16,8 @@ pub struct RuntimeConfig {
     pub verbose: bool,
     /// Enable REPL strict error mode (exit on internal errors)
     pub strict_errors: bool,
+    /// Enable REPL error handling validation (experimental)
+    pub error_handling: bool,
 }
 
 #[non_exhaustive]
