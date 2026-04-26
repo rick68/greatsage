@@ -68,6 +68,7 @@ use {
 /// system transitions `CursorState` to `Breathing`.
 ///
 /// [`CURSOR_BLINK_INTERVAL_MS`]: crate::tui::core::CURSOR_BLINK_INTERVAL_MS
+#[allow(clippy::too_many_arguments)]
 pub fn draw_scene_system(
     mut context: ResMut<RatatuiContext>,
     mut tui: NonSendMut<TuiMain>,

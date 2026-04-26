@@ -182,10 +182,8 @@ pub fn breathing_input_lines(
     }
 
     // Cursor past all lines (empty input or cursor at the very end).
-    if !cursor_placed {
-        if let Some(last) = result.last_mut() {
-            last.spans.push(Span::styled(" ", cursor_style));
-        }
+    if !cursor_placed && let Some(last) = result.last_mut() {
+        last.spans.push(Span::styled(" ", cursor_style));
     }
 
     result
