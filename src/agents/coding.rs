@@ -1,3 +1,28 @@
+//! # Coding Agent — Event Handling
+//!
+//! ## Agent event flow
+//! Events arrive via `CodingAgentEvent` messages on the Bevy main thread.
+//! `handle_coding_agent_events` matches each `AgentEvent` and drives the TUI
+//! through the `TuiMain` public API (never accessing `tui.blocks` directly).
+//!
+//! ## ThinkingBlock integration
+//! When `StreamDelta::Thinking` arrives, `tui.begin_thinking()` opens a new
+//! ThinkingBlock (spinner visible immediately).  Each subsequent delta calls
+//! `tui.append_thinking(delta)`.  On the first `StreamDelta::Text` after a
+//! thinking sequence, `tui.end_thinking(0)` seals the block (token count is
+//! not available per-delta; the final tally comes from `AgentEnd`).
+//!
+//! ## StreamingText integration
+//! On the first `StreamDelta::Text` delta, `tui.begin_streaming_text()` opens
+//! a `StreamingText` block with a fixed header.  Each delta calls
+//! `tui.update_streaming_text(rendered_lines)`, replacing the block in-place.
+//! When a tool call interrupts the stream, `tui.finalize_streaming_text()`
+//! converts the block to static `Lines` before tool output is appended.
+//!
+//! ## Coordinate mapping note
+//! `tui_output_index` (previously used for flat-Vec truncation) is gone.
+//! The `StreamingText` block owns its rendered lines and replaces them atomically.
+
 use {
     crate::{
         agents::{
@@ -5,9 +30,8 @@ use {
         },
         config::AppConfig,
         tokio::AppCancelToken,
-        tui::TuiMain,
+        tui::{RenderNeeded, TuiMain},
     },
-    ansi_to_tui::IntoText,
     anyhow::anyhow,
     bevy::{
         app::{App, AppExit, PostUpdate, Startup, Update},
@@ -29,17 +53,17 @@ use {
             state::{NextState, States},
         },
     },
+    ansi_to_tui::IntoText as _,
     bevy_tokio_tasks::{MainThreadContext, TokioTasksRuntime},
     ratatui::{
         style::Stylize,
-        text::{Line, Span, Text},
+        text::Line,
     },
     std::{
         fmt,
         io::{Error as IoError, Write, stdout},
         sync::Arc,
     },
-    termimad::MadSkin,
     tokio::{sync::Mutex, task::JoinHandle},
     yoagent::{
         agent::Agent,
@@ -93,13 +117,9 @@ fn setup(
     () = commands.insert_resource::<McpConfig>(mcp_config.clone());
 
     if let Some(tui) = tui.as_mut() {
-        () = tui
-            .output
-            .push(Line::from("🚀 Starting Interactive Coding Agent Session"));
+        () = tui.push_line(Line::from("🚀 Starting Interactive Coding Agent Session"));
         if !mcp_config.sse_transports.is_empty() || !mcp_config.stdio_transports.is_empty() {
-            () = tui
-                .output
-                .push(Line::from("🔌 Connecting to MCP servers...").yellow());
+            () = tui.push_line(Line::from("🔌 Connecting to MCP servers...").yellow());
             () = tui.scroll_to_bottom();
         }
     }
@@ -214,9 +234,8 @@ enum CodingAgentState {
 
 #[derive(Default, Resource)]
 pub struct CodingAgentTask {
-    last_usage: Usage,
     in_text: bool,
-    tui_output_index: usize,
+    in_thinking: bool,
     buffer: String,
 }
 
@@ -250,7 +269,25 @@ fn spawn_agent_task(
             .await;
             match rx_result {
                 Ok(mut rx) => {
+                    // Capture token usage directly from AgentEnd while forwarding
+                    // events to the message queue.  We cannot rely on
+                    // handle_coding_agent_events processing AgentEnd because
+                    // CodingAgentTask is removed (and the system's run-condition
+                    // fails) before the message is consumed.
+                    let mut final_usage: Option<Usage> = None;
+
                     while let Some(event) = rx.recv().await {
+                        if let AgentEvent::AgentEnd { ref messages } = event {
+                            for msg in messages.iter().rev() {
+                                if let AgentMessage::Llm(
+                                    yoagent::types::Message::Assistant { usage, .. },
+                                ) = msg
+                                {
+                                    final_usage = Some(usage.clone());
+                                    break;
+                                }
+                            }
+                        }
                         () = ctx
                             .run_on_main_thread(|ctx| {
                                 let _ = ctx
@@ -263,10 +300,28 @@ fn spawn_agent_task(
                     if let Ok(ref mut agent) = *coding_agent.lock().await {
                         agent.finish().await;
                     }
-                    // When done, reset state to Idle
+                    // When done, accumulate token usage and reset state to Idle.
                     () = ctx
-                        .run_on_main_thread(|ctx| {
+                        .run_on_main_thread(move |ctx| {
                             let world: &mut World = ctx.world;
+                            if let Some(usage) = final_usage {
+                                if let Some(mut total) =
+                                    world.get_resource_mut::<CodingAgentTotalTokenUsage>()
+                                {
+                                    let CodingAgentTotalTokenUsage(Usage {
+                                        input: dst_in,
+                                        output: dst_out,
+                                        cache_read: dst_cr,
+                                        cache_write: dst_cw,
+                                        total_tokens: dst_tt,
+                                    }) = &mut *total;
+                                    *dst_in += usage.input;
+                                    *dst_out += usage.output;
+                                    *dst_cr += usage.cache_read;
+                                    *dst_cw += usage.cache_write;
+                                    *dst_tt += usage.total_tokens;
+                                }
+                            }
                             _ = world.remove_resource::<CodingAgentTask>();
                             () = world
                                 .get_resource_mut::<NextState<CodingAgentState>>()
@@ -325,19 +380,37 @@ pub(crate) fn truncate(s: &str, max: usize) -> &str {
     }
 }
 
+/// Render markdown text to Ratatui `Line`s via termimad → ansi-to-tui.
+///
+/// Falls back to plain line splitting on any conversion error so the caller
+/// always gets a usable `Vec<Line<'static>>` regardless of input.
+fn render_markdown(text: &str) -> Vec<Line<'static>> {
+    let skin = termimad::MadSkin::default();
+    let mut buf: Vec<u8> = Vec::new();
+    if skin.write_text_on(&mut buf, text).is_ok() {
+        if let Ok(parsed) = buf.into_text() {
+            return parsed.lines;
+        }
+    }
+    // Fallback: raw line splitting
+    text.lines().map(|l| Line::raw(l.to_string())).collect()
+}
+
 fn handle_coding_agent_events(
     mut messages: MessageReader<CodingAgentEvent>,
     mut coding_agent_task: ResMut<CodingAgentTask>,
-    mut token_usage: ResMut<CodingAgentTotalTokenUsage>,
     mut tui: Option<NonSendMut<TuiMain>>,
+    // Option<> so this system works in non-TUI mode (--prompt flag) where
+    // tui_plugin is not loaded and RenderNeeded does not exist.
+    mut dirty: Option<ResMut<RenderNeeded>>,
     permission: Res<PermissionConfig>,
 ) {
     for CodingAgentEvent(event) in messages.read() {
         let CodingAgentTask {
-            last_usage,
             in_text,
-            tui_output_index,
+            in_thinking,
             buffer: buf,
+            ..
         } = coding_agent_task.as_mut();
 
         match event {
@@ -365,24 +438,33 @@ fn handle_coding_agent_events(
                 {
                     let msg = err.to_string();
                     if let Some(tui) = tui.as_mut() {
-                        () = tui.output.push(Line::from(msg).red());
-                        () = tui.scroll_to_bottom();
+                        () = tui.push_line(Line::from(msg).red());
                     } else {
                         eprintln!("{err}");
                     }
                 }
+
+                // Seal any open thinking block — model may call tools without
+                // emitting a Text delta first, so end_thinking won't trigger there.
+                if *in_thinking {
+                    if let Some(tui) = tui.as_mut() {
+                        () = tui.end_thinking(0);
+                    }
+                    *in_thinking = false;
+                }
+
+                // Seal any open streaming text before showing the tool line.
                 if *in_text {
                     if let Some(tui) = tui.as_mut() {
-                        let span: Span =
-                            format!("🔧 Tool Call: {tool_name} with args: {args}").yellow();
-                        () = tui.output.push(Line::from(span));
-                        () = tui.output.push(Line::from(""));
+                        () = tui.finalize_streaming_text();
                     }
                     *in_text = false;
                 }
+
+                // Build a compact one-line summary for the ToolCall block.
                 let summary: String = match tool_name.as_str() {
                     "bash" => {
-                        let cmd: &str = args
+                        let cmd = args
                             .get("command")
                             .and_then(|v| v.as_str())
                             .unwrap_or("...");
@@ -412,52 +494,58 @@ fn handle_coding_agent_events(
                 };
 
                 if let Some(tui) = tui.as_mut() {
-                    if let Some(line) = tui.output.last_mut() {
-                        *line = Line::from(summary).yellow();
-                    }
-
+                    () = tui.begin_tool_call(summary);
                     () = tui.scroll_to_bottom();
                 }
+                if let Some(ref mut d) = dirty { ***d = true; }
             }
-            AgentEvent::ToolExecutionEnd {
-                tool_name,
-                result,
-                is_error,
+            AgentEvent::ToolExecutionEnd { result, is_error, .. } => {
+                // Truncate large result dumps to a short error snippet (errors only).
+                let error_snippet = if *is_error {
+                    truncate(&format!("{result:?}"), 80).to_string()
+                } else {
+                    String::new()
+                };
+                if let Some(tui) = tui.as_mut() {
+                    () = tui.finish_tool_call(*is_error, error_snippet);
+                    () = tui.scroll_to_bottom();
+                }
+                if let Some(ref mut d) = dirty { ***d = true; }
+            }
+            AgentEvent::MessageUpdate {
+                delta: StreamDelta::Thinking { delta },
                 ..
             } => {
-                let line = if *is_error {
-                    Line::from(format!(
-                        "❌ Tool Incompleted: {tool_name} - Result: {result:?}"
-                    ))
-                    .red()
-                } else {
-                    Line::from(format!(
-                        "✅ Tool Completed: {tool_name} - Result: {result:?}"
-                    ))
-                    .yellow()
-                };
-
+                if !*in_thinking {
+                    if let Some(tui) = tui.as_mut() {
+                        () = tui.begin_thinking();
+                    }
+                    *in_thinking = true;
+                }
                 if let Some(tui) = tui.as_mut() {
-                    () = tui.output.push(line);
+                    () = tui.append_thinking(delta);
                     () = tui.scroll_to_bottom();
                 }
+                if let Some(ref mut d) = dirty { ***d = true; }
             }
             AgentEvent::MessageUpdate {
                 delta: StreamDelta::Text { delta },
                 ..
             } => {
+                if *in_thinking {
+                    // Seal the ThinkingBlock when text begins.
+                    // Token count is not available here; AgentEnd has the full tally.
+                    if let Some(tui) = tui.as_mut() {
+                        () = tui.end_thinking(0);
+                    }
+                    *in_thinking = false;
+                }
+
                 if !*in_text {
                     () = buf.clear();
                     if let Some(tui) = tui.as_mut() {
-                        () = tui.output.push(Line::from(""));
-                        let line: Line = Line::from("📝 Agent Response:");
-                        () = tui.output.push(line);
-                        let span = "─".repeat(50).blue();
-                        let line = Line::from(span);
-                        () = tui.output.push(line);
-                        () = tui.output.push(Line::from(""));
+                        () = tui.begin_streaming_text();
                     }
-                    *tui_output_index = 0;
                     *in_text = true;
                 }
 
@@ -467,52 +555,39 @@ fn handle_coding_agent_events(
                 } else if let Some(tui) = tui.as_mut() {
                     () = buf.push_str(delta);
 
-                    let skin: MadSkin = MadSkin::default();
-
-                    let output_len = tui.output.len();
-                    () = tui
-                        .output
-                        .truncate(output_len.saturating_sub(1 + *tui_output_index));
-
-                    let mut bytes = Vec::new();
-                    () = skin.write_text_on(&mut bytes, buf).unwrap();
-                    let out = String::from_utf8(bytes).expect("termimad produced invalid UTF-8");
-
-                    let text: Text = out.into_text().unwrap();
-                    *tui_output_index = text.lines.len();
-                    for line in text.lines {
-                        () = tui.output.push(line);
-                    }
-
-                    let span: Span = "─".repeat(50).blue();
-                    let line: Line = Line::from(span);
-                    () = tui.output.push(line);
-
+                    // Render the accumulated buffer as plain lines.
+                    // termimad + ansi-to-tui is used for final markdown presentation;
+                    // during streaming we use raw splits so content is always visible.
+                    let rendered: Vec<Line<'static>> = buf
+                        .lines()
+                        .map(|l| Line::raw(l.to_string()))
+                        .collect();
+                    () = tui.update_streaming_text(rendered);
                     () = tui.scroll_to_bottom();
                 }
+                if let Some(ref mut d) = dirty { ***d = true; }
             }
-            AgentEvent::AgentEnd { messages } => {
-                for msg in messages.iter().rev() {
-                    if let AgentMessage::Llm(yoagent::types::Message::Assistant { usage, .. }) = msg
-                    {
-                        *last_usage = usage.clone();
-                        // token_usage. = usage.clone();
-                        let CodingAgentTotalTokenUsage(Usage {
-                            input: dst_input,
-                            output: dst_output,
-                            cache_read: dst_cache_read,
-                            cache_write: dst_cache_write,
-                            total_tokens: dst_total_tokens,
-                        }) = token_usage.as_mut();
-
-                        *dst_input += usage.input;
-                        *dst_output += usage.output;
-                        *dst_cache_read += usage.cache_read;
-                        *dst_cache_write += usage.cache_write;
-                        *dst_total_tokens += usage.total_tokens;
-
-                        break;
+            AgentEvent::AgentEnd { .. } => {
+                // Token accumulation is handled directly in the background task's
+                // cleanup closure (spawn_agent_task) to avoid the race where
+                // CodingAgentTask is removed before this handler can run.
+                // We still seal any TUI blocks that might be left open.
+                if *in_thinking {
+                    if let Some(tui) = tui.as_mut() {
+                        () = tui.end_thinking(0);
                     }
+                    *in_thinking = false;
+                }
+                if *in_text {
+                    if let Some(tui) = tui.as_mut() {
+                        // Render the full buffer as markdown before sealing the block.
+                        // During streaming we use raw lines for speed; at the end we
+                        // upgrade to fully rendered markdown via termimad → ansi-to-tui.
+                        let md_lines = render_markdown(&buf);
+                        () = tui.update_streaming_text(md_lines);
+                        () = tui.finalize_streaming_text();
+                    }
+                    *in_text = false;
                 }
             }
             _ => (),
@@ -541,19 +616,15 @@ fn check_agent_ready(
     let has_mcp = !sse_transports.is_empty() || !stdio_transports.is_empty();
 
     if let Some(tui) = tui.as_mut() {
-        () = tui.output.push(Line::from("✅ Ready").green());
+        () = tui.push_line(Line::from("✅ Ready").green());
         if has_mcp {
-            () = tui.output.push(Line::from("✅ MCP connected:").green());
+            () = tui.push_line(Line::from("✅ MCP connected:").green());
             for url in sse_transports {
-                () = tui
-                    .output
-                    .push(Line::from(format!("  http: {url}")).green());
+                () = tui.push_line(Line::from(format!("  http: {url}")).green());
             }
             for cmd in stdio_transports {
                 let label = cmd.split_whitespace().next().unwrap_or(cmd.as_str());
-                () = tui
-                    .output
-                    .push(Line::from(format!("  stdio: {label}")).green());
+                () = tui.push_line(Line::from(format!("  stdio: {label}")).green());
             }
         }
         () = tui.scroll_to_bottom();
