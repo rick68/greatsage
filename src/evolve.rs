@@ -112,12 +112,83 @@ pub fn assessment_phase(base_dir: impl AsRef<Path>) -> Result<String, Box<dyn st
 pub fn run_evolve_with(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
     let assessment = assessment_phase(&base_dir)?;
     println!("[greatsage] Assessment Phase Result:\n{assessment}");
-    // Planning phase
+    // Planning phase – generate placeholder tasks.
     () = planning_phase(&base_dir)?;
     println!("[greatsage] Planning Phase completed. Task files created in session_plan/.");
     // Execute tasks phase
     () = execute_tasks(&base_dir)?;
     println!("[greatsage] Execute Tasks Phase completed. Log written to evolve.log.");
+    Ok(())
+}
+
+/// Generate up to three task files based on the assessment output.
+/// The assessment string contains lines like "Version: X", "Source files: N", "CI last: status".
+/// For each line we create a task with a descriptive title.
+#[allow(dead_code)]
+fn generate_tasks_from_assessment(
+    base_dir: &Path,
+    assessment: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let plan_dir = base_dir.join("session_plan");
+    // Ensure the directory exists (planning_phase already created it, but be safe).
+    if !plan_dir.is_dir() {
+        fs::create_dir_all(&plan_dir)?;
+    }
+    // Parse the assessment lines.
+    let mut titles = Vec::new();
+    for line in assessment.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        // Use the part after ':' as title content.
+        if let Some((_key, value)) = line.split_once(':') {
+            let title = format!("Address {}", value.trim());
+            titles.push(title);
+        }
+    }
+    // Limit to three tasks.
+    for (i, title) in titles.iter().take(3).enumerate() {
+        let file_path = plan_dir.join(format!("task_{:02}.md", i + 1));
+        let mut file = File::create(&file_path)?;
+        writeln!(file, "Title: {}", title)?;
+        writeln!(file, "Files: none")?;
+        writeln!(file, "Issue: none")?;
+        writeln!(file, "\nGenerated from assessment output.")?;
+    }
+    Ok(())
+}
+
+/// Planning phase now receives the assessment output to create meaningful tasks.
+#[allow(dead_code)]
+pub fn planning_phase_with_assessment(
+    base_dir: impl AsRef<Path>,
+    assessment: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Create session_plan directory
+    let plan_dir = base_dir.as_ref().join("session_plan");
+    // Resolve canonical path to detect protected locations even via symlinks
+    let canonical_plan_dir = fs::canonicalize(&plan_dir).unwrap_or(plan_dir.clone());
+    if is_protected_path(&canonical_plan_dir) {
+        return Err(Box::new(std::io::Error::other(format!(
+            "planning_phase aborted: protected path {}",
+            canonical_plan_dir.display()
+        ))));
+    }
+    if plan_dir.exists() {
+        // Clean existing task files
+        for entry in fs::read_dir(&plan_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("md") {
+                fs::remove_file(path)?;
+            }
+        }
+    } else {
+        fs::create_dir_all(&plan_dir)?;
+    }
+
+    // Generate task files based on assessment output.
+    generate_tasks_from_assessment(base_dir.as_ref(), assessment)?;
     Ok(())
 }
 

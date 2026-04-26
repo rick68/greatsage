@@ -1,6 +1,6 @@
 [package]
 name = "greatsage"
-version = "0.0.0"
+version = "0.0.1"
 edition = "2024"
 description = "Rimuru's Unique Skill, you know the one."
 license = "MIT OR Apache-2.0"
