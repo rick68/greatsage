@@ -295,6 +295,10 @@ mod tests {
     mod cli_stats;
     mod evolve_protection;
     mod repl_error_handling;
+    mod task_01_execution;
+    mod task_02_execution;
+    mod task_03_execution;
+    mod task_01_placeholder;
     mod task_02_placeholder;
     mod task_03_placeholder;
     mod truncate;
