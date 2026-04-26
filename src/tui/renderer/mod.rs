@@ -220,10 +220,7 @@ fn render_tui(
         CursorStyle::Breathing if is_input_focused => {
             breathing_input_lines(&input_lines, cursor_total, tui.cursor_phase)
         }
-        _ => input_lines
-            .iter()
-            .map(|l| Line::from(l.as_str()))
-            .collect(),
+        _ => input_lines.iter().map(|l| Line::from(l.as_str())).collect(),
     };
 
     let input = Paragraph::new(input_text).style(Style::default()).block(
@@ -344,7 +341,11 @@ fn breathing_cursor_style(phase: f32) -> Style {
     let bg_t = 0.05 + 0.95 * brightness;
     let bg = Color::Indexed(232 + (bg_t * 23.0).round() as u8);
     // Adaptive contrast: pick whichever text colour contrasts the background.
-    let fg = if brightness > 0.5 { Color::Black } else { Color::White };
+    let fg = if brightness > 0.5 {
+        Color::Black
+    } else {
+        Color::White
+    };
     Style::default().bg(bg).fg(fg)
 }
 
@@ -353,12 +354,17 @@ fn breathing_cursor_style(phase: f32) -> Style {
 /// Only the single character cell under the cursor receives a style; every other
 /// character is left as a plain [`Span::raw`] so the breathing effect is strictly
 /// isolated to the cursor position.
-fn breathing_input_lines(lines: &[String], cursor_col_total: usize, phase: f32) -> Vec<Line<'static>> {
+fn breathing_input_lines(
+    lines: &[String],
+    cursor_col_total: usize,
+    phase: f32,
+) -> Vec<Line<'static>> {
     let cursor_style = breathing_cursor_style(phase);
     let mut accumulated = 0usize;
     let mut cursor_placed = false;
     let mut result: Vec<Line<'static>> = Vec::with_capacity(lines.len());
 
+    #[allow(clippy::collapsible_if)]
     for (line_idx, line) in lines.iter().enumerate() {
         let line_w = line.width();
 
@@ -406,6 +412,7 @@ fn breathing_input_lines(lines: &[String], cursor_col_total: usize, phase: f32) 
     }
 
     // Cursor past all lines (empty input or cursor after every character).
+    #[allow(clippy::collapsible_if)]
     if !cursor_placed {
         if let Some(last) = result.last_mut() {
             last.spans.push(Span::styled(" ", cursor_style));

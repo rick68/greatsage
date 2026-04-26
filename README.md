@@ -37,7 +37,8 @@ greatsage --prompt "Hello"
 | `--skills <dir>` | Directory of skill files (repeatable) |
 | `--mcp <server>` | MCP server: HTTP URL or stdio command (repeatable) |
 | `-v, --verbose` | Print status messages to stderr in non-interactive mode |
-| `--error-handling` | Enable REPL error‑handling validation (experimental; default false) |
+| `--error-handling` | Enable REPL error‑handling validation (experimental; default false). When enabled, REPL validates each command and displays errors in a standardized format, improving guard‑rail safety. |
+| `--strict-errors` | Exit REPL on internal errors (experimental; default false). In strict mode, any internal error aborts the REPL session, providing a guard‑rail against hidden failures. |
 
 ## REPL usage
 
