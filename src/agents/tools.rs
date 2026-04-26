@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn no_truncation_under_limit() {
         let short = "line1\nline2\nline3";
-        assert_eq!(truncate_tool_output(short, 40_000), short);
+        assert_eq!(truncate_tool_output(short, MAX_TOOL_OUTPUT_CHARS), short);
     }
 
     #[test]

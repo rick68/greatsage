@@ -1,5 +1,6 @@
 pub mod coding;
 pub use coding::{CodingAgentPromptChannel, CodingAgentTask, CodingAgentTotalTokenUsage};
+
 mod tools;
 pub use tools::build_tools;
 
@@ -434,7 +435,7 @@ impl From<Vec<String>> for McpConfig {
                     Err(e) => eprintln!("MCP: invalid URL '{server}': {e}"),
                 }
             } else if !server.trim().is_empty() {
-                stdio_transports.push(server);
+                () = stdio_transports.push(server);
             }
         }
         Self {
@@ -455,7 +456,7 @@ pub fn agents_plugin(app: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, pretty_assertions::assert_eq, tempfile::tempdir};
+    use {super::*, pretty_assertions::assert_eq, std::fs, tempfile::tempdir};
 
     #[test]
     fn test_retry_success_on_second_attempt() {
@@ -494,7 +495,7 @@ mod tests {
         // Separate directory not allowed
         let denied_dir = tempdir().expect("failed to create denied temp dir");
         let denied_path = denied_dir.path().join("outside.txt");
-        () = std::fs::write(&denied_path, b"nope").expect("failed to write denied file");
+        () = fs::write(&denied_path, b"nope").expect("failed to write denied file");
 
         let perm = PermissionConfig {
             allowed_dir: allowed_path.clone(),
@@ -536,10 +537,10 @@ mod tests {
     fn command_mixed_allowed_and_disallowed_tokens() {
         let allowed_dir = tempdir().expect("create allowed temp dir");
         let allowed_file = allowed_dir.path().join("good.txt");
-        () = std::fs::write(&allowed_file, b"ok").expect("write allowed file");
+        () = fs::write(&allowed_file, b"ok").expect("write allowed file");
         let denied_dir = tempdir().expect("create denied temp dir");
         let denied_file = denied_dir.path().join("bad.txt");
-        () = std::fs::write(&denied_file, b"no").expect("write denied file");
+        () = fs::write(&denied_file, b"no").expect("write denied file");
         let config = PermissionConfig {
             allowed_dir: allowed_dir.path().to_path_buf(),
         };
@@ -591,8 +592,7 @@ mod tests {
         let json = "{\"url\": \"http://example.com/path\"}";
         // Also include an allowed path token to ensure overall passes.
         let cmd = format!(
-            "echo {} {}",
-            json,
+            "echo {json} {}",
             allowed_dir.path().join("file.txt").to_str().unwrap()
         );
         assert!(config.validate_command(&cmd).is_ok());
