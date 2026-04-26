@@ -32,6 +32,7 @@ use {
         tokio::AppCancelToken,
         tui::{RenderNeeded, TuiMain},
     },
+    ansi_to_tui::IntoText as _,
     anyhow::anyhow,
     bevy::{
         app::{App, AppExit, PostUpdate, Startup, Update},
@@ -53,12 +54,8 @@ use {
             state::{NextState, States},
         },
     },
-    ansi_to_tui::IntoText as _,
     bevy_tokio_tasks::{MainThreadContext, TokioTasksRuntime},
-    ratatui::{
-        style::Stylize,
-        text::Line,
-    },
+    ratatui::{style::Stylize, text::Line},
     std::{
         fmt,
         io::{Error as IoError, Write, stdout},
@@ -279,9 +276,10 @@ fn spawn_agent_task(
                     while let Some(event) = rx.recv().await {
                         if let AgentEvent::AgentEnd { ref messages } = event {
                             for msg in messages.iter().rev() {
-                                if let AgentMessage::Llm(
-                                    yoagent::types::Message::Assistant { usage, .. },
-                                ) = msg
+                                if let AgentMessage::Llm(yoagent::types::Message::Assistant {
+                                    usage,
+                                    ..
+                                }) = msg
                                 {
                                     final_usage = Some(usage.clone());
                                     break;
@@ -497,9 +495,13 @@ fn handle_coding_agent_events(
                     () = tui.begin_tool_call(summary);
                     () = tui.scroll_to_bottom();
                 }
-                if let Some(ref mut d) = dirty { ***d = true; }
+                if let Some(ref mut d) = dirty {
+                    ***d = true;
+                }
             }
-            AgentEvent::ToolExecutionEnd { result, is_error, .. } => {
+            AgentEvent::ToolExecutionEnd {
+                result, is_error, ..
+            } => {
                 // Truncate large result dumps to a short error snippet (errors only).
                 let error_snippet = if *is_error {
                     truncate(&format!("{result:?}"), 80).to_string()
@@ -510,7 +512,9 @@ fn handle_coding_agent_events(
                     () = tui.finish_tool_call(*is_error, error_snippet);
                     () = tui.scroll_to_bottom();
                 }
-                if let Some(ref mut d) = dirty { ***d = true; }
+                if let Some(ref mut d) = dirty {
+                    ***d = true;
+                }
             }
             AgentEvent::MessageUpdate {
                 delta: StreamDelta::Thinking { delta },
@@ -526,7 +530,9 @@ fn handle_coding_agent_events(
                     () = tui.append_thinking(delta);
                     () = tui.scroll_to_bottom();
                 }
-                if let Some(ref mut d) = dirty { ***d = true; }
+                if let Some(ref mut d) = dirty {
+                    ***d = true;
+                }
             }
             AgentEvent::MessageUpdate {
                 delta: StreamDelta::Text { delta },
@@ -558,14 +564,14 @@ fn handle_coding_agent_events(
                     // Render the accumulated buffer as plain lines.
                     // termimad + ansi-to-tui is used for final markdown presentation;
                     // during streaming we use raw splits so content is always visible.
-                    let rendered: Vec<Line<'static>> = buf
-                        .lines()
-                        .map(|l| Line::raw(l.to_string()))
-                        .collect();
+                    let rendered: Vec<Line<'static>> =
+                        buf.lines().map(|l| Line::raw(l.to_string())).collect();
                     () = tui.update_streaming_text(rendered);
                     () = tui.scroll_to_bottom();
                 }
-                if let Some(ref mut d) = dirty { ***d = true; }
+                if let Some(ref mut d) = dirty {
+                    ***d = true;
+                }
             }
             AgentEvent::AgentEnd { .. } => {
                 // Token accumulation is handled directly in the background task's

@@ -198,6 +198,7 @@ pub(crate) fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn st
                         () = fs::write(&placeholder_path, "Task 1 completed")?;
                     }
                     // Special handling for Placeholder Task 2: create a second marker file.
+                    // Handle Placeholder Task 2: create a marker file indicating completion.
                     if title == "Placeholder Task 2" {
                         let placeholder_path = base_dir.join(".greatsage").join("placeholder2.txt");
                         if let Some(parent) = placeholder_path.parent() {
@@ -363,6 +364,14 @@ mod tests {
         );
         let marker2 = fs::read_to_string(&placeholder2_path).expect("read placeholder2 file");
         assert_eq!(marker2, "Task 2 completed");
+        // Verify placeholder marker file created for Task 3.
+        let placeholder3_path = base.join(".greatsage").join("placeholder3.txt");
+        assert!(
+            placeholder3_path.is_file(),
+            "placeholder3.txt should be created"
+        );
+        let marker3 = fs::read_to_string(&placeholder3_path).expect("read placeholder3 file");
+        assert_eq!(marker3, "Task 3 completed");
     }
 
     #[test]

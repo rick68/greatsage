@@ -298,7 +298,13 @@ impl TuiMain {
     /// `error_snippet` is a short truncated message for failed calls.
     pub fn finish_tool_call(&mut self, is_error: bool, error_snippet: String) {
         for block in self.blocks.iter_mut().rev() {
-            if let OutputBlock::ToolCall { running, is_error: ie, error_snippet: es, .. } = block {
+            if let OutputBlock::ToolCall {
+                running,
+                is_error: ie,
+                error_snippet: es,
+                ..
+            } = block
+            {
                 if *running {
                     *running = false;
                     *ie = is_error;
@@ -484,7 +490,9 @@ impl TuiMain {
                 SPINNER[(start_instant.elapsed().as_millis() as usize / 100) % SPINNER.len()];
             Line::from(vec![
                 Span::from(summary.to_string()).yellow(),
-                Span::from(format!("  {frame}  {elapsed_str}")).yellow().dim(),
+                Span::from(format!("  {frame}  {elapsed_str}"))
+                    .yellow()
+                    .dim(),
             ])
         } else if is_error {
             let mut spans = vec![
@@ -765,13 +773,11 @@ impl TuiMain {
         } else {
             COLOR_BORDER_UNFOCUSED
         };
-        let input = Paragraph::new(input_text)
-            .style(Style::default())
-            .block(
-                Block::bordered()
-                    .title("Input")
-                    .border_style(Style::default().fg(input_border_color)),
-            );
+        let input = Paragraph::new(input_text).style(Style::default()).block(
+            Block::bordered()
+                .title("Input")
+                .border_style(Style::default().fg(input_border_color)),
+        );
         () = frame.render_widget::<Paragraph<'_>>(input, input_area);
 
         if self.show_cursor && self.focused == TuiMainFocus::InputArea {
@@ -895,15 +901,11 @@ fn handle_global_input(
                 **dirty = true;
             }
             // Expand / collapse all ThinkingBlocks — usable from any focus area.
-            KeyCode::Char('A')
-                if !in_input && matches!(kind, KeyEventKind::Press) =>
-            {
+            KeyCode::Char('A') if !in_input && matches!(kind, KeyEventKind::Press) => {
                 () = tui_main.expand_all_thinking();
                 **dirty = true;
             }
-            KeyCode::Char('a')
-                if !in_input && matches!(kind, KeyEventKind::Press) =>
-            {
+            KeyCode::Char('a') if !in_input && matches!(kind, KeyEventKind::Press) => {
                 () = tui_main.collapse_all_thinking();
                 **dirty = true;
             }
@@ -1091,9 +1093,7 @@ fn handle_input_area_input(
                         }
                         _ => {
                             () = tui_main.push_history(&input);
-                            () = tui_main.push_line(
-                                Line::from(format!("> {input}")).dark_gray(),
-                            );
+                            () = tui_main.push_line(Line::from(format!("> {input}")).dark_gray());
                             () = tui_main.clear_input();
                             () = tui_main.scroll_to_bottom();
                             match channel.sender.send(input) {
@@ -1187,10 +1187,8 @@ fn draw_scene_system(
     // Spinner timer: animate ThinkingBlock / ToolCall spinners at 100 ms intervals.
     // Using a dedicated timer (not every Bevy frame) prevents continuous full-frame
     // redraws that caused visible input-area flicker during agent responses.
-    let spinner_timer = spinner_timer.get_or_insert(Timer::new(
-        Duration::from_millis(100),
-        TimerMode::Repeating,
-    ));
+    let spinner_timer =
+        spinner_timer.get_or_insert(Timer::new(Duration::from_millis(100), TimerMode::Repeating));
     _ = spinner_timer.tick(time.delta());
     let has_spinner = tui.blocks.iter().any(|b| match b {
         OutputBlock::Thinking(tb) => tb.streaming,
