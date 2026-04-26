@@ -49,6 +49,7 @@ ANTHROPIC_API_KEY=sk-... ./scripts/evolve.sh
 
 **Multi-file agent** (`src/`):
 - `main.rs` — Application entry point. Initializes the Bevy App, plugins, resources, and systems, managing the overall application lifecycle.
+- `lib.rs` — Library entry point. Currently exports the `evolve` module.
 - `cli.rs` — Argument parsing via `clap`. Defines `Args` and subcommands (`Config`, `Stats`, `Evolve`), and provides help for REPL commands.
 - `config.rs` — Centralized configuration management. Defines the `AppConfig` resource, handling TOML loading and runtime dynamic modifications.
 - `tokio.rs` — Integration layer between Tokio and Bevy. Manages the `AppCancelToken` and handles OS terminal signals (e.g., SIGINT).
@@ -64,6 +65,7 @@ ANTHROPIC_API_KEY=sk-... ./scripts/evolve.sh
 - `tui/core/action_system.rs` — System for processing TUI actions like scrolling and toggling UI states.
 - `tui/input/mod.rs` — Systems for handling keyboard and mouse input via `bevy_ratatui`.
 - `tui/renderer/mod.rs` — Main TUI rendering system using `ratatui`.
+- `tui/renderer/cursor.rs` — Cursor animation implementation (Blink ↔ Breathing modes).
 - `tui/renderer/display_utils.rs` — Utilities for line wrapping and display calculations.
 - `tui/renderer/widgets/mod.rs` — Registry and common traits for UI widgets.
 - `tui/renderer/widgets/thinking.rs` — Widget for displaying agent thinking process.
@@ -72,14 +74,15 @@ ANTHROPIC_API_KEY=sk-... ./scripts/evolve.sh
 - `tui/commands/mod.rs` — REPL command registry and dispatcher.
 - `tui/commands/builtin.rs` — Implementation of built-in commands like `/help`, `/clear`, `/exit`.
 - `tui/commands/git.rs` — Implementation of the `/git` REPL command.
-- `tui/tests/cli_stats.rs` — Tests for CLI statistics command.
-- `tui/tests/evolve_cli.rs` — Tests for the evolution CLI interface.
-- `tui/tests/evolve_protection.rs` — Tests for safety guards during evolution.
-- `tui/tests/repl_error_handling.rs` — Tests for REPL error robustness.
-- `tui/tests/truncate.rs` — Tests for tool output truncation logic.
-- `tui/tests/task_02_placeholder.rs` — Placeholder and execution tests for the evolution pipeline.
-- `tui/tests/task_03_placeholder.rs` — Placeholder and execution tests for the evolution pipeline.
-- `tui/tests/task_03_execution.rs` — Placeholder and execution tests for the evolution pipeline.
+- `tests/cli_stats.rs` — Tests for CLI statistics command.
+- `tests/evolve_cli.rs` — Tests for the evolution CLI interface.
+- `tests/evolve_protection.rs` — Tests for safety guards during evolution.
+- `tests/repl_error_handling.rs` — Tests for REPL error robustness.
+- `tests/truncate.rs` — Tests for tool output truncation logic.
+- `tests/task_02_execution.rs` — Execution tests for the evolution pipeline task 02.
+- `tests/task_02_placeholder.rs` — Placeholder tests for the evolution pipeline task 02.
+- `tests/task_03_execution.rs` — Execution tests for the evolution pipeline task 03.
+- `tests/task_03_placeholder.rs` — Placeholder tests for the evolution pipeline task 03.
 
 Uses `yoagent::Agent` with `OpenAiCompatProvider`, `build_tools()` (see `agents/tools.rs`), and an optional `SkillSet`.
 
