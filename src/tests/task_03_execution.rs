@@ -2,8 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use {
-        std::fs, tempfile::TempDir, crate::evolve::execute_tasks};
+    use {crate::evolve::execute_tasks, std::fs, tempfile::TempDir};
 
     #[test]
     fn test_placeholder_task_3_execution_creates_marker() {
@@ -18,7 +17,10 @@ mod tests {
         () = execute_tasks(base).expect("execute_tasks should succeed");
         // Verify placeholder marker file.
         let placeholder_path = base.join(".greatsage").join("placeholder3.txt");
-        assert!(placeholder_path.is_file(), "placeholder3.txt should be created");
+        assert!(
+            placeholder_path.is_file(),
+            "placeholder3.txt should be created"
+        );
         let marker = fs::read_to_string(&placeholder_path).expect("read placeholder file");
         assert_eq!(marker, "Task 3 completed");
     }
