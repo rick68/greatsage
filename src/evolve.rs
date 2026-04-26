@@ -1,6 +1,6 @@
 use {
     std::{
-        fs::{self, File},
+        fs,
         future::Future,
         io::{ErrorKind, Write},
         path::Path,
@@ -127,30 +127,30 @@ pub fn run_evolve_with(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::er
 #[allow(dead_code)]
 fn generate_tasks_from_assessment(
     base_dir: &Path,
-    assessment: &str,
+    assessment: impl AsRef<str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let plan_dir = base_dir.join("session_plan");
     // Ensure the directory exists (planning_phase already created it, but be safe).
     if !plan_dir.is_dir() {
-        fs::create_dir_all(&plan_dir)?;
+        () = fs::create_dir_all(&plan_dir)?;
     }
     // Parse the assessment lines.
     let mut titles = Vec::new();
-    for line in assessment.lines() {
+    for line in assessment.as_ref().lines() {
         if line.trim().is_empty() {
             continue;
         }
         // Use the part after ':' as title content.
         if let Some((_key, value)) = line.split_once(':') {
             let title = format!("Address {}", value.trim());
-            titles.push(title);
+            () = titles.push(title);
         }
     }
     // Limit to three tasks.
     for (i, title) in titles.iter().take(3).enumerate() {
         let file_path = plan_dir.join(format!("task_{:02}.md", i + 1));
-        let mut file = File::create(&file_path)?;
-        writeln!(file, "Title: {}", title)?;
+        let mut file = fs::File::create(&file_path)?;
+        writeln!(file, "Title: {title}")?;
         writeln!(file, "Files: none")?;
         writeln!(file, "Issue: none")?;
         writeln!(file, "\nGenerated from assessment output.")?;
@@ -237,7 +237,7 @@ pub(crate) fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn st
     let log_dir = base_dir.join(".greatsage");
     () = fs::create_dir_all(&log_dir)?;
     let log_path = log_dir.join("evolve.log");
-    let mut log_file = File::create(&log_path)?;
+    let mut log_file = fs::File::create(&log_path)?;
 
     // Iterate over markdown files in the session_plan directory.
     for entry in fs::read_dir(&plan_dir)? {
@@ -328,7 +328,7 @@ pub fn planning_phase(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::err
                 canonical_file_path.display()
             ))));
         }
-        let mut file = File::create(&file_path)?;
+        let mut file = fs::File::create(&file_path)?;
         writeln!(file, "Title: Placeholder Task {}", i)?;
         writeln!(file, "Files: none")?;
         writeln!(file, "Issue: none")?;
