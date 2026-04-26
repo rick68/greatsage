@@ -278,7 +278,7 @@ fn spawn_agent_task(
                 Err(_e) => {
                     // Use unified error handling respecting the runtime flag.
                     // Propagate the error through handle_error; it will log if enabled or return Err.
-                    let simple_err = IoError::new(std::io::ErrorKind::Other, "LLM request failed");
+                    let simple_err = IoError::other("LLM request failed");
                     let _ = handle_error(simple_err, error_handling);
                     () = ctx
                         .run_on_main_thread(|ctx: MainThreadContext| {
