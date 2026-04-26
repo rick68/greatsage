@@ -76,7 +76,7 @@ pub fn revert_last() -> Result<(), git2::Error> {
             .ok_or(git2::Error::from_str("HEAD has no target"))?,
     )?;
     // Apply inverse changes to the index and working directory.
-    repo.revert(&target, None)?;
+    () = repo.revert(&target, None)?;
     // Create the revert commit from the staged result.
     let message = format!("Revert \"{}\"", target.summary().unwrap_or(""));
     commit(&message)
@@ -121,7 +121,7 @@ mod tests {
         () = index
             .add_path(std::path::Path::new("init.txt"))
             .expect("Failed to add init file to index");
-        index.write().expect("Failed to write index");
+        () = index.write().expect("Failed to write index");
         let tree_id = index.write_tree().expect("Failed to write tree");
         let tree = repo.find_tree(tree_id).expect("Failed to find tree");
         () = drop(index);
