@@ -21,8 +21,8 @@ use {
         agents::CodingAgentTotalTokenUsage,
         tui::{
             core::{
-                COLOR_BORDER_FOCUSED, COLOR_BORDER_UNFOCUSED, PROMPT_PREFIX, SPINNER, TuiMain,
-                TuiMainFocus,
+                COLOR_BORDER_FOCUSED, COLOR_BORDER_UNFOCUSED, CURSOR_BLINK_INTERVAL_MS,
+                CursorStyle, PROMPT_PREFIX, SPINNER, TuiMain, TuiMainFocus,
             },
             events::RenderNeeded,
         },
@@ -38,11 +38,12 @@ use {
     ratatui::{
         Frame,
         layout::{Constraint, Layout},
-        style::Style,
+        style::{Color, Style},
+        text::{Line, Span},
         widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation},
     },
     std::time::Duration,
-    unicode_width::UnicodeWidthStr,
+    unicode_width::{UnicodeWidthChar, UnicodeWidthStr},
 };
 
 /// Bevy system: decides whether to render a frame and drives periodic timers.
@@ -68,15 +69,24 @@ pub fn draw_scene_system(
     mut dirty: ResMut<RenderNeeded>,
     token_usage: Option<Res<CodingAgentTotalTokenUsage>>,
 ) -> bevy::ecs::error::Result {
-    // ── Cursor blink ──────────────────────────────────────────────────────────
-    let cursor_timer = cursor_timer.get_or_insert(Timer::new(
-        Duration::from_millis(crate::tui::core::CURSOR_BLINK_INTERVAL_MS),
-        TimerMode::Repeating,
-    ));
-    _ = cursor_timer.tick(time.delta());
-    if cursor_timer.just_finished() {
-        tui.show_cursor ^= true; // toggle blink phase
-        **dirty = true;
+    // ── Cursor animation ──────────────────────────────────────────────────────
+    match tui.cursor_style {
+        CursorStyle::Blink => {
+            let cursor_timer = cursor_timer.get_or_insert(Timer::new(
+                Duration::from_millis(CURSOR_BLINK_INTERVAL_MS),
+                TimerMode::Repeating,
+            ));
+            _ = cursor_timer.tick(time.delta());
+            if cursor_timer.just_finished() {
+                tui.show_cursor ^= true;
+                **dirty = true;
+            }
+        }
+        CursorStyle::Breathing => {
+            // Advance phase proportional to elapsed time. Full cycle = 5 seconds.
+            tui.cursor_phase = (tui.cursor_phase + time.delta().as_secs_f32() / 5.0) % 1.0;
+            **dirty = true;
+        }
     }
 
     // ── Spinner refresh ───────────────────────────────────────────────────────
@@ -198,15 +208,24 @@ fn render_tui(
     () = frame.render_widget(status, status_area);
 
     // ── Input panel ───────────────────────────────────────────────────────────
-    let input_text: Vec<ratatui::text::Line<'_>> = input_lines
-        .iter()
-        .map(|l| ratatui::text::Line::from(l.as_str()))
-        .collect();
-    let input_border_color = if tui.focused == TuiMainFocus::InputArea {
+    let is_input_focused = tui.focused == TuiMainFocus::InputArea;
+    let cursor_total = PROMPT_PREFIX.width() + display_utils::display_index(tui);
+    let input_border_color = if is_input_focused {
         COLOR_BORDER_FOCUSED
     } else {
         COLOR_BORDER_UNFOCUSED
     };
+
+    let input_text: Vec<Line<'_>> = match tui.cursor_style {
+        CursorStyle::Breathing if is_input_focused => {
+            breathing_input_lines(&input_lines, cursor_total, tui.cursor_phase)
+        }
+        _ => input_lines
+            .iter()
+            .map(|l| Line::from(l.as_str()))
+            .collect(),
+    };
+
     let input = Paragraph::new(input_text).style(Style::default()).block(
         Block::bordered()
             .title("Input")
@@ -215,11 +234,9 @@ fn render_tui(
     () = frame.render_widget(input, input_area);
 
     // ── Software cursor ───────────────────────────────────────────────────────
-    // Rendered only in the blink-on phase and only when the input box is focused.
-    if tui.show_cursor && tui.focused == TuiMainFocus::InputArea {
-        // Total visual width from the left edge of the prompt to the caret.
-        let cursor_total = PROMPT_PREFIX.width() + display_utils::display_index(tui);
-        // Map the flat visual column back to (row, col) in the multi-line box.
+    // Blink mode: use the terminal's native cursor (set_cursor_position).
+    // Breathing mode: cursor is drawn as a styled span inside the paragraph above.
+    if tui.cursor_style == CursorStyle::Blink && tui.show_cursor && is_input_focused {
         let (cursor_row, cursor_col) = {
             let mut accumulated = 0usize;
             let mut result = (0usize, cursor_total);
@@ -237,10 +254,163 @@ fn render_tui(
             }
             result
         };
-        // +1 on both axes to account for the single-cell border.
         () = frame.set_cursor_position((
             input_area.left() + cursor_col as u16 + 1,
             input_area.top() + cursor_row as u16 + 1,
         ));
     }
+}
+
+/// Computes a normalised brightness value in `[0.0, 1.0]` for the current breathing `phase`.
+///
+/// # Background — Apple Breathing LED
+///
+/// Introduced with the PowerBook G4 (2001), the Sleep Indicator LED on Apple portables
+/// pulses with a distinctive asymmetric rhythm that Apple engineers deliberately tuned
+/// to mimic the average human resting breathing rate (~12 breaths per minute, i.e. a
+/// ~5-second cycle).
+///
+/// The waveform is **not** a symmetric sine wave.  It uses two Gaussian half-bells
+/// joined at the peak — one narrow (inhale) and one wide (exhale):
+///
+/// ```text
+///         1.0 ┤        ╭╮
+///             │       ╭  ╮
+///             │      ╭    ╮
+///             │     ╭      ╮
+///             │    ╭        ╮
+///    0.05 ┤───╯               ╰──────────────╮  (5 % floor)
+///             0   0.8 s      ←── 5 s ──→
+///                peak     exhale tail + pause
+/// ```
+///
+/// - **Inhale (rise)**: narrow Gaussian (small σ) — LED brightens quickly.
+/// - **Exhale (fall)**: wide Gaussian (large σ) — LED dims slowly.
+/// - **Pause**: the long tail of the exhale Gaussian naturally creates a dark
+///   "rest" interval before the next inhale; no explicit pause constant is needed.
+///
+/// # Mathematical form
+///
+/// Asymmetric (split-normal) Gaussian, normalised so `f(μ) = 1.0`:
+///
+/// ```text
+/// f(t) = exp( −(t − μ)² / (2σ²) )
+/// ```
+///
+/// σ switches at `t = μ`:
+///
+/// | Parameter | Value  | Meaning                              |
+/// |-----------|--------|--------------------------------------|
+/// | period    | 5.0 s  | full inhale → exhale → pause cycle   |
+/// | μ         | 0.8 s  | peak centre (LED at maximum)         |
+/// | σ\_rise   | 0.25 s | narrow → fast inhale                 |
+/// | σ\_fall   | 1.5 s  | wide  → slow exhale + natural pause  |
+fn breathing_brightness(phase: f32) -> f32 {
+    const PERIOD: f32 = 5.0;
+    const MU: f32 = 0.8;
+    const SIGMA_RISE: f32 = 0.25;
+    const SIGMA_FALL: f32 = 1.5;
+
+    let t = phase * PERIOD;
+    let sigma = if t <= MU { SIGMA_RISE } else { SIGMA_FALL };
+    (-(t - MU).powi(2) / (2.0 * sigma.powi(2))).exp()
+}
+
+/// Returns the cursor [`Style`] for the given breathing `phase`.
+///
+/// # Background colour
+///
+/// Maps `breathing_brightness(phase)` through the ANSI 256-colour grayscale ramp
+/// (indices 232 – 255), remapped to `[5 %, 100 %]` so the cursor never fully
+/// disappears:
+///
+/// | Phase | Brightness | `Color::Indexed` |
+/// |-------|-----------|------------------|
+/// | tail  | 5 %       | 233 (near-black) |
+/// | peak  | 100 %     | 255 (near-white) |
+///
+/// # Foreground colour — adaptive contrast (the bug fix)
+///
+/// `fg(Color::Black)` was previously used unconditionally.  On a dark terminal this
+/// makes the cursor character **invisible** during the dark phase (black text on a
+/// near-black background).  The fix uses the brightness threshold to pick a
+/// contrasting foreground:
+///
+/// - brightness > 50 % → `fg(Color::Black)` — dark text on bright background.
+/// - brightness ≤ 50 % → `fg(Color::White)` — bright text on dark background.
+fn breathing_cursor_style(phase: f32) -> Style {
+    let brightness = breathing_brightness(phase);
+    // Remap [0, 1] → [0.05, 1.0]: 5 % floor keeps the cursor always visible.
+    let bg_t = 0.05 + 0.95 * brightness;
+    let bg = Color::Indexed(232 + (bg_t * 23.0).round() as u8);
+    // Adaptive contrast: pick whichever text colour contrasts the background.
+    let fg = if brightness > 0.5 { Color::Black } else { Color::White };
+    Style::default().bg(bg).fg(fg)
+}
+
+/// Builds styled [`Line`]s for the input box in [`CursorStyle::Breathing`] mode.
+///
+/// Only the single character cell under the cursor receives a style; every other
+/// character is left as a plain [`Span::raw`] so the breathing effect is strictly
+/// isolated to the cursor position.
+fn breathing_input_lines(lines: &[String], cursor_col_total: usize, phase: f32) -> Vec<Line<'static>> {
+    let cursor_style = breathing_cursor_style(phase);
+    let mut accumulated = 0usize;
+    let mut cursor_placed = false;
+    let mut result: Vec<Line<'static>> = Vec::with_capacity(lines.len());
+
+    for (line_idx, line) in lines.iter().enumerate() {
+        let line_w = line.width();
+
+        if !cursor_placed && cursor_col_total < accumulated + line_w {
+            // Cursor lands somewhere inside this line.
+            let local_col = cursor_col_total - accumulated;
+            let mut col = 0usize;
+            let mut before_end = 0usize;
+            let mut cursor_char = ' ';
+            let mut after_start = line.len();
+
+            for (byte_idx, ch) in line.char_indices() {
+                if col == local_col {
+                    before_end = byte_idx;
+                    cursor_char = ch;
+                    after_start = byte_idx + ch.len_utf8();
+                    break;
+                }
+                col += ch.width().unwrap_or(0);
+            }
+
+            result.push(Line::from(vec![
+                Span::raw(line[..before_end].to_owned()),
+                Span::styled(cursor_char.to_string(), cursor_style),
+                Span::raw(line[after_start..].to_owned()),
+            ]));
+            cursor_placed = true;
+        } else if !cursor_placed && cursor_col_total == accumulated + line_w {
+            // Cursor is at the very end of this line (trailing-space cursor).
+            // Show trailing space only on the last line to avoid phantom rows.
+            if line_idx + 1 == lines.len() {
+                result.push(Line::from(vec![
+                    Span::raw(line.clone()),
+                    Span::styled(" ", cursor_style),
+                ]));
+                cursor_placed = true;
+            } else {
+                result.push(Line::from(line.clone()));
+            }
+        } else {
+            result.push(Line::from(line.clone()));
+        }
+
+        accumulated += line_w;
+    }
+
+    // Cursor past all lines (empty input or cursor after every character).
+    if !cursor_placed {
+        if let Some(last) = result.last_mut() {
+            last.spans.push(Span::styled(" ", cursor_style));
+        }
+    }
+
+    result
 }

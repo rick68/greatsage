@@ -38,7 +38,26 @@ pub const PROMPT_PREFIX: &str = "🤖 > ";
 pub const SPINNER: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 
 /// How long (milliseconds) each phase of the software cursor blink lasts.
+/// Only used by [`CursorStyle::Blink`]; [`CursorStyle::Breathing`] has its own 5-second period.
 pub const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
+
+/// Animation style for the software cursor in the input box.
+///
+/// | Variant      | Behaviour |
+/// |--------------|-----------|
+/// | `Blink`      | Classic on/off toggle every [`CURSOR_BLINK_INTERVAL_MS`] ms |
+/// | `Breathing`  | Apple-style LED: asymmetric Gaussian inhale/exhale over a 5-second cycle |
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum CursorStyle {
+    /// Classic on/off toggle.
+    Blink,
+    /// Smooth grayscale breathing — like the sleep LED on older MacBooks.
+    ///
+    /// Uses an asymmetric Gaussian: narrow σ on the inhale (steep rise) and wide σ
+    /// on the exhale (slow decay whose tail produces a natural dark pause).
+    #[default]
+    Breathing,
+}
 
 /// Border color for the panel that currently has keyboard focus (bright white).
 ///
@@ -282,9 +301,14 @@ pub struct TuiMain {
     /// Current scroll offset in wrapped visual rows.
     pub vertical_scroll: usize,
 
-    // ── Cursor blink ──────────────────────────────────────────────────────
-    /// Toggled every [`CURSOR_BLINK_INTERVAL_MS`] by the renderer timer.
+    // ── Cursor animation ──────────────────────────────────────────────────
+    /// Which animation style the cursor uses.
+    pub cursor_style: CursorStyle,
+    /// `Blink` mode: toggled every [`CURSOR_BLINK_INTERVAL_MS`] by the renderer timer.
     pub show_cursor: bool,
+    /// `Breathe` mode: continuous phase in `[0.0, 1.0)`.
+    /// 0.0 → darkest, 0.5 → brightest, advances each frame proportional to elapsed time.
+    pub cursor_phase: f32,
 
     // ── Focus ─────────────────────────────────────────────────────────────
     /// The panel that currently owns keyboard input.
@@ -323,7 +347,9 @@ impl Default for TuiMain {
             history_draft: String::new(),
             blocks: Vec::new(),
             output_area: Rect::default(),
+            cursor_style: CursorStyle::default(),
             show_cursor: true,
+            cursor_phase: 0.0,
             focused: TuiMainFocus::default(),
             vertical_scroll: 0,
             vertical_scroll_state: ScrollbarState::default(),
