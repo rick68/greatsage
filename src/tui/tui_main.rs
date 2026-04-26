@@ -1,3 +1,33 @@
+//! # TUI Main — Output Rendering Architecture
+//!
+//! ## OutputBlock model
+//! Output is stored as `Vec<OutputBlock>` instead of a flat `Vec<Line>`.
+//! `rendered_flat_lines()` flattens blocks to `Vec<Line<'static>>`, which
+//! `hard_wrap_output_lines()` then word-wraps to the terminal width.
+//!
+//! ## Coordinate mapping invariant
+//! Every wrap calculation uses `unicode_width` — never `.len()` — so that
+//! terminal column positions stay consistent with scrollbar math and any
+//! future LineMap for mouse-to-text coordinate translation.
+//!
+//! ## ThinkingBlock lifecycle
+//! `begin_thinking()` → `append_thinking(delta)` × N → `end_thinking(tokens)`
+//! Streaming: spinner + live elapsed.  Done: ▶/▼ + elapsed + token count.
+//!
+//! ### ThinkingBlock keyboard controls (work from any focus area)
+//! - `t` — toggle the **most recent** completed ThinkingBlock
+//! - `a` — collapse **all** completed ThinkingBlocks
+//! - `A` — expand  **all** completed ThinkingBlocks
+//!
+//! `a`/`A` are the only way to control ThinkingBlocks other than the last
+//! one, since there is currently no per-block cursor navigation.
+//!
+//! ## Mouse text selection
+//! Mouse capture handles scroll-wheel and future click-to-toggle.
+//! Terminal-native selection is available via Shift+drag (terminal emulator
+//! layer; no app code needed).  Full in-app selection requires a LineMap
+//! built alongside `rendered_flat_lines` — deferred to a future milestone.
+
 use {
     super::RenderNeeded,
     crate::agents::{CodingAgentPromptChannel, CodingAgentTotalTokenUsage},
@@ -17,7 +47,8 @@ use {
         time::{Time, Timer, TimerMode},
     },
     bevy_ratatui::{
-        RatatuiContext, crossterm,
+        RatatuiContext,
+        crossterm::{self, cursor::SetCursorStyle, execute},
         event::{KeyMessage, MouseMessage},
     },
     ratatui::{
@@ -28,8 +59,9 @@ use {
         widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     },
     std::{
+        io::stdout,
         iter::{DoubleEndedIterator, ExactSizeIterator, Iterator},
-        time::Duration,
+        time::{Duration, Instant},
     },
     strum::{EnumCount, FromRepr},
     unicode_width::{UnicodeWidthChar, UnicodeWidthStr},
@@ -37,6 +69,11 @@ use {
 
 const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
 const PROMPT_PREFIX: &str = "🤖 > ";
+const SPINNER: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+
+// Border colours — edit here to restyle all panels at once.
+const COLOR_BORDER_FOCUSED: ratatui::style::Color = ratatui::style::Color::White;
+const COLOR_BORDER_UNFOCUSED: ratatui::style::Color = ratatui::style::Color::DarkGray;
 
 #[derive(Clone, Copy, Debug, Default, EnumCount, Eq, FromRepr, Hash, PartialEq, States)]
 #[repr(u8)]
@@ -72,14 +109,108 @@ impl DoubleEndedIterator for TuiMainFocus {
     }
 }
 
+/// A live or completed reasoning block emitted by the LLM's extended thinking.
+///
+/// Lifecycle: `begin_thinking()` → `append_thinking(delta)` × N → `end_thinking(tokens)`.
+/// While `streaming` is true the header shows a spinner and live elapsed time.
+/// After `end_thinking` the header shows elapsed + token count and the body
+/// can be toggled with `t` (OutputArea focus).
+pub struct ThinkingBlock {
+    raw: String,
+    lines: Vec<Line<'static>>,
+    elapsed_secs: f32,
+    token_count: u32,
+    expanded: bool,
+    streaming: bool,
+    start_instant: Instant,
+}
+
+impl ThinkingBlock {
+    fn new() -> Self {
+        Self {
+            raw: String::new(),
+            lines: Vec::new(),
+            elapsed_secs: 0.0,
+            token_count: 0,
+            expanded: false,
+            streaming: true,
+            start_instant: Instant::now(),
+        }
+    }
+
+    fn spinner_frame(&self) -> &'static str {
+        let ms = self.start_instant.elapsed().as_millis() as usize;
+        SPINNER[(ms / 100) % SPINNER.len()]
+    }
+
+    fn render_header(&self) -> Line<'static> {
+        if self.streaming {
+            Line::from(vec![
+                Span::from("💭 Thinking  "),
+                Span::from(self.spinner_frame()).yellow(),
+                Span::from(format!(
+                    "  {:.1}s",
+                    self.start_instant.elapsed().as_secs_f32()
+                ))
+                .dim(),
+            ])
+        } else {
+            let arrow = if self.expanded { "▼" } else { "▶" };
+            // Show "t" hint only when collapsed so user knows content is there.
+            let hint = if self.expanded { "" } else { "  (t)" };
+            Line::from(vec![
+                Span::from(format!("💭 Thinking  {arrow}  ")),
+                Span::from(format!(
+                    "[{:.1}s · {} tokens]",
+                    self.elapsed_secs, self.token_count
+                ))
+                .dim(),
+                Span::from(hint).dark_gray(),
+            ])
+        }
+    }
+}
+
+/// A structural unit of TUI output.
+///
+/// Using `Vec<OutputBlock>` instead of a flat `Vec<Line>` lets blocks be
+/// updated or toggled in-place without rebuilding the entire line list.
+pub enum OutputBlock {
+    /// Static lines: status messages, completed responses.
+    Lines(Vec<Line<'static>>),
+    /// Agent text currently being streamed — `lines` is replaced on each delta.
+    StreamingText {
+        header: Vec<Line<'static>>,
+        lines: Vec<Line<'static>>,
+    },
+    /// Extended-thinking reasoning block.
+    Thinking(ThinkingBlock),
+    /// A single tool invocation — one line that updates from spinner to ✅/❌.
+    ///
+    /// On `begin_tool_call` the line shows a spinner and live elapsed time.
+    /// On `finish_tool_call` it transitions to a ✅/❌ with final elapsed time.
+    ToolCall {
+        summary: String,
+        running: bool,
+        is_error: bool,
+        /// Truncated error message for failed calls (empty for success).
+        error_snippet: String,
+        start_instant: Instant,
+    },
+}
+
+fn divider_line() -> Line<'static> {
+    Line::from(Span::from("─".repeat(50)).dark_gray())
+}
+
 #[derive(Default)]
-pub struct TuiMain<'a> {
+pub struct TuiMain {
     input: String,
     byte_index: usize, // byte offset of cursor in input
     history: Vec<String>,
     history_pos: Option<usize>, // None = editing new input, Some(i) = viewing history[i]
     history_draft: String,      // saved draft when navigating history
-    pub output: Vec<Line<'a>>,
+    pub blocks: Vec<OutputBlock>,
     output_area: Rect,
     show_cursor: bool,
     focused: TuiMainFocus,
@@ -87,7 +218,7 @@ pub struct TuiMain<'a> {
     vertical_scroll_state: ScrollbarState,
 }
 
-impl<'a> TuiMain<'a> {
+impl TuiMain {
     #[cfg(test)]
     pub(crate) fn set_input_public(&mut self, s: String) {
         self.set_input(s);
@@ -107,6 +238,269 @@ impl<'a> TuiMain<'a> {
     #[cfg(test)]
     pub(crate) fn last_history(&self) -> Option<&str> {
         self.history.last().map(|s| s.as_str())
+    }
+
+    // ── Output public API ────────────────────────────────────────────────────
+
+    /// Append a single line to the output, coalescing into the last Lines block.
+    pub fn push_line(&mut self, line: Line<'static>) {
+        match self.blocks.last_mut() {
+            Some(OutputBlock::Lines(lines)) => lines.push(line),
+            _ => self.blocks.push(OutputBlock::Lines(vec![line])),
+        }
+    }
+
+    /// Append multiple lines to the output.
+    pub fn push_lines(&mut self, new_lines: Vec<Line<'static>>) {
+        match self.blocks.last_mut() {
+            Some(OutputBlock::Lines(lines)) => lines.extend(new_lines),
+            _ => self.blocks.push(OutputBlock::Lines(new_lines)),
+        }
+    }
+
+    /// Replace the last line in the most recent Lines block.
+    /// Kept as public API for future caller use (currently unused).
+    #[allow(dead_code)]
+    pub fn replace_last_line(&mut self, line: Line<'static>) {
+        for block in self.blocks.iter_mut().rev() {
+            if let OutputBlock::Lines(lines) = block {
+                if let Some(last) = lines.last_mut() {
+                    *last = line;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Open a new StreamingText block for an agent response.
+    /// Must be followed by `update_streaming_text` calls then `finalize_streaming_text`.
+    pub fn begin_streaming_text(&mut self) {
+        // Minimal separator — no verbose "📝 Agent Response:" header.
+        self.blocks.push(OutputBlock::StreamingText {
+            header: vec![Line::from("")],
+            lines: Vec::new(),
+        });
+    }
+
+    /// Open a new ToolCall block showing a spinner while the tool runs.
+    /// Call `finish_tool_call` when the tool completes.
+    pub fn begin_tool_call(&mut self, summary: String) {
+        self.blocks.push(OutputBlock::ToolCall {
+            summary,
+            running: true,
+            is_error: false,
+            error_snippet: String::new(),
+            start_instant: Instant::now(),
+        });
+    }
+
+    /// Seal the most recent running ToolCall with its outcome.
+    /// `error_snippet` is a short truncated message for failed calls.
+    pub fn finish_tool_call(&mut self, is_error: bool, error_snippet: String) {
+        for block in self.blocks.iter_mut().rev() {
+            if let OutputBlock::ToolCall { running, is_error: ie, error_snippet: es, .. } = block {
+                if *running {
+                    *running = false;
+                    *ie = is_error;
+                    *es = error_snippet;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Replace the rendered lines inside the most recent StreamingText block.
+    ///
+    /// Scans backwards so it still works if other blocks were pushed after it.
+    pub fn update_streaming_text(&mut self, new_lines: Vec<Line<'static>>) {
+        for block in self.blocks.iter_mut().rev() {
+            if let OutputBlock::StreamingText { lines, .. } = block {
+                *lines = new_lines;
+                return;
+            }
+        }
+    }
+
+    /// Seal the StreamingText block into a static Lines block.
+    /// Call when the agent turn produces a tool call or finishes.
+    ///
+    /// Scans backwards so it works even if other blocks (ToolCall, Thinking)
+    /// were pushed after the StreamingText.
+    pub fn finalize_streaming_text(&mut self) {
+        if let Some(idx) = self
+            .blocks
+            .iter()
+            .rposition(|b| matches!(b, OutputBlock::StreamingText { .. }))
+        {
+            if let OutputBlock::StreamingText { header, lines } = self.blocks.remove(idx) {
+                let mut all = header;
+                all.extend(lines);
+                all.push(divider_line());
+                self.blocks.insert(idx, OutputBlock::Lines(all));
+            }
+        }
+    }
+
+    /// Start a new ThinkingBlock in streaming state.
+    pub fn begin_thinking(&mut self) {
+        self.blocks
+            .push(OutputBlock::Thinking(ThinkingBlock::new()));
+    }
+
+    /// Append a thinking delta to the most recent streaming ThinkingBlock.
+    ///
+    /// Scans backwards so it can find the Thinking block even when other blocks
+    /// (e.g. a ToolCall that was just finished) sit after it.
+    pub fn append_thinking(&mut self, raw: &str) {
+        for block in self.blocks.iter_mut().rev() {
+            if let OutputBlock::Thinking(tb) = block {
+                tb.raw.push_str(raw);
+                tb.lines = tb
+                    .raw
+                    .lines()
+                    .map(|l| Line::from(Span::from(l.to_string()).dim()))
+                    .collect();
+                return;
+            }
+        }
+    }
+
+    /// Mark the most recent ThinkingBlock as done and record metadata.
+    ///
+    /// Scans backwards so it still works when a ToolCall block was pushed after
+    /// the Thinking block (model calls a tool without emitting a Text delta first).
+    pub fn end_thinking(&mut self, token_count: u32) {
+        for block in self.blocks.iter_mut().rev() {
+            if let OutputBlock::Thinking(tb) = block {
+                if tb.streaming {
+                    tb.elapsed_secs = tb.start_instant.elapsed().as_secs_f32();
+                    tb.token_count = token_count;
+                    tb.streaming = false;
+                }
+                return; // stop at the first Thinking block found
+            }
+        }
+    }
+
+    /// Toggle expanded/collapsed on the most recent completed ThinkingBlock.
+    fn toggle_last_thinking(&mut self) {
+        for block in self.blocks.iter_mut().rev() {
+            if let OutputBlock::Thinking(tb) = block {
+                if !tb.streaming {
+                    tb.expanded = !tb.expanded;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Expand all completed ThinkingBlocks.
+    fn expand_all_thinking(&mut self) {
+        for block in self.blocks.iter_mut() {
+            if let OutputBlock::Thinking(tb) = block {
+                if !tb.streaming {
+                    tb.expanded = true;
+                }
+            }
+        }
+    }
+
+    /// Collapse all completed ThinkingBlocks.
+    fn collapse_all_thinking(&mut self) {
+        for block in self.blocks.iter_mut() {
+            if let OutputBlock::Thinking(tb) = block {
+                if !tb.streaming {
+                    tb.expanded = false;
+                }
+            }
+        }
+    }
+
+    // ── Rendering helpers ────────────────────────────────────────────────────
+
+    /// Flatten all blocks into a single `Vec<Line<'static>>` for wrapping and display.
+    /// ThinkingBlock bodies use a dim `│` prefix; ToolCall blocks render as one line.
+    fn rendered_flat_lines(&self) -> Vec<Line<'static>> {
+        let mut result = Vec::new();
+        for block in &self.blocks {
+            match block {
+                OutputBlock::Lines(lines) => result.extend_from_slice(lines),
+                OutputBlock::StreamingText { header, lines } => {
+                    result.extend_from_slice(header);
+                    result.extend_from_slice(lines);
+                    result.push(divider_line());
+                }
+                OutputBlock::Thinking(tb) => {
+                    result.push(tb.render_header());
+                    // While streaming: always show body so thinking content is
+                    // visible in real-time.  When done: respect expanded flag
+                    // (collapsed by default, `t` in OutputArea to toggle).
+                    if tb.streaming || tb.expanded {
+                        for line in &tb.lines {
+                            let mut spans = vec![Span::from("  │ ").dim()];
+                            spans.extend(line.spans.iter().cloned());
+                            result.push(Line::from(spans));
+                        }
+                        if !tb.streaming {
+                            result.push(Line::from(Span::from("  └─").dim()));
+                        }
+                    }
+                }
+                OutputBlock::ToolCall {
+                    summary,
+                    running,
+                    is_error,
+                    error_snippet,
+                    start_instant,
+                } => {
+                    result.push(Self::render_tool_call_line(
+                        summary,
+                        *running,
+                        *is_error,
+                        error_snippet,
+                        start_instant,
+                    ));
+                }
+            }
+        }
+        result
+    }
+
+    /// Render a ToolCall block as a single line:
+    ///   running  →  `summary  ⣾  0.3s`   (yellow)
+    ///   success  →  `summary  ✅  0.3s`  (default + dim elapsed)
+    ///   error    →  `summary  ❌  0.3s  snippet`  (red)
+    fn render_tool_call_line(
+        summary: &str,
+        running: bool,
+        is_error: bool,
+        error_snippet: &str,
+        start_instant: &Instant,
+    ) -> Line<'static> {
+        let elapsed = start_instant.elapsed().as_secs_f32();
+        let elapsed_str = format!("{elapsed:.1}s");
+        if running {
+            let frame =
+                SPINNER[(start_instant.elapsed().as_millis() as usize / 100) % SPINNER.len()];
+            Line::from(vec![
+                Span::from(summary.to_string()).yellow(),
+                Span::from(format!("  {frame}  {elapsed_str}")).yellow().dim(),
+            ])
+        } else if is_error {
+            let mut spans = vec![
+                Span::from(summary.to_string()).red(),
+                Span::from(format!("  ❌  {elapsed_str}")).red(),
+            ];
+            if !error_snippet.is_empty() {
+                spans.push(Span::from(format!("  {error_snippet}")).red().dim());
+            }
+            Line::from(spans)
+        } else {
+            Line::from(vec![
+                Span::from(summary.to_string()),
+                Span::from(format!("  ✅  {elapsed_str}")).dim(),
+            ])
+        }
     }
 
     fn display_index(&self) -> usize {
@@ -218,7 +612,7 @@ impl<'a> TuiMain<'a> {
 
     /// Clears the REPL output buffer and resets scrolling.
     fn clear_output(&mut self) {
-        self.output.clear();
+        self.blocks.clear();
         self.vertical_scroll = 0;
         self.vertical_scroll_state = ScrollbarState::default();
     }
@@ -271,11 +665,12 @@ impl<'a> TuiMain<'a> {
 
     fn total_visual_rows(&self) -> usize {
         let inner_width = self.output_area.width.saturating_sub(2) as usize;
+        let flat = self.rendered_flat_lines();
         if inner_width == 0 {
-            return self.output.len();
+            return flat.len();
         }
         let mut count = 0usize;
-        for line in &self.output {
+        for line in &flat {
             let mut current_width = 0usize;
             for span in &line.spans {
                 for ch in span.content.chars() {
@@ -312,13 +707,23 @@ impl<'a> TuiMain<'a> {
         self.output_area = output_area;
 
         let output_inner_width = output_area.width.saturating_sub(2) as usize;
-        let wrapped = Self::hard_wrap_output_lines(&self.output, output_inner_width);
+        let flat = self.rendered_flat_lines();
+        let wrapped = Self::hard_wrap_output_lines(&flat, output_inner_width);
         let total_rows = wrapped.len();
         let new_max = total_rows.saturating_sub(self.output_area_height());
         self.vertical_scroll = self.vertical_scroll.min(new_max);
+        let output_border_color = if self.focused == TuiMainFocus::OutputArea {
+            COLOR_BORDER_FOCUSED
+        } else {
+            COLOR_BORDER_UNFOCUSED
+        };
         let output = Paragraph::new(wrapped)
             .style(Style::default())
-            .block(Block::bordered().title("Output"))
+            .block(
+                Block::bordered()
+                    .title("Output")
+                    .border_style(Style::default().fg(output_border_color)),
+            )
             .scroll((self.vertical_scroll as u16, 0));
         let scroll_positions = total_rows.saturating_sub(self.output_area_height()) + 1;
         self.vertical_scroll_state = self
@@ -355,9 +760,18 @@ impl<'a> TuiMain<'a> {
             .iter()
             .map(|l| ratatui::text::Line::from(l.as_str()))
             .collect();
+        let input_border_color = if self.focused == TuiMainFocus::InputArea {
+            COLOR_BORDER_FOCUSED
+        } else {
+            COLOR_BORDER_UNFOCUSED
+        };
         let input = Paragraph::new(input_text)
             .style(Style::default())
-            .block(Block::bordered().title("Input"));
+            .block(
+                Block::bordered()
+                    .title("Input")
+                    .border_style(Style::default().fg(input_border_color)),
+            );
         () = frame.render_widget::<Paragraph<'_>>(input, input_area);
 
         if self.show_cursor && self.focused == TuiMainFocus::InputArea {
@@ -480,6 +894,19 @@ fn handle_global_input(
                 () = tui_main.scroll_to_bottom();
                 **dirty = true;
             }
+            // Expand / collapse all ThinkingBlocks — usable from any focus area.
+            KeyCode::Char('A')
+                if !in_input && matches!(kind, KeyEventKind::Press) =>
+            {
+                () = tui_main.expand_all_thinking();
+                **dirty = true;
+            }
+            KeyCode::Char('a')
+                if !in_input && matches!(kind, KeyEventKind::Press) =>
+            {
+                () = tui_main.collapse_all_thinking();
+                **dirty = true;
+            }
             _ => (),
         }
     }
@@ -518,6 +945,14 @@ fn help_lines() -> Vec<Line<'static>> {
         Line::raw("    /git stage         Stage all changes"),
         Line::raw("    /git commit -m …   Commit staged changes"),
         Line::raw("    /git revert        Revert last commit"),
+        Line::raw(""),
+        Line::from("  Keyboard shortcuts:".cyan().bold()),
+        Line::raw("    Tab                Switch focus (Input ↔ Output)"),
+        Line::raw("    ↑/↓  PgUp/PgDn    Scroll output (in Output area)"),
+        Line::raw("    t                  Toggle last thinking block (Output area)"),
+        Line::raw("    A                  Expand all thinking blocks (Output area)"),
+        Line::raw("    a                  Collapse all thinking blocks (Output area)"),
+        Line::raw("    Ctrl+C             Exit"),
         Line::raw(""),
     ]
 }
@@ -650,15 +1085,15 @@ fn handle_input_area_input(
                         cmd if cmd.starts_with('/') => {
                             let lines = handle_slash_command(cmd);
                             () = tui_main.push_history(&input);
-                            for line in lines {
-                                () = tui_main.output.push(line);
-                            }
+                            () = tui_main.push_lines(lines);
                             () = tui_main.clear_input();
                             () = tui_main.scroll_to_bottom();
                         }
                         _ => {
                             () = tui_main.push_history(&input);
-                            () = tui_main.output.push(Line::raw(input.clone()));
+                            () = tui_main.push_line(
+                                Line::from(format!("> {input}")).dark_gray(),
+                            );
                             () = tui_main.clear_input();
                             () = tui_main.scroll_to_bottom();
                             match channel.sender.send(input) {
@@ -667,7 +1102,7 @@ fn handle_input_area_input(
                                     eprintln!("Failed to send REPL input to agent: {e}");
                                     let err_line =
                                         Line::from(format!("❌ Failed to send input: {e}")).red();
-                                    () = tui_main.output.push(err_line);
+                                    () = tui_main.push_line(err_line);
                                     () = tui_main.scroll_to_bottom();
                                 }
                             }
@@ -686,14 +1121,22 @@ fn handle_output_area_input(
     mut tui_main: NonSendMut<TuiMain>,
     mut dirty: ResMut<RenderNeeded>,
 ) {
-    use crossterm::event::{KeyCode, KeyEvent};
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
     for message in messages.read() {
-        let KeyEvent { code, .. } = &**message;
+        let KeyEvent { code, kind, .. } = &**message;
 
-        if let KeyCode::Char(' ') = code {
-            () = tui_main.scroll_page_down();
-            **dirty = true;
+        match code {
+            KeyCode::Char(' ') => {
+                () = tui_main.scroll_page_down();
+                **dirty = true;
+            }
+            // Toggle the most recent completed ThinkingBlock.
+            KeyCode::Char('t') if matches!(kind, KeyEventKind::Press) => {
+                () = tui_main.toggle_last_thinking();
+                **dirty = true;
+            }
+            _ => (),
         }
     }
 }
@@ -726,18 +1169,35 @@ fn draw_scene_system(
     mut tui: NonSendMut<TuiMain>,
     time: Res<Time<()>>,
     mut cursor_timer: Local<Option<Timer>>,
+    mut spinner_timer: Local<Option<Timer>>,
     mut dirty: ResMut<RenderNeeded>,
     token_usage: Option<Res<CodingAgentTotalTokenUsage>>,
 ) -> bevy::ecs::error::Result {
+    // Cursor blink timer: toggle show_cursor every 530 ms.
     let cursor_timer = cursor_timer.get_or_insert(Timer::new(
         Duration::from_millis(CURSOR_BLINK_INTERVAL_MS),
         TimerMode::Repeating,
     ));
     _ = cursor_timer.tick(time.delta());
-    let TuiMain { show_cursor, .. } = &mut *tui;
-
     if cursor_timer.just_finished() {
-        *show_cursor ^= true;
+        tui.show_cursor ^= true;
+        **dirty = true;
+    }
+
+    // Spinner timer: animate ThinkingBlock / ToolCall spinners at 100 ms intervals.
+    // Using a dedicated timer (not every Bevy frame) prevents continuous full-frame
+    // redraws that caused visible input-area flicker during agent responses.
+    let spinner_timer = spinner_timer.get_or_insert(Timer::new(
+        Duration::from_millis(100),
+        TimerMode::Repeating,
+    ));
+    _ = spinner_timer.tick(time.delta());
+    let has_spinner = tui.blocks.iter().any(|b| match b {
+        OutputBlock::Thinking(tb) => tb.streaming,
+        OutputBlock::ToolCall { running, .. } => *running,
+        _ => false,
+    });
+    if has_spinner && spinner_timer.just_finished() {
         **dirty = true;
     }
 
@@ -752,10 +1212,18 @@ fn draw_scene_system(
     Ok(())
 }
 
+/// Restore the block cursor shape that crossterm/raw-mode may have overridden.
+/// Blinking is driven by our software timer (show_cursor toggle); the cursor
+/// shape itself should be a steady block so the show/hide cycle looks correct.
+fn setup_cursor(_: bevy::ecs::system::Commands) {
+    let _ = execute!(stdout(), SetCursorStyle::SteadyBlock);
+}
+
 pub fn plugin(app: &mut App) {
     _ = app
         .init_non_send_resource::<TuiMain>()
         .init_state::<TuiMainFocus>()
+        .add_systems(bevy::app::Startup, setup_cursor)
         .add_systems(
             PreUpdate,
             (
