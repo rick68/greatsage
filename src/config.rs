@@ -172,6 +172,8 @@ pub struct AppConfig {
     pub permissions: PermissionsFileConfig,
     #[serde(skip)]
     pub runtime: RuntimeConfig,
+    /// Persisted REPL error handling flag (default false)
+    pub repl_error_handling: bool,
 }
 
 impl AppConfig {
@@ -221,7 +223,9 @@ impl AppConfig {
             ConfigKey::ToolsTruncationTailLines => self.tools.truncation_tail_lines.to_string(),
             ConfigKey::TuiFramesPerSecond => self.tui.frames_per_second.to_string(),
             ConfigKey::TuiCursorBlinkMs => self.tui.cursor_blink_ms.to_string(),
-            ConfigKey::TuiCursorIdleToBreathingMs => self.tui.cursor_idle_to_breathing_ms.to_string(),
+            ConfigKey::TuiCursorIdleToBreathingMs => {
+                self.tui.cursor_idle_to_breathing_ms.to_string()
+            }
             ConfigKey::PermissionsAllowedDir => self.permissions.allowed_dir.clone(),
             ConfigKey::McpSseTransports => self.mcp.sse_transports.join(", "),
             ConfigKey::McpStdioTransports => self.mcp.stdio_transports.join(", "),
