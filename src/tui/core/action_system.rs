@@ -11,7 +11,7 @@ use {
         agents::CodingAgentPromptChannel,
         tui::{
             commands,
-            core::{OutputBlock, TuiMain, TuiMainFocus},
+            core::{CursorState, OutputBlock, TuiMain, TuiMainFocus},
             events::{RenderNeeded, TuiAction},
         },
     },
@@ -20,6 +20,7 @@ use {
         change_detection::{NonSendMut, Res, ResMut},
         message::{MessageReader, MessageWriter},
     },
+    bevy::state::state::NextState,
     ratatui::{style::Stylize, text::Line},
 };
 
@@ -32,9 +33,14 @@ pub fn tui_action_system(
     mut tui: NonSendMut<TuiMain>,
     mut dirty: ResMut<RenderNeeded>,
     mut exit: MessageWriter<AppExit>,
+    mut next_cursor_state: ResMut<NextState<CursorState>>,
     channel: Res<CodingAgentPromptChannel>,
 ) {
     for action_msg in actions.read() {
+        // Any user interaction resets the idle timer and switches back to Blink mode.
+        tui.reset_activity();
+        next_cursor_state.set(CursorState::Blink);
+
         let action = action_msg;
         match action {
             TuiAction::InsertChar(c) => {

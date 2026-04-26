@@ -55,7 +55,7 @@
 pub mod commands;
 
 pub mod core;
-pub use self::core::{TuiMain, TuiMainFocus};
+pub use self::core::{CursorState, TuiMain, TuiMainFocus};
 
 pub mod events;
 pub use self::events::RenderNeeded;
@@ -118,6 +118,8 @@ pub fn tui_plugin(app: &mut App) {
         .init_non_send_resource::<TuiMain>()
         // Focus toggles between InputArea ↔ OutputArea via Tab.
         .init_state::<TuiMainFocus>()
+        // Cursor switches from Blink (active) to Breathing (idle).
+        .init_state::<CursorState>()
         // Message channels used to decouple input from action execution.
         .add_message::<TuiAction>()
         .add_message::<TuiCommandEvent>()
