@@ -234,6 +234,7 @@ enum CodingAgentState {
 pub struct CodingAgentTask {
     in_text: bool,
     in_thinking: bool,
+    response_started: bool,
     buffer: String,
 }
 
@@ -405,6 +406,20 @@ fn handle_coding_agent_events(
     permission: Res<PermissionConfig>,
 ) {
     for CodingAgentEvent(event) in messages.read() {
+        if let Some(tui) = tui.as_mut() {
+            match &event {
+                AgentEvent::ToolExecutionStart { .. }
+                | AgentEvent::MessageUpdate { .. }
+                | AgentEvent::ToolExecutionEnd { .. } => {
+                    if !coding_agent_task.response_started {
+                        tui.begin_response();
+                        coding_agent_task.response_started = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+
         let CodingAgentTask {
             in_text,
             in_thinking,
@@ -579,6 +594,9 @@ fn handle_coding_agent_events(
                 // cleanup closure (spawn_agent_task) to avoid the race where
                 // CodingAgentTask is removed before this handler can run.
                 // We still seal any TUI blocks that might be left open.
+                if let Some(tui) = tui.as_mut() {
+                    tui.end_response();
+                }
                 if *in_thinking {
                     if let Some(tui) = tui.as_mut() {
                         () = tui.end_thinking(0);
