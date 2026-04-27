@@ -180,7 +180,7 @@ fn generate_tasks_from_assessment(
     }
     // Ensure we have three titles; fill missing slots with a generic placeholder.
     while titles.len() < 3 {
-        titles.push("Address TBD".to_string());
+        () = titles.push("Address TBD".to_string());
     }
     // Limit to three tasks.
     for (i, title) in titles.iter().take(3).enumerate() {
