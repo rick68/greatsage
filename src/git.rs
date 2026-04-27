@@ -1,6 +1,6 @@
 use {
     git2::{IndexAddOption, Repository},
-    std::process::Command
+    std::process::Command,
 };
 
 /// Stage all changes in the current repository using `git2`.

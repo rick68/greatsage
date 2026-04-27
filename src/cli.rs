@@ -85,6 +85,9 @@ pub struct Args {
     /// Enable REPL error handling validation (experimental)
     #[arg(long, action = ArgAction::SetTrue)]
     pub error_handling: bool,
+    /// Enable REPL error handling validation (alias for --check)
+    #[arg(long = "handle-errors", action = ArgAction::SetTrue)]
+    pub handle_errors: bool,
     /// Enable persisted REPL error handling validation
     #[arg(long = "repl-error-handling", action = ArgAction::SetTrue)]
     pub repl_error_handling: bool,

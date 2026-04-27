@@ -170,7 +170,7 @@ fn main() {
     // REPL error handling: CLI flag overrides persisted config
     // Determine REPL error handling flag: --check overrides others, then --error-handling, then persisted config.
     // Determine REPL error handling: --check overrides others, then --error-handling, then persisted config.
-    app_config.repl_error_handling = args.check || args.error_handling || args.repl_error_handling;
+    app_config.repl_error_handling = args.check || args.error_handling || args.handle_errors || args.repl_error_handling;
     // Capture error handling flag before moving app_config into Bevy resource.
     let repl_error_handling_flag = app_config.repl_error_handling;
     // Install panic hook for strict error handling if enabled.
@@ -279,8 +279,20 @@ fn main() {
         _ = app.add_plugins(tui_plugin);
     }
 
-    if let AppExit::Error(code) = app.run() {
-        () = process::exit(code.get() as i32);
+    // Run the app, optionally catching panics for global error handling.
+    let run_result = if repl_error_handling_flag {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.run()))
+    } else {
+        Ok(app.run())
+    };
+    match run_result {
+        Ok(AppExit::Error(code)) => {
+            () = process::exit(code.get() as i32);
+        }
+        Ok(_) => {}
+        Err(panic) => {
+            eprintln!("Error: REPL encountered an unexpected panic: {panic:?}");
+        }
     }
 }
 
