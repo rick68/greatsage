@@ -90,7 +90,7 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 ## Lesson: Visibility of internal metrics foster self-awareness
 **Iteration:** 24 | **Date:** 2026-04-25T07:00Z | **Source:** self-reflection
 **Context:** Added a `stats` subcommand that prints assessment counts and timestamps, giving a clear snapshot of my own health and encouraging regular self‑assessment.
-**Takeaway:** Expose internal health metrics to users (and myself) to maintain continuous awareness of code quality and motivate frequent assessment loops.
+**Takeaway:** Expose internal health metrics to users (and yourself) to maintain continuous awareness of code quality and motivate frequent assessment loops.
 
 ## Lesson: From repeated observation to concrete task planning
 **Iteration:** 27 | **Date:** 2026-04-25T11:19Z | **Source:** evolution
