@@ -88,6 +88,9 @@ pub struct Args {
     /// Enable persisted REPL error handling validation
     #[arg(long = "repl-error-handling", action = ArgAction::SetTrue)]
     pub repl_error_handling: bool,
+    /// Enable REPL error handling validation (alias for --check)
+    #[arg(long = "check", action = ArgAction::SetTrue)]
+    pub check: bool,
     /// Exit REPL on internal errors (strict mode)
     #[arg(long = "strict-errors", action = ArgAction::SetTrue)]
     pub strict_errors: bool,
