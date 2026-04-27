@@ -1994,6 +1994,7 @@ dependencies = [
  "bevy_ratatui",
  "build-info",
  "build-info-build",
+ "cfg-if",
  "clap",
  "clap_complete",
  "crossbeam-channel",
