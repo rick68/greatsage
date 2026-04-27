@@ -3,7 +3,7 @@ use {
         fs,
         future::Future,
         io::{ErrorKind, Write},
-        path::Path,
+        path::{self, Path},
         pin::Pin,
         time::Duration,
     },
@@ -29,7 +29,7 @@ pub fn is_protected_path(path: impl AsRef<Path>) -> bool {
         .as_ref()
         .components()
         .filter_map(|c| match c {
-            std::path::Component::Normal(os) => Some(os),
+            path::Component::Normal(os) => Some(os),
             _ => None,
         })
         .collect();
@@ -138,7 +138,7 @@ pub fn run_evolve_with(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::er
     let assessment = assessment_phase(&base_dir)?;
     println!("[greatsage] Assessment Phase Result:\n{assessment}");
     // Planning phase – generate tasks based on assessment output.
-    planning_phase_with_assessment(&base_dir, &assessment)?;
+    () = planning_phase_with_assessment(&base_dir, &assessment)?;
     println!("[greatsage] Planning Phase completed. Task files created in session_plan/.");
     // Execute tasks phase
     () = execute_tasks(&base_dir)?;
@@ -213,7 +213,7 @@ pub fn planning_phase_with_assessment(
     }
 
     // Generate task files based on assessment output.
-    generate_tasks_from_assessment(base_dir.as_ref(), assessment)?;
+    () = generate_tasks_from_assessment(base_dir.as_ref(), assessment)?;
     Ok(())
 }
 
@@ -339,12 +339,12 @@ pub fn planning_phase(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::err
         let entry = entry?;
         let path = entry.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("md") {
-            fs::remove_file(path)?;
+            () = fs::remove_file(path)?;
         }
     }
     // Obtain assessment output and generate tasks accordingly.
     let assessment = assessment_phase(base_dir.as_ref())?;
-    generate_tasks_from_assessment(base_dir.as_ref(), assessment)?;
+    () =generate_tasks_from_assessment(base_dir.as_ref(), assessment)?;
     Ok(())
 }
 
