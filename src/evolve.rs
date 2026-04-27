@@ -269,9 +269,9 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
 
     // Iterate over markdown files in the session_plan directory.
     // Collect entries, filter out errors, and sort them to ensure deterministic execution order.
-    let mut entries: Vec<std::fs::DirEntry> =
+    let mut entries: Vec<fs::DirEntry> =
         fs::read_dir(&plan_dir)?.filter_map(Result::ok).collect();
-    entries.sort_by_key(|e| e.file_name());
+    () = entries.sort_by_key(|e| e.file_name());
     for entry in entries {
         let path = entry.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("md") {
