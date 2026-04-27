@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use {crate::cli::Args, crate::config::AppConfig};
+    use {
+        crate::{cli::Args, config::AppConfig},
+        clap::Parser,
+    };
 
     #[test]
     fn test_check_flag_overrides_other_flags() {
@@ -16,6 +19,9 @@ mod tests {
         } else {
             args.repl_error_handling
         };
-        assert!(app_config.repl_error_handling, "repl_error_handling should be enabled by --check");
+        assert!(
+            app_config.repl_error_handling,
+            "repl_error_handling should be enabled by --check"
+        );
     }
 }

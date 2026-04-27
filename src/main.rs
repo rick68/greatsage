@@ -305,6 +305,7 @@ pub fn validate_env_vars() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    mod check_flag;
     mod cli_stats;
     mod evolve_protection;
     mod repl_error_handling;
