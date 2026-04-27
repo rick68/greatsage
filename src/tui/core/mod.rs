@@ -125,7 +125,11 @@ impl DoubleEndedIterator for TuiMainFocus {
 /// [`TuiAction`] to emit.
 ///
 /// [`TuiAction`]: crate::tui::events::TuiAction
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct SelectionRange { pub start: (usize, usize), pub end: (usize, usize) }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SelectionState { #[default] Idle, Dragging { anchor: (usize, usize) } }
+#[derive(Clone, Copy)]
 pub enum ClickAction {
     /// Select (or deselect) the parent [`ResponseBlock`].
     ///
@@ -335,7 +339,7 @@ pub struct TuiMain {
     /// Used by:
     /// * `toggle_last_thinking` — operates on this block instead of the last one
     /// * The renderer — draws a cyan gutter on the selected block
-    pub selected_block: Option<usize>,
+    pub selection: Option<SelectionRange>, pub selection_state: SelectionState, pub last_click: Option<(std::time::Instant, (usize, usize), u8)>, pub selected_block: Option<usize>,
 }
 
 impl Default for TuiMain {
@@ -355,7 +359,7 @@ impl Default for TuiMain {
             vertical_scroll: 0,
             vertical_scroll_state: ScrollbarState::default(),
             line_map: Vec::new(),
-            selected_block: None,
+            selection: None, selection_state: SelectionState::Idle, last_click: None, selected_block: None,
         }
     }
 }

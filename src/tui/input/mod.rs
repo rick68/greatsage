@@ -14,6 +14,7 @@
 //!
 //! [`TuiAction`]: crate::tui::events::TuiAction
 
+use bevy::prelude::DetectChangesMut;
 use bevy_ratatui::crossterm;
 use {
     crate::tui::{
@@ -36,7 +37,9 @@ use {
 /// | Key | Condition | Action |
 /// |-----|-----------|--------|
 /// | Tab | always | Cycle focus (InputArea ↔ OutputArea) |
-/// | Ctrl-C | always | Exit the application |
+/// | F10 | always | Exit the application |
+/// | Double-Esc | always | Exit the application |
+/// | Ctrl-C | selection active | Copy selection |
 /// | ↑ / ↓ | OutputArea only | Scroll output one line |
 /// | PgUp / PgDn | always | Scroll output one line |
 /// | Home | OutputArea only | Scroll to top |
@@ -52,7 +55,7 @@ pub fn handle_global_input(
     mut tui_main: NonSendMut<TuiMain>,
     mut dirty: ResMut<RenderNeeded>,
     mut next_tui_main_focus: ResMut<NextState<TuiMainFocus>>,
-    mut exit: MessageWriter<AppExit>,
+    _exit: MessageWriter<AppExit>,
     focus: Res<State<TuiMainFocus>>,
     mut actions: MessageWriter<TuiAction>,
 ) {
@@ -68,6 +71,20 @@ pub fn handle_global_input(
         // True when the text-entry box owns the keyboard.
         let in_input = focus.get() == &TuiMainFocus::InputArea;
         match code {
+            KeyCode::F(10) => {
+                _ = actions.write(TuiAction::Quit);
+            }
+            KeyCode::Esc => {
+                let now = std::time::Instant::now();
+                let last_esc = tui_main.last_click;
+                if let Some((last_time, (999, 999), 0)) = last_esc {
+                    if now.duration_since(last_time).as_millis() < 500 {
+                        _ = actions.write(TuiAction::Quit);
+                    }
+                }
+                tui_main.bypass_change_detection().last_click = Some((now, (999, 999), 0));
+                **dirty = true;
+            }
             // Tab cycles focus; updates the Bevy state so run-conditions apply.
             KeyCode::Tab => {
                 let mut current = *focus.get();
@@ -76,12 +93,17 @@ pub fn handle_global_input(
                 tui_main.focused = next;
                 **dirty = true;
             }
-            // Ctrl-C exits unconditionally (mirrors Unix terminal convention).
+            // Ctrl-C (all platforms) or Cmd-C (macOS) copies selection if active.
             KeyCode::Char('c')
                 if matches!(kind, KeyEventKind::Press)
-                    && modifiers.contains(KeyModifiers::CONTROL) =>
+                    && (modifiers.contains(KeyModifiers::CONTROL)
+                        || modifiers.contains(KeyModifiers::SUPER)) =>
             {
-                exit.write_default();
+                if tui_main.selection.is_some() {
+                    _ = actions.write(TuiAction::CopySelection);
+                } else {
+                    **dirty = true;
+                }
             }
             // Arrow keys scroll only when the output panel is focused; in the
             // input panel they navigate command history (handled separately).
@@ -225,7 +247,7 @@ pub fn handle_input_area_input(
 /// Clicks outside the output area are silently ignored.
 pub fn handle_mouse_input(
     mut messages: bevy::ecs::message::MessageReader<MouseMessage>,
-    tui_main: NonSendMut<TuiMain>,
+    mut tui_main: NonSendMut<TuiMain>,
     mut actions: MessageWriter<TuiAction>,
 ) {
     use bevy_ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
@@ -239,18 +261,35 @@ pub fn handle_mouse_input(
             MouseEventKind::ScrollUp => {
                 _ = actions.write(TuiAction::ScrollUp);
             }
+            MouseEventKind::Drag(MouseButton::Left) => { let output_area = tui_main.output_area; if output_area.contains(ratatui::layout::Position { x: column, y: row }) { let inner_row = (row).saturating_sub(output_area.top() + 1) as usize; let map_row = inner_row + tui_main.vertical_scroll; let inner_width = output_area.width.saturating_sub(2) as usize; let rel_col = (column).saturating_sub(output_area.left() + 1) as usize; let logical_col = rel_col.min(inner_width); if let Some(selection) = tui_main.selection { _ = actions.write(TuiAction::SetSelection { start: selection.start, end: (map_row, logical_col), click_count: 1 }); } } }
             MouseEventKind::ScrollDown => {
                 _ = actions.write(TuiAction::ScrollDown);
             }
             MouseEventKind::Down(MouseButton::Left) => {
+                let now = std::time::Instant::now();
+                let mut click_count = 1;
+                if let Some((last_time, last_pos, last_count)) = tui_main.last_click {
+                    if now.duration_since(last_time).as_millis() < 500 && last_pos == (row as usize, column as usize) {
+                        click_count = (last_count % 3) + 1;
+                    }
+                }
+                tui_main.bypass_change_detection().last_click = Some((now, (row as usize, column as usize), click_count));
                 let output_area = tui_main.output_area;
                 // Only act on clicks that land inside the output panel.
-                if output_area.contains(Position { x: column, y: row }) {
+                if !output_area.contains(Position { x: column, y: row }) {
+                    if tui_main.selection.is_some() {
+                        _ = actions.write(TuiAction::ClearSelection);
+                    }
+                } else {
                     // Convert terminal row to an inner row (subtract border + top offset).
                     let inner_row = (row).saturating_sub(output_area.top() + 1) as usize;
                     // Add current scroll offset to get the absolute logical row index.
                     let map_row = inner_row + tui_main.vertical_scroll;
                     // Look up the action associated with this row in the line map.
+                    let inner_width = output_area.width.saturating_sub(2) as usize;
+                    let rel_col = (column).saturating_sub(output_area.left() + 1) as usize;
+                    let logical_col = rel_col.min(inner_width);
+                    _ = actions.write(TuiAction::SetSelection { start: (map_row, logical_col), end: (map_row, logical_col), click_count });
                     if let Some(Some((block_idx, click_action))) =
                         tui_main.line_map.get(map_row).copied()
                     {

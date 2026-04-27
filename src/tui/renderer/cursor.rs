@@ -188,3 +188,8 @@ pub fn breathing_input_lines(
 
     result
 }
+
+/// Returns the [`Style`] used for highlighted text in the output area.
+pub fn selection_style() -> Style {
+    Style::default().bg(Color::Indexed(240))
+}

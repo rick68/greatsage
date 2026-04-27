@@ -79,7 +79,7 @@ pub enum TuiAction {
     /// Scroll the output view up by one line.
     ScrollUp,
     /// Scroll the output view down by one line.
-    ScrollDown,
+    ScrollDown, Quit,
 
     // ── Thinking-block controls ───────────────────────────────────────────
     /// Toggle a specific thinking block identified by block and thinking index.
@@ -109,6 +109,9 @@ pub enum TuiAction {
     /// Emitted on left-click inside the output area when the clicked row
     /// belongs to a ResponseBlock.
     SelectBlock(usize),
+    SetSelection { start: (usize, usize), end: (usize, usize), click_count: u8 },
+    ClearSelection,
+    CopySelection,
     /// Clear the current block selection.
     #[allow(dead_code)]
     DeselectBlock,

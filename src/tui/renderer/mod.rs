@@ -169,10 +169,11 @@ fn render_tui(
     // Flatten all OutputBlocks → (Line, ClickAction) pairs.
     let (flat, flat_map) = display_utils::rendered_flat_lines(tui, &SPINNER);
     // Word-wrap both lists in lockstep to preserve the line→block mapping.
-    let (wrapped, wrapped_map) =
+    let (mut wrapped, wrapped_map) =
         display_utils::hard_wrap_output_lines_with_map(&flat, &flat_map, output_inner_width);
     // Persist the wrapped map so handle_mouse_input can look up click actions.
     tui.line_map = wrapped_map;
+    if let Some(range) = tui.selection { apply_selection_style(&mut wrapped, range); }
 
     let total_rows = wrapped.len();
     let output_height = output_area.height.saturating_sub(2) as usize;
@@ -274,5 +275,61 @@ fn render_tui(
             input_area.left() + cursor_col as u16 + 1,
             input_area.top() + cursor_row as u16 + 1,
         ));
+    }
+}
+
+fn apply_selection_style(lines: &mut [ratatui::text::Line<'_>], range: crate::tui::core::SelectionRange) {
+    use unicode_width::UnicodeWidthChar;
+
+    let (mut s_row, mut s_col) = range.start;
+    let (mut e_row, mut e_col) = range.end;
+
+    // Normalize: s_row/s_col is top-left, e_row/e_col is bottom-right
+    if s_row > e_row || (s_row == e_row && s_col > e_col) {
+        std::mem::swap(&mut s_row, &mut e_row);
+        std::mem::swap(&mut s_col, &mut e_col);
+    }
+
+    let style = crate::tui::renderer::cursor::selection_style();
+
+    for row in s_row..=e_row {
+        if let Some(line) = lines.get_mut(row) {
+            let start_c = if row == s_row { s_col } else { 0 };
+            let end_c = if row == e_row { e_col } else { 10000 };
+
+            let mut new_spans = Vec::new();
+            let mut current_w = 0;
+
+            for span in line.spans.drain(..) {
+                let mut span_content = String::new();
+                let mut in_selection = false;
+
+                for ch in span.content.chars() {
+                    let cw = ch.width().unwrap_or(1);
+                    let ch_in_sel = current_w >= start_c && current_w < end_c;
+
+                    if ch_in_sel != in_selection {
+                        if !span_content.is_empty() {
+                            new_spans.push(ratatui::text::Span::styled(
+                                span_content,
+                                if in_selection { style } else { span.style },
+                            ));
+                            span_content = String::new();
+                        }
+                        in_selection = ch_in_sel;
+                    }
+                    span_content.push(ch);
+                    current_w += cw;
+                }
+
+                if !span_content.is_empty() {
+                    new_spans.push(ratatui::text::Span::styled(
+                        span_content,
+                        if in_selection { style } else { span.style },
+                    ));
+                }
+            }
+            line.spans = new_spans;
+        }
     }
 }
