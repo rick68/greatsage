@@ -159,8 +159,9 @@ fn render_tui(
         Constraint::Min(3),               // output — fills remaining space
         Constraint::Length(3),            // status bar — always 3 rows
         Constraint::Length(input_height), // input — dynamic
+        Constraint::Length(1),            // function key bar
     ]);
-    let [output_area, status_area, input_area] = vertical.areas(area);
+    let [output_area, status_area, input_area, keys_area] = vertical.areas(area);
 
     // Store output_area so scroll math and mouse hit-testing stay in sync.
     tui.output_area = output_area;
@@ -252,6 +253,34 @@ fn render_tui(
             .border_style(Style::default().fg(input_border_color)),
     );
     () = frame.render_widget(input, input_area);
+
+    // ── Function Key Bar ──────────────────────────────────────────────────────
+    let keys_layout = Layout::horizontal(vec![Constraint::Percentage(10); 10]);
+    let key_labels = [
+        " F1 ", " F2 ", " F3 ", " F4 ", " F5 ", " F6 ", " F7 ", " F8 ", " F9 ", " F10 Exit ",
+    ];
+    let key_colors = [
+        ratatui::style::Color::Red,
+        ratatui::style::Color::Green,
+        ratatui::style::Color::Yellow,
+        ratatui::style::Color::Blue,
+        ratatui::style::Color::Magenta,
+        ratatui::style::Color::Cyan,
+        ratatui::style::Color::Gray,
+        ratatui::style::Color::LightRed,
+        ratatui::style::Color::LightGreen,
+        ratatui::style::Color::LightBlue,
+    ];
+
+    for (i, area) in keys_layout.split(keys_area).iter().enumerate() {
+        let key_text = ratatui::text::Span::styled(
+            key_labels[i],
+            Style::default()
+                .fg(ratatui::style::Color::Black)
+                .bg(key_colors[i]),
+        );
+        () = frame.render_widget(Paragraph::new(key_text), *area);
+    }
 
     // ── Software cursor ───────────────────────────────────────────────────────
     // Blink mode: use the terminal's native cursor (set_cursor_position).

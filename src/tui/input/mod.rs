@@ -40,6 +40,7 @@ use {
 /// | Key | Condition | Action |
 /// |-----|-----------|--------|
 /// | Tab | always | Cycle focus (InputArea ↔ OutputArea) |
+/// | F1 - F9 | always | (Reserved for future use) |
 /// | F10 | always | Exit the application |
 /// | Double-Esc | always | Exit the application |
 /// | Ctrl-C | selection active | Copy selection |
@@ -76,6 +77,9 @@ pub fn handle_global_input(
         match code {
             KeyCode::F(10) => {
                 _ = actions.write(TuiAction::Quit);
+            }
+            KeyCode::F(_) => {
+                // Reserved for F1-F9
             }
             KeyCode::Esc => {
                 let now = std::time::Instant::now();
