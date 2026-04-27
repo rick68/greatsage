@@ -563,10 +563,16 @@ mod tests {
         let log_path = base.join(".greatsage").join("evolve.log");
         assert!(log_path.is_file(), "evolve.log should be created");
         let log_content = fs::read_to_string(&log_path).expect("read evolve.log");
-        assert!(log_content.contains("Address none"), "log should contain task title");
+        assert!(
+            log_content.contains("Address none"),
+            "log should contain task title"
+        );
         // Ensure no placeholder file was erroneously created for "none".
         let placeholder_path = base.join(".greatsage").join("placeholdernone.txt");
-        assert!(!placeholder_path.is_file(), "No placeholder file should be created for 'none'");
+        assert!(
+            !placeholder_path.is_file(),
+            "No placeholder file should be created for 'none'"
+        );
     }
 
     #[test]
