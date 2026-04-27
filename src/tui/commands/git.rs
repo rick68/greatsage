@@ -4,7 +4,10 @@
 //! operations.  Each function returns `Vec<Line<'static>>` with ✅/❌ icons
 //! to give instant visual feedback.
 
-use ratatui::{style::Stylize, text::Line};
+use {
+    crate::git,
+    ratatui::{style::Stylize, text::Line},
+};
 
 /// Extracts the commit message string from a `-m` argument.
 ///
@@ -50,7 +53,7 @@ pub fn handle_git_subcmd(cmd: impl AsRef<str>) -> Vec<Line<'static>> {
         .unwrap_or((rest, ""));
 
     match subcmd {
-        "stage" => match crate::git::stage_all() {
+        "stage" => match git::stage_all() {
             Ok(_) => vec![Line::from("✅ Staged all changes").green()],
             Err(e) => vec![Line::from(format!("❌ /git stage failed: {e}")).red()],
         },
@@ -59,13 +62,13 @@ pub fn handle_git_subcmd(cmd: impl AsRef<str>) -> Vec<Line<'static>> {
             if msg.is_empty() {
                 vec![Line::from("❌ /git commit missing -m message").red()]
             } else {
-                match crate::git::commit(&msg) {
+                match git::commit(&msg) {
                     Ok(_) => vec![Line::from(format!("✅ Commit: {msg}")).green()],
                     Err(e) => vec![Line::from(format!("❌ /git commit failed: {e}")).red()],
                 }
             }
         }
-        "revert" => match crate::git::revert_last() {
+        "revert" => match git::revert_last() {
             Ok(_) => vec![Line::from("✅ Reverted last commit").green()],
             Err(e) => vec![Line::from(format!("❌ /git revert failed: {e}")).red()],
         },

@@ -21,12 +21,18 @@
 
 use {
     bevy::state::state::States,
-    ratatui::{layout::Rect, prelude::Stylize, text::Line, widgets::ScrollbarState},
+    ratatui::{
+        layout::Rect,
+        style::{Color, Stylize},
+        text::Line,
+        widgets::ScrollbarState,
+    },
     std::{
         iter::{DoubleEndedIterator, ExactSizeIterator, Iterator},
         time::Instant,
     },
     strum::{EnumCount, FromRepr},
+    unicode_width::UnicodeWidthChar,
 };
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -62,12 +68,12 @@ pub enum CursorState {
 /// Border color for the panel that currently has keyboard focus (bright white).
 ///
 /// Change this constant to restyle focused borders project-wide.
-pub const COLOR_BORDER_FOCUSED: ratatui::style::Color = ratatui::style::Color::White;
+pub const COLOR_BORDER_FOCUSED: Color = Color::White;
 
 /// Border color for panels that do **not** have focus (muted dark gray).
 ///
 /// Change this constant to restyle unfocused borders project-wide.
-pub const COLOR_BORDER_UNFOCUSED: ratatui::style::Color = ratatui::style::Color::DarkGray;
+pub const COLOR_BORDER_UNFOCUSED: Color = Color::DarkGray;
 
 // ── Focus state ────────────────────────────────────────────────────────────────
 
@@ -402,7 +408,7 @@ impl TuiMain {
 
     /// Insert `c` at the current cursor position and advance the cursor.
     pub fn insert_char(&mut self, c: char) {
-        self.input.insert(self.byte_index, c);
+        () = self.input.insert(self.byte_index, c);
         self.byte_index += c.len_utf8();
     }
 
@@ -577,7 +583,6 @@ impl TuiMain {
     /// mirrors [`renderer::display_utils::hard_wrap_output_lines_with_map`] so
     /// they always agree.
     pub fn total_visual_rows(&self) -> usize {
-        use unicode_width::UnicodeWidthChar;
         let inner_width = self.output_area.width.saturating_sub(2) as usize;
         let (flat, _) = crate::tui::renderer::display_utils::rendered_flat_lines(self, &SPINNER);
         if inner_width == 0 {
@@ -729,7 +734,7 @@ impl TuiMain {
             .current_response_mut()
             .and_then(|resp| resp.thinkings.iter_mut().rev().find(|tb| tb.streaming))
         {
-            tb.raw.push_str(raw.as_ref());
+            () = tb.raw.push_str(raw.as_ref());
             // Re-render all lines from the full raw text to avoid partial-line artifacts.
             tb.lines = tb
                 .raw

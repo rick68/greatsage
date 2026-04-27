@@ -14,20 +14,23 @@
 //!
 //! [`TuiAction`]: crate::tui::events::TuiAction
 
-use bevy::prelude::DetectChangesMut;
-use bevy_ratatui::crossterm;
 use {
     crate::tui::{
         core::{TuiMain, TuiMainFocus},
         events::{RenderNeeded, TuiAction},
     },
-    bevy::app::AppExit,
-    bevy::ecs::{
-        change_detection::{NonSendMut, Res, ResMut},
-        message::MessageWriter,
+    bevy::{
+        app::AppExit,
+        ecs::{
+            change_detection::{DetectChangesMut, NonSendMut, Res, ResMut},
+            message::MessageWriter,
+        },
+        state::state::{NextState, State},
     },
-    bevy::state::state::{NextState, State},
-    bevy_ratatui::event::{KeyMessage, MouseMessage},
+    bevy_ratatui::{
+        crossterm,
+        event::{KeyMessage, MouseMessage},
+    },
 };
 
 /// Handles keyboard events that are active regardless of which panel is focused.

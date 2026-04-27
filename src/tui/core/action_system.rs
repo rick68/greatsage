@@ -24,9 +24,9 @@ use {
         state::state::NextState,
     },
     ratatui::{style::Stylize, text::Line},
+    std::mem,
     unicode_segmentation::UnicodeSegmentation,
     unicode_width::UnicodeWidthChar,
-    std::mem,
 };
 
 /// Reads all pending [`TuiAction`] messages and applies each one to [`TuiMain`].
@@ -44,7 +44,7 @@ pub fn tui_action_system(
     for action_msg in actions.read() {
         // Any user interaction resets the idle timer and switches back to Blink mode.
         () = tui.reset_activity();
-        () =next_cursor_state.set(CursorState::Blink);
+        () = next_cursor_state.set(CursorState::Blink);
 
         let action = action_msg;
 
@@ -390,12 +390,12 @@ fn extract_selection_text(
             for ch in lt.chars() {
                 let w = ch.width().unwrap_or(1);
                 if cw >= stc && cw < enc {
-                    () =   rc.push(ch);
+                    () = rc.push(ch);
                 }
                 cw += w;
             }
             if !res.is_empty() {
-                () =  res.push('\n');
+                () = res.push('\n');
             }
             () = res.push_str(&rc);
         }
