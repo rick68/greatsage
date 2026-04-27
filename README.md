@@ -8,6 +8,19 @@ greatsage [OPTIONS] [prompt]
 ```
 
 Run the self‑evolution pipeline with:
+
+## Evolution Pipeline – Safety
+
+The evolve pipeline includes a guard against modifying critical repository files. The function `is_protected_path` checks paths against a whitelist of protected locations. The following directories and files are **never** modified by the evolution process:
+
+- `.github/workflows/`
+- `IDENTITY.md`
+- `PERSONALITY.md`
+- `scripts/`
+- `skills/`
+
+If any task attempts to write to a protected path, the pipeline aborts with an error message indicating the protected file was targeted.
+
 ```bash
 greatsage evolve
 ```

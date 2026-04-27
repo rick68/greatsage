@@ -18,6 +18,7 @@ pub fn is_protected_path(path: impl AsRef<Path>) -> bool {
     let protected = [
         Path::new(".github/workflows"),
         Path::new("IDENTITY.md"),
+        Path::new("PERSONALITY.md"),
         Path::new("scripts"),
         Path::new("skills"),
     ];
