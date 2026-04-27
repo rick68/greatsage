@@ -167,8 +167,12 @@ fn main() {
     app_config.runtime.verbose = args.verbose;
     app_config.runtime.strict_errors = args.strict_errors;
     app_config.runtime.error_handling = args.error_handling;
-    // Persisted REPL error handling flag (overridden by CLI flag if provided)
-    app_config.repl_error_handling = args.repl_error_handling;
+    // REPL error handling: CLI flag overrides persisted config
+    app_config.repl_error_handling = if args.error_handling {
+        true
+    } else {
+        args.repl_error_handling
+    };
     // Capture error handling flag before moving app_config into Bevy resource.
     let repl_error_handling_flag = app_config.repl_error_handling;
     // Install panic hook for strict error handling if enabled.
