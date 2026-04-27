@@ -41,4 +41,15 @@ mod tests {
             std::env::remove_var("FORCE_PANIC");
         }
     }
+
+    #[test]
+    fn test_flag_enabled_nonexistent_file() {
+        // Use a path that likely does not exist and has a known extension.
+        let path = "/tmp/this_file_should_not_exist_12345.txt".to_string();
+        let res = handle_prompt(path.clone(), true);
+        assert!(
+            res.is_err(),
+            "Nonexistent file should be rejected when flag enabled: {path}"
+        );
+    }
 }
