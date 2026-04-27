@@ -14,6 +14,8 @@ greatsage evolve
 
 The evolve pipeline generates three placeholder task files (`task_01.md`, `task_02.md`, `task_03.md`) in the `session_plan/` directory. Each contains a title like `Placeholder Task 1`, `Placeholder Task 2`, or `Placeholder Task 3`, with `Files: none` and `Issue: none` lines.
 
+- `greatsage evolve --dry-run`: Perform a dry run of the evolve pipeline (assessment and planning phases only, without executing tasks).
+
 
 Start the REPL (no arguments), or pass a prompt to run once and exit:
 

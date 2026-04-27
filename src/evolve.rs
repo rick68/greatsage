@@ -134,14 +134,16 @@ pub fn assessment_phase(base_dir: impl AsRef<Path>) -> Result<String, Box<dyn st
 }
 
 /// Orchestrates the evolve pipeline: assessment, planning, and task execution.
+#[allow(clippy::needless_borrows_for_generic_args)]
 pub fn run_evolve_with(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
-    let assessment = assessment_phase(&base_dir)?;
+    let base = base_dir.as_ref();
+    let assessment = assessment_phase(base)?;
     println!("[greatsage] Assessment Phase Result:\n{assessment}");
     // Planning phase – generate tasks based on assessment output.
-    () = planning_phase_with_assessment(&base_dir, &assessment)?;
+    () = planning_phase_with_assessment(base, &assessment)?;
     println!("[greatsage] Planning Phase completed. Task files created in session_plan/.");
     // Execute tasks phase
-    () = execute_tasks(&base_dir)?;
+    () = execute_tasks(base)?;
     println!("[greatsage] Execute Tasks Phase completed. Log written to evolve.log.");
     Ok(())
 }
@@ -348,7 +350,22 @@ pub fn planning_phase(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
+/// Run the evolve pipeline in dry‑run mode (assessment + planning only)
+pub fn run_evolve_dry() -> Result<(), Box<dyn std::error::Error>> {
+    let base_dir = Path::new(".");
+    let assessment = assessment_phase(&base_dir)?;
+    println!("[greatsage] Assessment Phase Result:\n{assessment}");
+    // Planning phase – generate tasks based on assessment output.
+    planning_phase_with_assessment(&base_dir, &assessment)?;
+    println!(
+        "[greatsage] Planning Phase completed (dry‑run). Task files created in session_plan/."
+    );
+    Ok(())
+}
+
+/// Run the evolve pipeline (full mode) – entry point used by CLI.
 pub fn run_evolve() -> Result<(), Box<dyn std::error::Error>> {
+    // Use current directory as base.
     run_evolve_with(Path::new("."))
 }
 
