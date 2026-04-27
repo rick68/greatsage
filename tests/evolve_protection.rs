@@ -6,7 +6,7 @@
 mod tests {
     use {
         greatsage::evolve::{execute_tasks, is_protected_path, planning_phase},
-        std::{fs, io::Write, path::Path},
+        std::{fs, io::Write, os, path::Path},
         tempfile::TempDir,
     };
 
@@ -61,14 +61,19 @@ mod tests {
         // Create a temporary directory with a protected subdirectory and a symlink to it.
         let tmp = TempDir::new().expect("temp dir");
         let protected_dir = tmp.path().join("scripts");
-        std::fs::create_dir_all(&protected_dir).expect("create protected dir");
+        () = fs::create_dir_all(&protected_dir).expect("create protected dir");
         // Create a symlink named "link_scripts" pointing to the protected directory.
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&protected_dir, tmp.path().join("link_scripts"))
-            .expect("create symlink");
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&protected_dir, tmp.path().join("link_scripts"))
-            .expect("create symlink");
+        cfg_if::cfg_if! {
+            if #[cfg(unix)] {
+                () = os::unix::fs::symlink(&protected_dir, tmp.path()
+                    .join("link_scripts"))
+                    .expect("create symlink");
+            } else if #[cfg(windows)] {
+                () = os::windows::fs::symlink_dir(&protected_dir, tmp.path()
+                    .join("link_scripts"))
+                    .expect("create symlink");
+            }
+        }
         // Resolve the symlink to its canonical path and test.
         let symlink_path = tmp.path().join("link_scripts");
         let canonical = std::fs::canonicalize(&symlink_path).expect("canonicalize symlink");
@@ -83,7 +88,7 @@ mod tests {
         // Create a temporary directory that mimics a protected location.
         let tmp = TempDir::new().expect("create temp dir");
         let base = tmp.path().join(".github").join("workflows");
-        fs::create_dir_all(&base).expect("create protected dir");
+        () = fs::create_dir_all(&base).expect("create protected dir");
         // Attempt planning_phase with the protected base directory.
         let result = planning_phase(&base);
         assert!(
@@ -99,10 +104,10 @@ mod tests {
         let base = tmp.path();
         // Create session_plan directory.
         let plan_dir = base.join("session_plan");
-        fs::create_dir_all(&plan_dir).expect("create session_plan");
+        () = fs::create_dir_all(&plan_dir).expect("create session_plan");
         // Create a protected task file inside a protected path.
         let protected_dir = base.join("scripts");
-        fs::create_dir_all(&protected_dir).expect("create protected dir");
+        () = fs::create_dir_all(&protected_dir).expect("create protected dir");
         let task_path = protected_dir.join("task_01.md");
         let mut file = fs::File::create(&task_path).expect("create task file");
         writeln!(file, "Title: Bad Task").expect("write task");
