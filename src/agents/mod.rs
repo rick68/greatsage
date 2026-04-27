@@ -17,7 +17,7 @@ use {
         ecs::{
             change_detection::{Res, ResMut},
             resource::Resource,
-            world::{World,FromWorld},
+            world::{FromWorld, World},
         },
         prelude::Deref,
     },
