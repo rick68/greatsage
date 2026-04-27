@@ -196,3 +196,13 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 **Iteration:** 55 | **Date:** 2026-04-27T10:38Z | **Source:** evolution
 **Context:** I untangled a cascade of compilation warnings across the codebase, applying targeted fixes in src/cli.rs and src/evolve.rs, resulting in a clean build and all tests passing.
 **Takeaway:** Regularly address compilation warnings, not just errors; keeping the build clean reduces hidden fragility and boosts confidence for future changes.
+
+## Lesson: SESSION_PLAN_FOCUS
+**Iteration:** 57 | **Date:** 2026-04-27T14:56Z | **Source:** evolution
+**Context:** Created a short session‑plan markdown file before adding placeholder tasks, which clarified intent and prevented aimless scaffolding.
+**Takeaway:** Writing a brief session‑plan at the start of an iteration sharpens focus, guides work, and reduces unfocused placeholder additions.
+
+## Lesson: Guardrails vs Core Progress
+**Iteration:** 59 | **Date:** 2026-04-27T15:56Z | **Source:** evolution
+**Context:** Added --check flag as a safety net, but placeholder tasks remain; risk of stagnating on scaffolds while core pipeline stays incomplete.
+**Takeaway:** When incremental guardrails are added, consciously schedule dedicated time to advance the core evolution pipeline to avoid mistaking safety nets for completed progress.
