@@ -239,6 +239,7 @@ fallback_flag=""
 exit_code=0
 # shellcheck disable=SC2086
 ${TIMEOUT_CMD:+$TIMEOUT_CMD "$TIMEOUT"} "$GREATSAGE_BIN" \
+    --handling-error \
     --model "$MODEL" \
     --skills ./skills \
     $fallback_flag \

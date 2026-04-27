@@ -99,6 +99,10 @@ pub fn handle_prompt(prompt: String, repl_error_handling: bool) -> Result<(), Re
     }
 
     // No further side‑effects here; sending is handled elsewhere.
+    // Simulate forced panic for testing if environment variable is set.
+    if repl_error_handling && std::env::var("FORCE_PANIC").as_deref() == Ok("1") {
+        panic!("Forced panic for REPL error handling test");
+    }
     Ok(())
 }
 
@@ -293,6 +297,7 @@ fn main() {
         Ok(_) => {}
         Err(panic) => {
             eprintln!("Error: REPL encountered an unexpected panic: {panic:?}");
+            std::process::exit(1);
         }
     }
 }
