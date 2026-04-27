@@ -7,6 +7,12 @@ Rimuru's Unique Skill, you know the one.
 greatsage [OPTIONS] [prompt]
 ```
 
+## Installation
+
+```bash
+cargo install --path .
+```
+
 Run the self‑evolution pipeline with:
 
 ## Evolution Pipeline – Safety

@@ -177,6 +177,12 @@ fn generate_tasks_from_assessment(
     // Limit to three tasks.
     for (i, title) in titles.iter().take(3).enumerate() {
         let file_path = plan_dir.join(format!("task_{:02}.md", i + 1));
+        // If the task file already exists (e.g., a manual task like "Address 40"),
+        // preserve it instead of overwriting.
+        if file_path.exists() {
+            // Skip generation for this slot to retain the existing manual task.
+            continue;
+        }
         let mut file = fs::File::create(&file_path)?;
         writeln!(file, "Title: {title}")?;
         writeln!(file, "Files: none")?;
