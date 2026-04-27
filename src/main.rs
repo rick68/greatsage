@@ -33,7 +33,8 @@ use {
     clap::Parser,
     std::{
         env,
-        io::{IsTerminal, Read, Write, stdin},
+        fs,
+        io::{self, IsTerminal, Read, Write},
         process,
         time::Duration,
     },
@@ -57,17 +58,18 @@ fn maybe_set_strict_error_hook(enabled: bool) {
 
 build_info::build_info!(fn build_info);
 
-pub fn handle_prompt(prompt: String, error_handling: bool) -> Result<(), Box<dyn Error>> {
+pub fn handle_prompt(prompt: String, repl_error_handling: bool) -> Result<(), Box<dyn Error>> {
+    let trimmed = prompt.trim();
+
     // Treat empty prompts as a no-op.
-    if prompt.trim().is_empty() {
+    if trimmed.is_empty() {
         return Ok(());
     }
 
     // If error handling flag is enabled, perform validation.
-    if error_handling {
+    if repl_error_handling {
         // Determine if the prompt looks like a file reference.
         // Recognize "file:" prefix or known file extensions.
-        let trimmed = prompt.trim();
         let path_candidate = if let Some(stripped) = trimmed.strip_prefix("file:") {
             stripped.trim()
         } else {
@@ -77,14 +79,14 @@ pub fn handle_prompt(prompt: String, error_handling: bool) -> Result<(), Box<dyn
         let looks_like_file = KNOWN_EXTS.iter().any(|ext| path_candidate.ends_with(ext));
         if looks_like_file {
             // Verify file exists and is readable.
-            match std::fs::metadata(path_candidate) {
+            match fs::metadata(path_candidate) {
                 Ok(meta) if meta.is_file() => {
                     // try opening for reading to ensure readability
-                    std::fs::File::open(path_candidate)?;
+                    _ = fs::File::open(path_candidate)?;
                 }
                 _ => {
-                    return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
+                    return Err(Box::new(io::Error::new(
+                        io::ErrorKind::NotFound,
                         format!("File not found or unreadable: {path_candidate}"),
                     )));
                 }
@@ -164,7 +166,7 @@ fn main() {
     // Persisted REPL error handling flag (overridden by CLI flag if provided)
     app_config.repl_error_handling = args.repl_error_handling;
     // Capture error handling flag before moving app_config into Bevy resource.
-    let error_handling_flag = app_config.repl_error_handling;
+    let repl_error_handling_flag = app_config.repl_error_handling;
     // Install panic hook for strict error handling if enabled.
     maybe_set_strict_error_hook(app_config.runtime.strict_errors);
 
@@ -193,7 +195,7 @@ fn main() {
 
     let mut invocation_prompt = None;
     {
-        let stdin = stdin();
+        let stdin = io::stdin();
         let Args {
             prompt,
             positional_prompt,
@@ -225,18 +227,18 @@ fn main() {
     if let Some(prompt) = invocation_prompt {
         // Use helper to handle the prompt with error handling.
         let prompt_clone = prompt.clone();
-        let error_handling = error_handling_flag;
+        let repl_error_handling = repl_error_handling_flag;
         _ = app.add_systems(
             Update,
             (
                 (move |channel: Res<CodingAgentPromptChannel>| {
                     // First, handle prompt validation.
-                    if let Err(e) = handle_prompt(prompt_clone.clone(), error_handling) {
+                    if let Err(e) = handle_prompt(prompt_clone.clone(), repl_error_handling) {
                         eprintln!("Prompt handling error: {e}");
                         return;
                     }
                     // Conditionally wrap send in panic catcher based on REPL error handling flag.
-                    if error_handling {
+                    if repl_error_handling {
                         // Wrap send in panic catcher and forward errors.
                         let result =
                             std::panic::catch_unwind(|| channel.sender.send(prompt_clone.clone()));
