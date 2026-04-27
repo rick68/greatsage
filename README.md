@@ -31,7 +31,7 @@ If any task attempts to write to a protected path, the pipeline aborts with an e
 greatsage evolve
 ```
 
-The evolve pipeline generates three placeholder task files (`task_01.md`, `task_02.md`, `task_03.md`) in the `session_plan/` directory. Each contains a title like `Placeholder Task 1`, `Placeholder Task 2`, or `Placeholder Task 3`, with `Files: none` and `Issue: none` lines.
+The evolve pipeline generates three placeholder task files (`task_01.md`, `task_02.md`, `task_03.md`) in the `session_plan/` directory. Each contains a title like `Placeholder Task 1`, `Placeholder Task 2`, or `Placeholder Task 3`, with `Files: none` and `Issue: none` lines. Additionally, tasks titled `Address TBD` are treated as no‑ops: they run without creating any marker files.
 
 - `greatsage evolve --dry-run`: Perform a dry run of the evolve pipeline (assessment and planning phases only, without executing tasks).
 
