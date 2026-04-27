@@ -1,5 +1,7 @@
 // Integration tests for protected path detection and enforcement in evolve.rs
 
+// Added tests for absolute paths, symlinks, and hidden directories.
+
 #[cfg(test)]
 mod tests {
     use {
@@ -29,6 +31,51 @@ mod tests {
             let path = Path::new(p);
             assert!(!is_protected_path(path), "{p} should NOT be protected");
         }
+    }
+
+    #[test]
+    fn absolute_paths_are_protected() {
+        // Use absolute path to a protected location.
+        let cwd = std::env::current_dir().expect("current dir");
+        let abs_path = cwd.join("scripts").join("util.sh");
+        assert!(
+            is_protected_path(&abs_path),
+            "absolute path to protected location should be protected"
+        );
+    }
+
+    #[test]
+    fn hidden_directories_are_not_protected() {
+        let hidden = [".secret/file.txt", ".hidden_dir/sub/file.rs"];
+        for p in hidden.iter() {
+            let path = Path::new(p);
+            assert!(
+                !is_protected_path(path),
+                "{p} should NOT be protected (hidden directory)"
+            );
+        }
+    }
+
+    #[test]
+    fn symlink_to_protected_path_is_detected() {
+        // Create a temporary directory with a protected subdirectory and a symlink to it.
+        let tmp = TempDir::new().expect("temp dir");
+        let protected_dir = tmp.path().join("scripts");
+        std::fs::create_dir_all(&protected_dir).expect("create protected dir");
+        // Create a symlink named "link_scripts" pointing to the protected directory.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&protected_dir, tmp.path().join("link_scripts"))
+            .expect("create symlink");
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&protected_dir, tmp.path().join("link_scripts"))
+            .expect("create symlink");
+        // Resolve the symlink to its canonical path and test.
+        let symlink_path = tmp.path().join("link_scripts");
+        let canonical = std::fs::canonicalize(&symlink_path).expect("canonicalize symlink");
+        assert!(
+            is_protected_path(&canonical),
+            "symlink to protected path should be considered protected"
+        );
     }
 
     #[test]
