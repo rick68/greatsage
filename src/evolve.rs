@@ -339,14 +339,11 @@ pub fn planning_phase(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::err
     if !plan_dir.is_dir() {
         fs::create_dir_all(&plan_dir)?;
     }
-    // Clean existing task files.
-    for entry in fs::read_dir(&plan_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("md") {
-            () = fs::remove_file(path)?;
-        }
-    }
+    // Preserve existing task files (do not delete).
+    // Previously, we removed all .md files in the session_plan directory to ensure a clean slate.
+    // However, manual task files (e.g., Address 40) should be retained across runs.
+    // Therefore, we now skip the deletion step.
+
     // Obtain assessment output and generate tasks accordingly.
     let assessment = assessment_phase(base_dir.as_ref())?;
     () = generate_tasks_from_assessment(base_dir.as_ref(), assessment)?;
