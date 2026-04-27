@@ -1,4 +1,6 @@
 use git2::{IndexAddOption, Repository};
+use std::error::Error;
+use std::process::Command;
 
 /// Stage all changes in the current repository using `git2`.
 /// Returns `Ok(())` on success or an `Err` containing a description.
@@ -80,6 +82,29 @@ pub fn revert_last() -> Result<(), git2::Error> {
     // Create the revert commit from the staged result.
     let message = format!("Revert \"{}\"", target.summary().unwrap_or(""));
     commit(&message)
+}
+
+/// Commit staged changes using the system `git` command.
+/// Runs `git add -A && git commit -m "message"`.
+/// Returns `Ok(())` on success, or an `Err` containing the command's stderr.
+#[allow(dead_code)]
+pub fn commit_changes(message: &str) -> Result<(), Box<dyn Error>> {
+    // Stage all changes.
+    let add_output = Command::new("git").args(["add", "-A"]).output()?;
+    if !add_output.status.success() {
+        let err = String::from_utf8_lossy(&add_output.stderr).into_owned();
+        return Err(err.into());
+    }
+    // Commit with the provided message.
+    let commit_output = Command::new("git")
+        .args(["commit", "-m", message])
+        .output()?;
+    if commit_output.status.success() {
+        Ok(())
+    } else {
+        let err = String::from_utf8_lossy(&commit_output.stderr).into_owned();
+        Err(err.into())
+    }
 }
 
 #[cfg(test)]
@@ -180,6 +205,42 @@ mod tests {
         () = stage_all().expect("stage failed");
         () = commit("initial commit").expect("initial commit failed");
         let result = crate::git::commit("empty commit");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[temp_env_vars]
+    fn commit_changes_successful() {
+        let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        () = init_git_repo(&temp_dir);
+        let _cwd = CwdGuard(env::current_dir().expect("Failed to get current dir"));
+        () = env::set_current_dir(temp_dir.path()).expect("Failed to set current dir");
+        // Create a new file.
+        let file_path = temp_dir.path().join("new.txt");
+        () = fs::write(&file_path, b"data").expect("write failed");
+        // Use commit_changes.
+        let result = commit_changes("add new file");
+        assert!(result.is_ok());
+        // Verify the commit exists.
+        let log_output = Command::new("git")
+            .args(["log", "--oneline"])
+            .output()
+            .expect("git log failed");
+        let log_str = String::from_utf8_lossy(&log_output.stdout);
+        assert!(log_str.contains("add new file"));
+    }
+
+    #[test]
+    #[temp_env_vars]
+    fn commit_changes_no_changes_error() {
+        let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        () = init_git_repo(&temp_dir);
+        let _cwd = CwdGuard(env::current_dir().expect("Failed to get current dir"));
+        () = env::set_current_dir(temp_dir.path()).expect("Failed to set current dir");
+        // No changes.
+        let result = commit_changes("nothing to do");
         assert!(result.is_err());
     }
 }
