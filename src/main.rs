@@ -187,15 +187,29 @@ fn main() {
     }
 
     // Evolve subcommand (supports dry-run)
-    if let Some(Command::Evolve { dry_run }) = args.command {
+    if let Some(Command::Evolve { dry_run, push }) = args.command {
         if dry_run {
             if let Err(e) = evolve::run_evolve_dry() {
                 eprintln!("{e}");
                 _ = process::exit(1);
             }
-        } else if let Err(e) = evolve::run_evolve() {
-            eprintln!("{e}");
-            _ = process::exit(1);
+        } else {
+            // Run evolve pipeline
+            if let Err(e) = evolve::run_evolve() {
+                eprintln!("{e}");
+                _ = process::exit(1);
+            }
+            // After successful evolve, commit and tag
+            // Read iteration count
+            let iteration_res = std::fs::read_to_string("ITERATION_COUNT");
+            let iteration: u32 = match iteration_res {
+                Ok(s) => s.trim().parse().unwrap_or(0),
+                Err(_) => 0,
+            };
+            if let Err(e) = crate::git::commit_and_tag(iteration, push) {
+                eprintln!("Git error: {e}");
+                _ = process::exit(1);
+            }
         }
         _ = process::exit(0);
     }

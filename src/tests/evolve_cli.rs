@@ -6,7 +6,7 @@ mod tests {
     fn test_args_parsing_evolve_subcommand() {
         let args = Args::parse_from(["test_bin", "evolve"]);
         match args.command {
-            Some(Command::Evolve { dry_run }) => {
+            Some(Command::Evolve { dry_run, .. }) => {
                 // Ensure dry_run defaults to false
                 assert!(!dry_run, "dry_run flag should be false by default");
             }

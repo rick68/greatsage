@@ -1,5 +1,6 @@
 use {
     git2::{IndexAddOption, Repository},
+    std::error::Error,
     std::process::Command,
 };
 
@@ -83,6 +84,55 @@ pub fn revert_last() -> Result<(), git2::Error> {
     // Create the revert commit from the staged result.
     let message = format!("Revert \"{}\"", target.summary().unwrap_or(""));
     commit(&message)
+}
+
+/// Error type for git operations used by `commit_and_tag`.
+pub type GitError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Stage all changes, commit with a message based on the iteration number,
+/// create an annotated tag `v{iteration}`, and optionally push to the remote.
+///
+/// Returns `Ok(())` on success or an `Err` containing a description.
+pub fn commit_and_tag(iteration: u32, push: bool) -> Result<(), GitError> {
+    // Stage all changes.
+    stage_all().map_err(|e| Box::new(e) as GitError)?;
+    // Commit with a message.
+    let msg = format!("evolve iteration {iteration}");
+    commit(&msg).map_err(|e| Box::new(e) as GitError)?;
+    // Create annotated tag.
+    let tag_name = format!("v{iteration}");
+    let tag_msg = format!("evolve iteration {iteration}");
+    let tag_status = Command::new("git")
+        .args(["tag", "-a", &tag_name, "-m", &tag_msg])
+        .output()?;
+    if !tag_status.status.success() {
+        let err = String::from_utf8_lossy(&tag_status.stderr).into_owned();
+        return Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            err,
+        )));
+    }
+    if push {
+        // Push commits.
+        let push_status = Command::new("git").args(["push"]).output()?;
+        if !push_status.status.success() {
+            let err = String::from_utf8_lossy(&push_status.stderr).into_owned();
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                err,
+            )));
+        }
+        // Push tags.
+        let push_tags_status = Command::new("git").args(["push", "--tags"]).output()?;
+        if !push_tags_status.status.success() {
+            let err = String::from_utf8_lossy(&push_tags_status.stderr).into_owned();
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                err,
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Commit staged changes using the system `git` command.

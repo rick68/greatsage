@@ -115,6 +115,9 @@ pub enum Command {
         /// Perform a dry run (assessment + planning only)
         #[arg(long, action = ArgAction::SetTrue, help = "Perform a dry run (assessment + planning only)")]
         dry_run: bool,
+        /// Push commits and tags to remote after successful evolve
+        #[arg(long, action = ArgAction::SetTrue, help = "Push commits and tags after evolve")]
+        push: bool,
     },
 }
 
