@@ -41,6 +41,11 @@ use {
 
 use std::error::Error;
 
+// Alias for error type used throughout REPL handling.
+// Allows returning any error that implements the `Error` trait.
+// This keeps the public API simple while supporting diverse error sources.
+pub type ReplError = Box<dyn Error>;
+
 /// Install a panic hook that aborts with a clear message and exit code 101
 /// when `--strict-errors` is enabled. This provides a guard‑rail so that REPL
 /// panics do not silently crash the process.
@@ -57,7 +62,7 @@ fn maybe_set_strict_error_hook(enabled: bool) {
 
 build_info::build_info!(fn build_info);
 
-pub fn handle_prompt(prompt: String, error_handling: bool) -> Result<(), Box<dyn Error>> {
+pub fn handle_prompt(prompt: String, error_handling: bool) -> Result<(), ReplError> {
     // Treat empty prompts as a no-op.
     if prompt.trim().is_empty() {
         return Ok(());
