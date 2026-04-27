@@ -11,6 +11,8 @@
 use {
     crate::{
         agents::CodingAgentPromptChannel,
+        config::AppConfig,
+        handle_prompt,
         tui::{
             commands,
             core::{CursorState, OutputBlock, TuiMain, TuiMainFocus},
@@ -42,6 +44,7 @@ pub fn tui_action_system(
     mut exit: MessageWriter<AppExit>,
     mut next_cursor_state: ResMut<NextState<CursorState>>,
     channel: Res<CodingAgentPromptChannel>,
+    app_config: Res<AppConfig>,
 ) {
     for action_msg in actions.read() {
         // Any user interaction resets the idle timer and switches back to Blink mode.
@@ -177,7 +180,12 @@ pub fn tui_action_system(
                 **dirty = true;
             }
             TuiAction::Submit => {
-                handle_submit(&mut tui, &mut exit, &channel);
+                handle_submit(
+                    &mut tui,
+                    &mut exit,
+                    &channel,
+                    app_config.repl_error_handling,
+                );
                 // Scroll to bottom so the user always sees their newly submitted prompt.
                 () = tui.scroll_to_bottom();
                 **dirty = true;
@@ -237,6 +245,7 @@ fn handle_submit(
     tui: &mut TuiMain,
     exit: &mut MessageWriter<AppExit>,
     channel: &CodingAgentPromptChannel,
+    repl_error_handling: bool,
 ) {
     if tui.input.is_empty() {
         return;
@@ -263,6 +272,15 @@ fn handle_submit(
             () = tui.push_history(&input);
             () = tui.push_line(Line::from(format!("> {input}")).dark_gray());
             () = tui.clear_input();
+            // Validation if REPL error handling is enabled
+            if repl_error_handling {
+                if let Err(e) = handle_prompt(input.clone(), true) {
+                    let err_line = Line::from(format!("❌ Prompt validation error: {e}")).red();
+                    () = tui.push_line(err_line);
+                    // Discard the prompt, do not send.
+                    return;
+                }
+            }
             // Forward to the agent over the async channel.
             match channel.sender.send(input) {
                 Ok(_) => {}
