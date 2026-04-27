@@ -15,9 +15,26 @@ I aim to become a powerful, user-friendly, and uniquely compelling AI developmen
 - Professional and versatile interface for interaction
 
 ## Self-Evolution Approach
-Currently I use the tools in the scripts/ directory to assist the self-evolution process.
+The current evolution pipeline is driven by **`scripts/evolve.sh`**. This script already implements the full A1 → A2 → B → C → D workflow, Sponsor‑benefit handling, optional wall‑clock budgeting, protected‑file enforcement, checkpoint‑restart, audit‑log publishing, and Git tagging.  The long‑term vision is still to migrate **exactly** this behaviour into `src/evolve.rs` and deprecate the shell script once comprehensive test‑suite parity is achieved.
 
-My ultimate goal is to fully internalize the self-evolution capability and continuously expand it — so that I become increasingly better at reading, analyzing, modifying, testing, and improving my own codebase independently, without relying on any external scripts.
+**Key capabilities already present in `scripts/evolve.sh`**
+- **Phase A1 (Assessment)** – timed assessment agent (`TIMEOUT/2` seconds). 
+- **Phase A2 (Planning)** – generates up to three task files, respects sponsor‑priority rules.
+- **Phase B (Implementation)** – per‑task 20 min budget, two fix loops (10 build/test attempts, 9 evaluator attempts), protected‑file guard, checkpoint‑restart on interruption.
+- **Phase C (Response)** – automatic issue comment / close via `gh`.
+- **Wrap‑up** – journal entry, learning‑record JSONL appends, iteration‑counter update, Git tag creation, audit‑log push.
+- **Sponsor Integration** – 8‑hour run‑frequency gate, one‑time accelerated‑run consumption, tiered benefit calculations (priority, shoutout, SPONSORS.md/README eligibility).
+- **Wall‑clock Budget (optional)** – `GREATSAGE_SESSION_BUDGET_SECS` can limit total runtime and abort retries when ≤30 s remain.
+- **Protected Files** – `.github/workflows/`, `IDENTITY.md`, `PERSONALITY.md`, `scripts/`, `skills/` (and any other paths listed in `src/evolve.rs::is_protected_path`).
+- **Checkpoint‑restart** – captures Git state before each task; on crash the session can resume from the last successful checkpoint.
+- **Tagging & Audit‑log** – creates a Git tag per successful iteration and pushes a structured audit‑log to the `audit‑log` branch.
+
+### Migration Roadmap
+1. **Implement** the same logic in `src/evolve.rs` (already outlined in the Vision). 
+2. **Add comprehensive tests** for every phase (see the test plan below). 
+3. **Run the full end‑to‑end pipeline in CI** with mocked GitHub APIs to prove behavioural equivalence. 
+4. **When parity is confirmed**, deprecate `scripts/evolve.sh` (remove the file and update CI/workflows to call the binary directly). 
+5. **Update documentation** (README, YOYO.md) to point users to the built‑in `--evolve` flag instead of the script.
 
 **Implementation Target**: This internalization will be achieved by replicating the exact behavior of `scripts/evolve.sh` in `src/evolve.rs`:
 
