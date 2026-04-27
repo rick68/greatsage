@@ -331,17 +331,17 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
                         () = fs::write(&placeholder_path, "Task 40 completed")?;
                     } else {
                         // Generic handling for "Address <num>" tasks: create a placeholder marker file.
-                        if let Some(num_str) = title.strip_prefix("Address ") {
-                            if let Ok(num) = num_str.parse::<u32>() {
-                                let placeholder_path = base_dir
-                                    .join(".greatsage")
-                                    .join(format!("placeholder{num}.txt"));
-                                if let Some(parent) = placeholder_path.parent() {
-                                    let _ = fs::create_dir_all(parent);
-                                }
-                                let content = format!("Task {num} completed");
-                                () = fs::write(&placeholder_path, content)?;
+                        if let Some(num_str) = title.strip_prefix("Address ")
+                            && let Ok(num) = num_str.parse::<u32>()
+                        {
+                            let placeholder_path = base_dir
+                                .join(".greatsage")
+                                .join(format!("placeholder{num}.txt"));
+                            if let Some(parent) = placeholder_path.parent() {
+                                let _ = fs::create_dir_all(parent);
                             }
+                            let content = format!("Task {num} completed");
+                            () = fs::write(&placeholder_path, content)?;
                         }
                     }
                     break;

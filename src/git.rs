@@ -1,6 +1,5 @@
 use {
     git2::{IndexAddOption, Repository},
-    std::error::Error,
     std::process::Command,
 };
 
@@ -107,29 +106,20 @@ pub fn commit_and_tag(iteration: u32, push: bool) -> Result<(), GitError> {
         .output()?;
     if !tag_status.status.success() {
         let err = String::from_utf8_lossy(&tag_status.stderr).into_owned();
-        return Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            err,
-        )));
+        return Err(Box::new(std::io::Error::other(err)));
     }
     if push {
         // Push commits.
         let push_status = Command::new("git").args(["push"]).output()?;
         if !push_status.status.success() {
             let err = String::from_utf8_lossy(&push_status.stderr).into_owned();
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                err,
-            )));
+            return Err(Box::new(std::io::Error::other(err)));
         }
         // Push tags.
         let push_tags_status = Command::new("git").args(["push", "--tags"]).output()?;
         if !push_tags_status.status.success() {
             let err = String::from_utf8_lossy(&push_tags_status.stderr).into_owned();
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                err,
-            )));
+            return Err(Box::new(std::io::Error::other(err)));
         }
     }
     Ok(())
