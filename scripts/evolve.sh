@@ -1997,7 +1997,7 @@ PYEOF
         if (
             cd "$AUDIT_PUSH_WT" && \
             git add . && \
-            git commit -m "audit: iteration $ITERATION ($SESSION_TIME)" 2>/dev/null && \
+            git commit -m "audit: iteration $ITERATION ($ISO_DATETIME)" 2>/dev/null && \
             # Pull-rebase before push to absorb a concurrent session's audit
             # commit (each session writes to its own iteration-N-<ts>/ subdir, so
             # rebase conflicts are essentially impossible — both touched only
