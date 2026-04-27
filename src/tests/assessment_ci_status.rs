@@ -1,8 +1,10 @@
 #[cfg(test)]
 mod assessment_ci_status_tests {
-    use super::super::assessment_phase;
-    use std::{fs, path::Path};
-    use tempfile::TempDir;
+    use {
+        crate::assessment_phase,
+        std::{fs, path::Path},
+        tempfile::TempDir,
+    };
 
     #[test]
     fn ci_status_present() {
