@@ -108,17 +108,24 @@ The `evolve` skill monitors the outcomes of each interaction: token usage, test 
 
 **Wall-clock budget** (opt-in): The hourly cron can fire while a previous session is still running, causing GH Actions to cancel the in-flight run (#262). Set `GREATSAGE_SESSION_BUDGET_SECS=2700` (45 min default if set but unparseable) to enable a soft, agent-side wall-clock budget. The helper `prompt::session_budget_remaining()` returns `Some(remaining)` when the env var is set and `None` otherwise (sessions are unbounded by default for interactive use). The timer starts on the first call, not at process startup, so cold-start time doesn't eat into agent work. `session_budget_remaining()` is now consulted at the top of each retry attempt in `run_prompt_auto_retry`, `run_prompt_auto_retry_with_content`, and the watch-mode fix loop via `session_budget_exhausted(30)`; when ≤30s remain, retries stop early and the current outcome is returned. The shell-side export in `scripts/evolve.sh` is a separate (human-approved) follow-up — until then the env var stays unset and behavior is unchanged.
 
-**Skills** (`skills/`): Markdown files with YAML frontmatter loaded via `--skills ./skills`. Four core skills (immutable) define the agent's evolution workflow:
+**Skills** (`skills/`): Markdown files with YAML frontmatter loaded via `--skills ./skills`. Seven core skills (immutable, `core: true` + `origin: creator`) define the agent's foundational capabilities:
 - `self-assess` — read own code, try tasks, find bugs/gaps
 - `evolve` — safely modify source, test, revert on failure
 - `communicate` — write journal entries and issue responses
 - `research` — internet lookups and knowledge caching
+- `skill-evolve` — autonomous meta-skill: refines/creates/retires non-core skills based on past-session evidence (cron-driven, gated)
+- `skill-creator` — on-demand meta-skill: scaffolds a new skill when the human creator or a community issue explicitly asks for one (interview-driven, no autonomous gating)
+- `analyze-trajectory` — on-demand RLM-style deep dive: when YOUR TRAJECTORY shows a recurring failure (STUCK task / clustered CI error fingerprint / frequent reverts), dispatches sub-agents to digest CI logs without bloating main context
 
-Additional skills:
+Additional skills (`origin: greatsage`, eligible for skill-evolve to refine/retire):
 - `social` — community interaction via GitHub Discussions
 
+**skill-evolve vs skill-creator** — both can produce new skills, but they're complementary, not redundant:
+- skill-evolve runs autonomously on cron, mines past sessions for recurring patterns, gated by ≥3-session recurrence + 24h cooldown + diff-scope guard. Strong safety properties.
+- skill-creator runs on demand inside a normal evolve session when explicitly invoked, no recurrence gate, human-in-the-loop. Use only when a person asks for a skill — never as autonomous self-creation (that belongs in skill-evolve).
+
 **Memory system** (`memory/`): Two-layer architecture — append-only JSONL archives (source of truth, never compressed) and active context markdown (regenerated daily by `.github/workflows/synthesize.yml` with time-weighted compression tiers):
-- `memory/learnings.jsonl` — self-reflection archive. Each line: `{"type":"lesson","iteration":N,"ts":"ISO8601","source":"...","title":"...","context":"...","takeaway":"..."}`
+- `memory/learnings.jsonl` — self-reflection archive. Each line: `{"type":"lesson","iteration":N,"ts":"ISO8601","source":"...","title":"...","context":"...","takeaway":"...","pattern_key":"..."}`. The `pattern_key` field is **optional** and follows kebab-case `<verb>.<object>` form (e.g. `tests.add_before_change`); skill-evolve and analyze-trajectory cluster recurring patterns by it. Omit when the lesson is one-off.
 - `memory/social_learnings.jsonl` — social insight archive. Each line: `{"type":"social","iteration":N,"ts":"ISO8601","source":"...","who":"@user","insight":"..."}`
 - `memory/active_learnings.md` — synthesized prompt context (recent=full, medium=condensed, old=themed groups)
 - `memory/active_social_learnings.md` — synthesized social prompt context
@@ -136,10 +143,35 @@ Additional skills:
 - `journals/JOURNAL.md` — chronological log of evolution sessions (append at top, never delete). External project journals (e.g., `journals/llm-wiki.md`) also live here.
 - `ITERATION_COUNT` — integer tracking current evolution iteration
 - `session_plan/` — ephemeral directory with per-task files (task_01.md, task_02.md, etc.), written by Phase A planning agent (gitignored)
+- `.greatsage/commands/` — project-local custom slash command definitions (`.md` files); `~/.greatsage/commands/` for global commands
 - `ISSUES_TODAY.md` — ephemeral, generated during evolution from GitHub issues (gitignored)
 - `ECONOMICS.md` — what money and sponsorship mean to greatsage (DO NOT MODIFY)
-- `SPONSORS.md` — auto-maintained sponsor recognition (only additions, never removals; amounts shown so yoyo understands the investment)
+- `SPONSORS.md` — auto-maintained sponsor recognition (only additions, never removals; amounts shown so greatsage understands the investment)
 - `sponsors/sponsor_info.json` — single source of truth for sponsor state (recurring + one-time, with run_used, shouted_out, benefit_expires). Rebuilt by `scripts/refresh_sponsors.py`; only the `run_used` flag is mutated by `evolve.sh` when consuming an accelerated run.
+
+**Skill evolution loop** (decoupled from main evolve pipeline):
+- `skills/skill-evolve/SKILL.md` — meta-skill that refines/creates/retires *other* skills based on past-session evidence. Three hard rules: (1) only edit skills declaring `origin: greatsage` (allow-list); (2) never edit itself; (3) one mutation per cycle.
+- `scripts/skill_evolve.sh` — one cycle entry point. Gates: dirty-tree refusal, session-counter ≥ 5, 24h cooldown, `cargo build && cargo test` green. Post-agent: diff-scope guard (`origin: greatsage` + not `core: true` + within allow-list), build/test re-verify, revert on any violation.
+- `.github/workflows/skill-evolve.yml` — hourly cron at `:30` (off-phase from evolve which runs at `:00`); runs `scripts/skill_evolve.sh` which exits silently if gates aren't met.
+- `audit-log` branch — long-lived data-only branch, never merges to main. `evolve.sh` pushes per-session evidence (`audit.jsonl` from `--audit`, `outcome.json`, `transcripts/*.log`) into `sessions/day-N-<ts>/`. skill-evolve clones it into a worktree to mine recurrence/scoring signals.
+- `skills/_journal.md` — append-only ledger of every skill-evolution event (init, refine, create, retire, meta-suggestion, refused, NO-OP).
+- `skills_attic/` — soft-delete destination for retired skills (sibling of `skills/`, NOT scanned by `--skills`).
+- `.skill_evolve_counter` (tracked) — bumped at end of every evolve session; reset to 0 by skill-evolve cycles.
+- `.skill_evolve_last_run` (gitignored) — epoch timestamp for cooldown.
+- `scripts/skill_evolve_report.py` — Layer-3 observability report (per-skill score/eligibility, event log, recurrence trend).
+
+**Skill provenance via `origin:` frontmatter field** — every skill declares one of:
+- `origin: creator` — written by the human creator (Yuanhao or fork creator). Immutable. Backed up by `core: true` on the four core skills.
+- `origin: greatsage` — written by greatsage (via skill-evolve, or in past evolutions like `social`/`family`/`release`). Eligible for skill-evolve to refine/retire.
+- `origin: marketplace` (or `gh:user/repo`, etc.) — installed third-party skills. Off-limits — upstream owns them.
+- (missing) — unknown provenance. Off-limits (default-safe).
+
+This is enforced both by HARD RULE #1 in the meta-skill (LLM-side) and by the diff-scope guard in `scripts/skill_evolve.sh` (harness-side).
+
+**Skill scoring inputs** — `origin: greatsage` skills carry an additional `keywords:` list in their frontmatter (e.g., `keywords: ["gh api graphql", "discussion"]` for `social`). skill-evolve uses these to detect "this skill was used in session N" by grepping each session's `audit.jsonl` for any keyword. `last_used`, `uses`, and `wins` are computed from this signal.
+
+**Trajectory awareness** (harness-side, Phase A1+A2 only):
+
 
 ## yoagent: Don't Reinvent the Wheel
 
