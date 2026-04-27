@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use crate::cli::Args;
-    use clap::Parser;
-    use crate::config::AppConfig;
+    use {
+        crate::{cli::Args , config::AppConfig},
+        clap::Parser
+    };
 
     #[test]
     fn test_handle_errors_flag_enables_repl_error_handling() {
