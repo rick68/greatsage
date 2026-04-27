@@ -170,9 +170,17 @@ fn generate_tasks_from_assessment(
         }
         // Use the part after ':' as title content.
         if let Some((_key, value)) = line.split_once(':') {
-            let title = format!("Address {}", value.trim());
+            let trimmed = value.trim();
+            if trimmed.eq_ignore_ascii_case("none") {
+                continue;
+            }
+            let title = format!("Address {}", trimmed);
             () = titles.push(title);
         }
+    }
+    // Ensure we have three titles; fill missing slots with a generic placeholder.
+    while titles.len() < 3 {
+        titles.push("Address TBD".to_string());
     }
     // Limit to three tasks.
     for (i, title) in titles.iter().take(3).enumerate() {
