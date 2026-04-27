@@ -170,7 +170,8 @@ fn main() {
     // REPL error handling: CLI flag overrides persisted config
     // Determine REPL error handling flag: --check overrides others, then --error-handling, then persisted config.
     // Determine REPL error handling: --check overrides others, then --error-handling, then persisted config.
-    app_config.repl_error_handling = args.check || args.error_handling || args.handle_errors || args.repl_error_handling;
+    app_config.repl_error_handling =
+        args.check || args.error_handling || args.handle_errors || args.repl_error_handling;
     // Capture error handling flag before moving app_config into Bevy resource.
     let repl_error_handling_flag = app_config.repl_error_handling;
     // Install panic hook for strict error handling if enabled.
