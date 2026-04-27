@@ -300,7 +300,7 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
                         let placeholder_path = base_dir.join(".greatsage").join("placeholder1.txt");
                         // Ensure the directory exists (should already exist).
                         if let Some(parent) = placeholder_path.parent() {
-                            let _ = fs::create_dir_all(parent);
+                            _ = fs::create_dir_all(parent);
                         }
                         () = fs::write(&placeholder_path, "Task 1 completed")?;
                     }
@@ -309,7 +309,7 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
                     if title == "Placeholder Task 2" {
                         let placeholder_path = base_dir.join(".greatsage").join("placeholder2.txt");
                         if let Some(parent) = placeholder_path.parent() {
-                            let _ = fs::create_dir_all(parent);
+                            _ = fs::create_dir_all(parent);
                         }
                         () = fs::write(&placeholder_path, "Task 2 completed")?;
                     }
@@ -326,7 +326,7 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
                         let placeholder_path =
                             base_dir.join(".greatsage").join("placeholder40.txt");
                         if let Some(parent) = placeholder_path.parent() {
-                            let _ = fs::create_dir_all(parent);
+                            _ = fs::create_dir_all(parent);
                         }
                         () = fs::write(&placeholder_path, "Task 40 completed")?;
                     } else {
@@ -338,7 +338,7 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
                                 .join(".greatsage")
                                 .join(format!("placeholder{num}.txt"));
                             if let Some(parent) = placeholder_path.parent() {
-                                let _ = fs::create_dir_all(parent);
+                                _ = fs::create_dir_all(parent);
                             }
                             let content = format!("Task {num} completed");
                             () = fs::write(&placeholder_path, content)?;
