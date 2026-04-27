@@ -261,7 +261,23 @@ pub fn handle_mouse_input(
             MouseEventKind::ScrollUp => {
                 _ = actions.write(TuiAction::ScrollUp);
             }
-            MouseEventKind::Drag(MouseButton::Left) => { let output_area = tui_main.output_area; if output_area.contains(ratatui::layout::Position { x: column, y: row }) { let inner_row = (row).saturating_sub(output_area.top() + 1) as usize; let map_row = inner_row + tui_main.vertical_scroll; let inner_width = output_area.width.saturating_sub(2) as usize; let rel_col = (column).saturating_sub(output_area.left() + 1) as usize; let logical_col = rel_col.min(inner_width); if let Some(selection) = tui_main.selection { _ = actions.write(TuiAction::SetSelection { start: selection.start, end: (map_row, logical_col), click_count: 1 }); } } }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let output_area = tui_main.output_area;
+                if output_area.contains(ratatui::layout::Position { x: column, y: row }) {
+                    let inner_row = (row).saturating_sub(output_area.top() + 1) as usize;
+                    let map_row = inner_row + tui_main.vertical_scroll;
+                    let inner_width = output_area.width.saturating_sub(2) as usize;
+                    let rel_col = (column).saturating_sub(output_area.left() + 1) as usize;
+                    let logical_col = rel_col.min(inner_width);
+                    if let Some(selection) = tui_main.selection {
+                        _ = actions.write(TuiAction::SetSelection {
+                            start: selection.start,
+                            end: (map_row, logical_col),
+                            click_count: 1,
+                        });
+                    }
+                }
+            }
             MouseEventKind::ScrollDown => {
                 _ = actions.write(TuiAction::ScrollDown);
             }
@@ -269,11 +285,14 @@ pub fn handle_mouse_input(
                 let now = std::time::Instant::now();
                 let mut click_count = 1;
                 if let Some((last_time, last_pos, last_count)) = tui_main.last_click {
-                    if now.duration_since(last_time).as_millis() < 500 && last_pos == (row as usize, column as usize) {
+                    if now.duration_since(last_time).as_millis() < 500
+                        && last_pos == (row as usize, column as usize)
+                    {
                         click_count = (last_count % 3) + 1;
                     }
                 }
-                tui_main.bypass_change_detection().last_click = Some((now, (row as usize, column as usize), click_count));
+                tui_main.bypass_change_detection().last_click =
+                    Some((now, (row as usize, column as usize), click_count));
                 let output_area = tui_main.output_area;
                 // Only act on clicks that land inside the output panel.
                 if !output_area.contains(Position { x: column, y: row }) {
@@ -289,7 +308,11 @@ pub fn handle_mouse_input(
                     let inner_width = output_area.width.saturating_sub(2) as usize;
                     let rel_col = (column).saturating_sub(output_area.left() + 1) as usize;
                     let logical_col = rel_col.min(inner_width);
-                    _ = actions.write(TuiAction::SetSelection { start: (map_row, logical_col), end: (map_row, logical_col), click_count });
+                    _ = actions.write(TuiAction::SetSelection {
+                        start: (map_row, logical_col),
+                        end: (map_row, logical_col),
+                        click_count,
+                    });
                     if let Some(Some((block_idx, click_action))) =
                         tui_main.line_map.get(map_row).copied()
                     {

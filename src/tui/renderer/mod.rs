@@ -37,6 +37,7 @@ use {
         state::state::{NextState, State},
         time::{Time, Timer, TimerMode},
     },
+    unicode_width::UnicodeWidthChar,
     bevy_ratatui::RatatuiContext,
     ratatui::{
         Frame,
@@ -45,7 +46,7 @@ use {
         text::Line,
         widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation},
     },
-    std::time::Duration,
+    std::{time::Duration, mem},
     unicode_width::UnicodeWidthStr,
 };
 
@@ -173,7 +174,9 @@ fn render_tui(
         display_utils::hard_wrap_output_lines_with_map(&flat, &flat_map, output_inner_width);
     // Persist the wrapped map so handle_mouse_input can look up click actions.
     tui.line_map = wrapped_map;
-    if let Some(range) = tui.selection { apply_selection_style(&mut wrapped, range); }
+    if let Some(range) = tui.selection {
+        () = apply_selection_style(&mut wrapped, range);
+    }
 
     let total_rows = wrapped.len();
     let output_height = output_area.height.saturating_sub(2) as usize;
@@ -278,16 +281,17 @@ fn render_tui(
     }
 }
 
-fn apply_selection_style(lines: &mut [ratatui::text::Line<'_>], range: crate::tui::core::SelectionRange) {
-    use unicode_width::UnicodeWidthChar;
-
+fn apply_selection_style(
+    lines: &mut [ratatui::text::Line<'_>],
+    range: crate::tui::core::SelectionRange,
+) {
     let (mut s_row, mut s_col) = range.start;
     let (mut e_row, mut e_col) = range.end;
 
     // Normalize: s_row/s_col is top-left, e_row/e_col is bottom-right
     if s_row > e_row || (s_row == e_row && s_col > e_col) {
-        std::mem::swap(&mut s_row, &mut e_row);
-        std::mem::swap(&mut s_col, &mut e_col);
+        () = mem::swap(&mut s_row, &mut e_row);
+        () = mem::swap(&mut s_col, &mut e_col);
     }
 
     let style = crate::tui::renderer::cursor::selection_style();
@@ -314,11 +318,11 @@ fn apply_selection_style(lines: &mut [ratatui::text::Line<'_>], range: crate::tu
                                 span_content,
                                 if in_selection { style } else { span.style },
                             ));
-                            span_content = String::new();
+                            () = span_content = String::new();
                         }
                         in_selection = ch_in_sel;
                     }
-                    span_content.push(ch);
+                    () =span_content.push(ch);
                     current_w += cw;
                 }
 
