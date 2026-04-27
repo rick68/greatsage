@@ -741,7 +741,7 @@ impl TuiMain {
             // 1 token ~= 4 chars for English, but we use a simple increment here
             // since the actual token count will be synced at the end.
             // For now, let's just increment by a rough estimate.
-            tb.token_count += (raw_ref.len() as u32 + 3) / 4;
+            tb.token_count += (raw_ref.len() as u32).div_ceil(4);
 
             // Re-render all lines from the full raw text to avoid partial-line artifacts.
             tb.lines = tb

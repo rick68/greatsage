@@ -622,14 +622,13 @@ fn handle_coding_agent_events(
                     *in_text = false;
                 }
             }
-            AgentEvent::MessageEnd { message } => {
-                if let AgentMessage::Llm(yoagent::types::Message::Assistant { usage, .. }) = message
-                {
-                    if let Some(total) = total_token_usage.as_mut() {
-                        total.0.input += usage.input;
-                        total.0.cache_read += usage.cache_read;
-                        total.0.cache_write += usage.cache_write;
-                    }
+            AgentEvent::MessageEnd {
+                message: AgentMessage::Llm(yoagent::types::Message::Assistant { usage, .. }),
+            } => {
+                if let Some(total) = total_token_usage.as_mut() {
+                    total.0.input += usage.input;
+                    total.0.cache_read += usage.cache_read;
+                    total.0.cache_write += usage.cache_write;
                 }
             }
             _ => (),
