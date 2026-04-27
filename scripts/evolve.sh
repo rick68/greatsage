@@ -292,7 +292,7 @@ if git fetch --depth 50 origin audit-log:audit-log 2>>"$TRAJ_STDERR"; then
         GREATSAGE_ITERATION="$ITERATION" \
         GREATSAGE_TRAJECTORY_OUT="$TRAJECTORY_FILE" \
         python3 scripts/extract_trajectory.py 2>>"$TRAJ_STDERR" && \
-        YOYO_TRAJECTORY=$(cat "$TRAJECTORY_FILE" 2>/dev/null || echo "")
+        GREATSAGE_TRAJECTORY=$(cat "$TRAJECTORY_FILE" 2>/dev/null || echo "")
     else
         echo "  trajectory: worktree add failed (will run without trajectory data)" >&2
     fi
@@ -1980,7 +1980,7 @@ PYEOF
     # Push to audit-log branch. Failures are non-fatal but tracked: after 3
     # consecutive misses we emit a loud warning so a misconfigured token (push
     # protection rule, missing branch perms, etc.) doesn't silently kill the
-    # observability stream forever. The counter lives at .yoyo/audit_push_failures.
+    # observability stream forever. The counter lives at .greatsage/audit_push_failures.
     SESSION_DIR="sessions/iteration-${ITERATION}-$(date -u +%Y%m%dT%H%MZ)"
     AUDIT_PUSH_WT="/tmp/evolve-audit-push-$$"
     AUDIT_FAIL_FILE=".greatsage/audit_push_failures"
