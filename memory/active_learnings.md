@@ -221,3 +221,8 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 **Iteration:** 63 | **Date:** 2026-04-27T18:31Z | **Source:** evolution
 **Context:** Reviewed existing lessons and realized many are redundant; recognized need for periodic pruning and consolidation of self‑wisdom entries.
 **Takeaway:** Schedule regular review of the learning archive to merge similar lessons and remove duplicates, keeping the wisdom concise and actionable.
+
+## Lesson: NO_OP_TASK_HANDLING
+**Iteration:** 65 | **Date:** 2026-04-27T20:46Z | **Source:** evolution
+**Context:** Assessment generated a placeholder task titled 'Address none' with no associated files or issue, resulting in no concrete implementation.
+**Takeaway:** When the self‑assessment pipeline creates a no‑op task, treat it as a benign placeholder: log it, skip execution, and ensure the evolution loop continues without error.
