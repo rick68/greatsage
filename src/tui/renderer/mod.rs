@@ -257,7 +257,16 @@ fn render_tui(
     // ── Function Key Bar ──────────────────────────────────────────────────────
     let keys_layout = Layout::horizontal(vec![Constraint::Percentage(10); 10]);
     let key_labels = [
-        " F1 ", " F2 ", " F3 ", " F4 ", " F5 ", " F6 ", " F7 ", " F8 ", " F9 ", " F10 Exit ",
+        " F1 ",
+        " F2 ",
+        " F3 ",
+        " F4 ",
+        " F5 ",
+        " F6 ",
+        " F7 ",
+        " F8 ",
+        " F9 ",
+        " F10 Exit ",
     ];
     let key_colors = [
         ratatui::style::Color::Red,

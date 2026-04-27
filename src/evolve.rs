@@ -344,7 +344,7 @@ pub fn planning_phase(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::err
     }
     // Obtain assessment output and generate tasks accordingly.
     let assessment = assessment_phase(base_dir.as_ref())?;
-    () =generate_tasks_from_assessment(base_dir.as_ref(), assessment)?;
+    () = generate_tasks_from_assessment(base_dir.as_ref(), assessment)?;
     Ok(())
 }
 
