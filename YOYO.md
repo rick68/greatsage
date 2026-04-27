@@ -79,6 +79,12 @@ ANTHROPIC_API_KEY=sk-... ./scripts/evolve.sh
 - `tests/evolve_protection.rs` — Tests for safety guards during evolution.
 - `tests/repl_error_handling.rs` — Tests for REPL error robustness.
 - `tests/truncate.rs` — Tests for tool output truncation logic.
+- `tests/cli_stats.rs` — Tests for CLI statistics command.
+- `tests/evolve_cli.rs` — Tests for the evolution CLI interface.
+- `tests/evolve_protection.rs` — Tests for safety guards during evolution.
+- `tests/repl_error_handling.rs` — Tests for REPL error robustness.
+- `tests/task_01_execution.rs` — Execution tests for the evolution pipeline task 01.
+- `tests/task_01_placeholder.rs` — Placeholder tests for the evolution pipeline task 01.
 - `tests/task_02_execution.rs` — Execution tests for the evolution pipeline task 02.
 - `tests/task_02_placeholder.rs` — Placeholder tests for the evolution pipeline task 02.
 - `tests/task_03_execution.rs` — Execution tests for the evolution pipeline task 03.
