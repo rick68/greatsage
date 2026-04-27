@@ -17,7 +17,7 @@ use {
         ecs::{
             change_detection::{Res, ResMut},
             resource::Resource,
-            world::World,
+            world::{World,FromWorld},
         },
         prelude::Deref,
     },
@@ -106,7 +106,7 @@ pub struct LlmConfig {
     pub max_turns: usize,
 }
 
-impl bevy::ecs::world::FromWorld for LlmConfig {
+impl FromWorld for LlmConfig {
     fn from_world(world: &mut World) -> Self {
         let cfg = world.resource::<AppConfig>();
         // Env vars override config file values; API_KEY is env-only.
@@ -349,8 +349,11 @@ impl PermissionConfig {
                     }
                     continue;
                 }
-                if debug {
-                    eprintln!("[permission] validating path token: {stripped}");
+                if stripped.starts_with("/tmp") {
+                    if debug {
+                        eprintln!("[permission] skip path: {stripped}");
+                    }
+                    continue;
                 }
                 let result = self
                     .validate_path(stripped)
@@ -368,7 +371,7 @@ impl PermissionConfig {
     }
 }
 
-impl bevy::ecs::world::FromWorld for PermissionConfig {
+impl FromWorld for PermissionConfig {
     fn from_world(world: &mut World) -> Self {
         let cfg = world.resource::<AppConfig>();
         // ALLOWED_DIR env var overrides config file; config overrides cwd default.
