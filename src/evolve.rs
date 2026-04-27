@@ -356,7 +356,7 @@ pub fn run_evolve_dry() -> Result<(), Box<dyn std::error::Error>> {
     let assessment = assessment_phase(base_dir)?;
     println!("[greatsage] Assessment Phase Result:\n{assessment}");
     // Planning phase – generate tasks based on assessment output.
-    planning_phase_with_assessment(base_dir, &assessment)?;
+    () = planning_phase_with_assessment(base_dir, &assessment)?;
     println!(
         "[greatsage] Planning Phase completed (dry‑run). Task files created in session_plan/."
     );
