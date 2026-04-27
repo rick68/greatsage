@@ -353,10 +353,10 @@ pub fn planning_phase(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::err
 /// Run the evolve pipeline in dry‑run mode (assessment + planning only)
 pub fn run_evolve_dry() -> Result<(), Box<dyn std::error::Error>> {
     let base_dir = Path::new(".");
-    let assessment = assessment_phase(&base_dir)?;
+    let assessment = assessment_phase(base_dir)?;
     println!("[greatsage] Assessment Phase Result:\n{assessment}");
     // Planning phase – generate tasks based on assessment output.
-    planning_phase_with_assessment(&base_dir, &assessment)?;
+    planning_phase_with_assessment(base_dir, &assessment)?;
     println!(
         "[greatsage] Planning Phase completed (dry‑run). Task files created in session_plan/."
     );
