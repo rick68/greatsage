@@ -13,7 +13,7 @@ mod tests {
         assert!(task_path.is_file(), "task_03.md should exist");
         let content = fs::read_to_string(&task_path).expect("read task file");
         assert!(
-            content.contains("Placeholder Task 3"),
+            content.contains("Address"),
             "task file should contain correct title"
         );
     }
