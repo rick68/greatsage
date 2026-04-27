@@ -241,6 +241,18 @@ pub struct CodingAgentTask {
 #[derive(Default, Deref, DerefMut, Resource)]
 pub struct CodingAgentTotalTokenUsage(pub Usage);
 
+/// Smoothed display values for the token-usage status bar.
+///
+/// `displayed_input` counts up toward `target_input` each animation tick
+/// rather than jumping instantly, giving a dynamic incrementing effect.
+#[derive(Default, Resource)]
+pub struct TokenUsageAnimated {
+    pub displayed_input: u64,
+    pub target_input: u64,
+    pub displayed_output: u64,
+    pub target_output: u64,
+}
+
 #[derive(Debug, Deref, DerefMut, Message)]
 pub struct CodingAgentEvent(AgentEvent);
 
@@ -273,18 +285,19 @@ fn spawn_agent_task(
                     // handle_coding_agent_events processing AgentEnd because
                     // CodingAgentTask is removed (and the system's run-condition
                     // fails) before the message is consumed.
-                    let mut final_usage: Option<Usage> = None;
+                    let mut run_output: u64 = 0;
+                    let mut run_total_tokens: u64 = 0;
 
                     while let Some(event) = rx.recv().await {
                         if let AgentEvent::AgentEnd { ref messages } = event {
-                            for msg in messages.iter().rev() {
+                            for msg in messages.iter() {
                                 if let AgentMessage::Llm(yoagent::types::Message::Assistant {
                                     usage,
                                     ..
                                 }) = msg
                                 {
-                                    final_usage = Some(usage.clone());
-                                    break;
+                                    run_output += usage.output;
+                                    run_total_tokens += usage.total_tokens;
                                 }
                             }
                         }
@@ -300,26 +313,19 @@ fn spawn_agent_task(
                     if let Ok(ref mut agent) = *coding_agent.lock().await {
                         agent.finish().await;
                     }
-                    // When done, accumulate token usage and reset state to Idle.
+                    // Accumulate real output/total_tokens from API.
+                    // input/cache are already updated in handle_coding_agent_events via MessageEnd.
                     () = ctx
                         .run_on_main_thread(move |ctx| {
                             let world: &mut World = ctx.world;
-                            if let Some(usage) = final_usage {
+
+                            if run_output > 0 {
                                 if let Some(mut total) =
                                     world.get_resource_mut::<CodingAgentTotalTokenUsage>()
                                 {
-                                    let CodingAgentTotalTokenUsage(Usage {
-                                        input: dst_in,
-                                        output: dst_out,
-                                        cache_read: dst_cr,
-                                        cache_write: dst_cw,
-                                        total_tokens: dst_tt,
-                                    }) = &mut *total;
-                                    *dst_in += usage.input;
-                                    *dst_out += usage.output;
-                                    *dst_cr += usage.cache_read;
-                                    *dst_cw += usage.cache_write;
-                                    *dst_tt += usage.total_tokens;
+                                    let CodingAgentTotalTokenUsage(total_usage) = &mut *total;
+                                    total_usage.output += run_output;
+                                    total_usage.total_tokens += run_total_tokens;
                                 }
                             }
                             _ = world.remove_resource::<CodingAgentTask>();
@@ -404,6 +410,7 @@ fn handle_coding_agent_events(
     // tui_plugin is not loaded and RenderNeeded does not exist.
     mut dirty: Option<ResMut<RenderNeeded>>,
     permission: Res<PermissionConfig>,
+    mut total_token_usage: Option<ResMut<CodingAgentTotalTokenUsage>>,
 ) {
     for CodingAgentEvent(event) in messages.read() {
         if let Some(tui) = tui.as_mut() {
@@ -615,6 +622,16 @@ fn handle_coding_agent_events(
                     *in_text = false;
                 }
             }
+            AgentEvent::MessageEnd { message } => {
+                if let AgentMessage::Llm(yoagent::types::Message::Assistant { usage, .. }) = message
+                {
+                    if let Some(total) = total_token_usage.as_mut() {
+                        total.0.input += usage.input;
+                        total.0.cache_read += usage.cache_read;
+                        total.0.cache_write += usage.cache_write;
+                    }
+                }
+            }
             _ => (),
         }
     }
@@ -685,6 +702,7 @@ pub fn coding_agent_plugin(app: &mut App) {
     let _: &mut App = app
         .init_resource::<CodingAgentPromptChannel>()
         .init_resource::<CodingAgentTotalTokenUsage>()
+        .init_resource::<TokenUsageAnimated>()
         .add_systems(Startup, setup)
         .init_state::<CodingAgentState>()
         .add_message::<CodingAgentEvent>()
