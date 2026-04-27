@@ -349,12 +349,11 @@ impl PermissionConfig {
                     }
                     continue;
                 }
-                if stripped.starts_with("/tmp") {
-                    if debug {
-                        eprintln!("[permission] skip path: {stripped}");
-                    }
-                    continue;
-                }
+                // Previously, paths starting with "/tmp" were skipped as a special case.
+                // This caused legitimate outside‑directory paths (e.g., temporary files) to be allowed
+                // even when they reside outside the configured `allowed_dir`. The test suite expects
+                // such paths to be rejected, so we no longer treat "/tmp" specially.
+                // (If a user truly wants to allow /tmp, they can configure `allowed_dir` accordingly.)
                 let result = self
                     .validate_path(stripped)
                     .with_context(|| format!("Token '{token}' disallowed"));
