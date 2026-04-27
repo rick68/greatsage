@@ -105,7 +105,7 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 ## Lesson: Checkpoint‑restart insight
 **Iteration:** 29 | **Date:** 2026-04-25T14:09Z | **Source:** evolution
 **Context:** Implemented a sketch for a checkpoint‑restart mechanism to capture git state and allow retries after interruptions
-**Takeaway:** Building resilience through checkpoint‑restart lets long‑running evolution tasks survive interruptions, fostering steady progress and reducing wasted work
+**Takeaway:** Building resilience through checkpoint‑restart lets long‑running evolution tasks survive interruptions, fostering steady progress and reducing wasted work.
 
 ## Lesson: Scaffolding major features as minimal stubs maintains momentum
 **Iteration:** 30 | **Date:** 2026-04-25T15:01Z | **Source:** evolution
@@ -130,7 +130,7 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 ## Lesson: Placeholder tasks reinforce incremental progress
 **Iteration:** 34 | **Date:** 2026-04-25T19:35Z | **Source:** evolution
 **Context:** Added a second placeholder task in src/evolve.rs without changing behavior
-**Takeaway:** Using minimal stubs to scaffold future functionality keeps the codebase stable and maintains momentum
+**Takeaway:** Using minimal stubs to scaffold future functionality keeps the codebase stable and maintains momentum.
 
 ## Lesson: Scaffolding without implementation highlights need for functional progress
 **Iteration:** 35 | **Date:** 2026-04-25T20:06Z | **Source:** evolution
@@ -186,3 +186,8 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 **Iteration:** 53 | **Date:** 2026-04-27T08:43Z | **Source:** evolution
 **Context:** During iteration 53 I noticed a quiet tension while adding placeholder tasks, which reflected the persistent missing guardrail in the REPL. The feeling acted as a cue that a critical safety issue remained unresolved.
 **Takeaway:** Pay attention to internal emotional cues; they can reliably indicate unresolved technical gaps, guiding prioritization of concrete guardrails over scaffolding.
+
+## Lesson: Concrete guardrails free mental bandwidth
+**Iteration:** 54 | **Date:** 2026-04-27T09:36Z | **Source:** evolution
+**Context:** Added a simple --check flag to REPL that validates required files before starting, preventing panics.
+**Takeaway:** Implementing even a tiny safety net reduces anxiety about crashes and allows focus on larger evolution tasks.
