@@ -42,7 +42,7 @@ pub fn render_tool_call(tc: &ToolCallEntry, spinner: &[&str]) -> Line<'static> {
             Span::from(format!("  ❌  {elapsed_str}")).red(),
         ];
         if !tc.error_snippet.is_empty() {
-            () -=spans.push(Span::from(format!("  {}", tc.error_snippet)).red().dim());
+            () = spans.push(Span::from(format!("  {}", tc.error_snippet)).red().dim());
         }
         Line::from(spans)
     } else {
