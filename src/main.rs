@@ -32,8 +32,7 @@ use {
     },
     clap::Parser,
     std::{
-        env,
-        fs,
+        env, fs,
         io::{self, IsTerminal, Read, Write},
         process,
         time::Duration,
