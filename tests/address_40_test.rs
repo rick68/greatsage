@@ -10,7 +10,7 @@ mod tests {
         let tmp = TempDir::new().expect("create temp dir");
         let base = tmp.path();
         let plan_dir = base.join("session_plan");
-        () =  fs::create_dir_all(&plan_dir).expect("create session_plan dir");
+        () = fs::create_dir_all(&plan_dir).expect("create session_plan dir");
         // Write a task file with Title: Address 40.
         let task_path = plan_dir.join("task_02.md");
         let task_content = "Title: Address 40\nDetails: none\n";

@@ -97,7 +97,7 @@ pub fn commit_and_tag(iteration: u32, push: bool) -> Result<(), GitError> {
     () = stage_all().map_err(|e| Box::new(e) as GitError)?;
     // Commit with a message.
     let msg = format!("evolve iteration {iteration}");
-    ()  = commit(&msg).map_err(|e| Box::new(e) as GitError)?;
+    () = commit(&msg).map_err(|e| Box::new(e) as GitError)?;
     // Create annotated tag.
     let tag_name = format!("v{iteration}");
     let tag_msg = format!("evolve iteration {iteration}");

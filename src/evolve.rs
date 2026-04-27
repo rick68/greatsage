@@ -548,6 +548,28 @@ mod tests {
     }
 
     #[test]
+    fn test_execute_task_address_none() {
+        // Setup temporary base directory with a session_plan and a task file titled "Address none".
+        let tmp = tempfile::TempDir::new().expect("create temp dir");
+        let base = tmp.path();
+        let plan_dir = base.join("session_plan");
+        () = fs::create_dir_all(&plan_dir).expect("create session_plan dir");
+        let task_path = plan_dir.join("task_99.md");
+        let task_content = "Title: Address none\nDetails: none\n";
+        () = fs::write(&task_path, task_content).expect("write task file");
+        // Execute tasks phase.
+        () = execute_tasks(base).expect("execute_tasks should succeed");
+        // Verify evolve.log contains the task title.
+        let log_path = base.join(".greatsage").join("evolve.log");
+        assert!(log_path.is_file(), "evolve.log should be created");
+        let log_content = fs::read_to_string(&log_path).expect("read evolve.log");
+        assert!(log_content.contains("Address none"), "log should contain task title");
+        // Ensure no placeholder file was erroneously created for "none".
+        let placeholder_path = base.join(".greatsage").join("placeholdernone.txt");
+        assert!(!placeholder_path.is_file(), "No placeholder file should be created for 'none'");
+    }
+
+    #[test]
     fn test_execute_task_placeholder2() {
         // Setup temporary base directory with a session_plan and a task file for placeholder 2.
         let tmp = tempfile::TempDir::new().expect("create temp dir");
