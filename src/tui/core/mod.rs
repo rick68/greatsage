@@ -734,13 +734,32 @@ impl TuiMain {
             .current_response_mut()
             .and_then(|resp| resp.thinkings.iter_mut().rev().find(|tb| tb.streaming))
         {
-            () = tb.raw.push_str(raw.as_ref());
+            let raw_ref = raw.as_ref();
+            () = tb.raw.push_str(raw_ref);
+
+            // Heuristic: estimate token count based on character length if not provided.
+            // 1 token ~= 4 chars for English, but we use a simple increment here
+            // since the actual token count will be synced at the end.
+            // For now, let's just increment by a rough estimate.
+            tb.token_count += (raw_ref.len() as u32 + 3) / 4;
+
             // Re-render all lines from the full raw text to avoid partial-line artifacts.
             tb.lines = tb
                 .raw
                 .lines()
                 .map(|l| Line::from(ratatui::text::Span::from(l.to_string()).dim()))
                 .collect();
+        }
+    }
+
+    /// Update the token count for the currently streaming thinking block.
+    #[allow(dead_code)]
+    pub fn update_thinking_tokens(&mut self, tokens: u32) {
+        if let Some(tb) = self
+            .current_response_mut()
+            .and_then(|resp| resp.thinkings.iter_mut().rev().find(|tb| tb.streaming))
+        {
+            tb.token_count = tokens;
         }
     }
 

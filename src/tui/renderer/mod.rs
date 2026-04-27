@@ -19,7 +19,7 @@ pub mod widgets;
 
 use {
     crate::{
-        agents::CodingAgentTotalTokenUsage,
+        agents::coding::{CodingAgentTotalTokenUsage, TokenUsageAnimated},
         tui::{
             core::{
                 COLOR_BORDER_FOCUSED, COLOR_BORDER_UNFOCUSED, CURSOR_BLINK_INTERVAL_MS,
@@ -80,6 +80,7 @@ pub fn draw_scene_system(
     mut spinner_timer: Local<Option<Timer>>,
     mut dirty: ResMut<RenderNeeded>,
     token_usage: Option<Res<CodingAgentTotalTokenUsage>>,
+    mut token_animated: Option<ResMut<TokenUsageAnimated>>,
     config: Res<crate::config::AppConfig>,
 ) -> bevy::ecs::error::Result {
     // ── Cursor animation & Idle timeout ───────────────────────────────────────
@@ -122,10 +123,40 @@ pub fn draw_scene_system(
         **dirty = true;
     }
 
+    // ── Token animation (Input & Output) ─────────────────────────────────────
+    if let (Some(usage), Some(animated)) = (&token_usage, &mut token_animated) {
+        animated.target_input = usage.0.input;
+        animated.target_output = usage.0.output;
+        let step = |displayed: &mut u64, target: u64| -> bool {
+            if *displayed < target {
+                let remaining = target - *displayed;
+                *displayed += (remaining / 8).max(1).min(remaining);
+                true
+            } else {
+                false
+            }
+        };
+        let (ti, to) = (animated.target_input, animated.target_output);
+        let needs_redraw =
+            step(&mut animated.displayed_input, ti) | step(&mut animated.displayed_output, to);
+        if needs_redraw {
+            **dirty = true;
+        }
+    }
+
     // ── Render ────────────────────────────────────────────────────────────────
     if **dirty {
+        let animated = token_animated
+            .as_deref()
+            .map(|a| (a.displayed_input, a.displayed_output));
         _ = context.draw(|frame| {
-            () = render_tui(frame, &mut tui, &cursor_state, token_usage.as_deref());
+            () = render_tui(
+                frame,
+                &mut tui,
+                &cursor_state,
+                token_usage.as_deref(),
+                animated,
+            );
         })?;
     }
     **dirty = false;
@@ -146,6 +177,7 @@ fn render_tui(
     tui: &mut TuiMain,
     cursor_state: &State<CursorState>,
     token_usage: Option<&CodingAgentTotalTokenUsage>,
+    animated: Option<(u64, u64)>,
 ) {
     let area = frame.area();
 
@@ -219,9 +251,10 @@ fn render_tui(
     // ── Status bar ────────────────────────────────────────────────────────────
     let status_text = if let Some(usage) = token_usage {
         let CodingAgentTotalTokenUsage(usage) = usage;
+        let (displayed_input, displayed_output) = animated.unwrap_or((usage.input, usage.output));
         format!(
             " 🎯 Input: {} | Output: {} | Cache Read: {} | Cache Write: {}",
-            usage.input, usage.output, usage.cache_read, usage.cache_write
+            displayed_input, displayed_output, usage.cache_read, usage.cache_write
         )
     } else {
         " 🎯 Token usage: Waiting for first response...".to_string()
