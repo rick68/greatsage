@@ -37,7 +37,6 @@ use {
         state::state::{NextState, State},
         time::{Time, Timer, TimerMode},
     },
-    unicode_width::UnicodeWidthChar,
     bevy_ratatui::RatatuiContext,
     ratatui::{
         Frame,
@@ -46,7 +45,8 @@ use {
         text::Line,
         widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation},
     },
-    std::{time::Duration, mem},
+    std::{mem, time::Duration},
+    unicode_width::UnicodeWidthChar,
     unicode_width::UnicodeWidthStr,
 };
 
@@ -318,11 +318,11 @@ fn apply_selection_style(
                                 span_content,
                                 if in_selection { style } else { span.style },
                             ));
-                            () = span_content = String::new();
+                            span_content = String::new();
                         }
                         in_selection = ch_in_sel;
                     }
-                    () =span_content.push(ch);
+                    () = span_content.push(ch);
                     current_w += cw;
                 }
 
