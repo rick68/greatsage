@@ -47,48 +47,48 @@ ANTHROPIC_API_KEY=sk-... ./scripts/evolve.sh
 
 ## Architecture
 
-**Multi-file agent** (`src/`):
-- `main.rs` — Application entry point. Initializes the Bevy App, plugins, resources, and systems, managing the overall application lifecycle.
-- `lib.rs` — Library entry point. Currently exports the `evolve` module.
-- `cli.rs` — Argument parsing via `clap`. Defines `Args` and subcommands (`Config`, `Stats`, `Evolve`), and provides help for REPL commands.
-- `config.rs` — Centralized configuration management. Defines the `AppConfig` resource, handling TOML loading and runtime dynamic modifications.
-- `tokio.rs` — Integration layer between Tokio and Bevy. Manages the `AppCancelToken` and handles OS terminal signals (e.g., SIGINT).
-- `evolve.rs` — Native Rust implementation of the self-evolution pipeline, covering assessment, planning, and execution logic.
-- `git.rs` — Git operation utilities based on `git2`, featuring safety guards for testing environments.
-- `agents/mod.rs` — Entry point for the agents subsystem, configuring permissions, MCP, and LLM resources.
-- `agents/coding.rs` — Core implementation of the Coding Agent, including the task processing state machine and Bevy ECS integration.
-- `agents/tools.rs` — Toolset construction, featuring output truncation (`TruncatingTool`) and permission checking.
-- `tui/mod.rs` — TUI plugin entry point, assembling the rendering and input systems.
-- `tui/events.rs` — Definition of TUI-related events and actions (e.g., `RenderNeeded`, `TuiAction`).
+**Source layout** (`src/`):
+- `main.rs` — Application entry point, sets up Bevy App and plugins.
+- `lib.rs` — Library root, re‑exports the `evolve` module.
+- `cli.rs` — Command‑line argument parsing with `clap`.
+- `config.rs` — Application configuration handling.
+- `tokio.rs` — Tokio integration, provides cancellation token.
+- `evolve.rs` — Self‑evolution pipeline implementation.
+- `git.rs` — Safe Git utility functions.
+- `agents/mod.rs` — Agents subsystem entry point and permission config.
+- `agents/coding.rs` — Coding agent core logic.
+- `agents/tools.rs` — Construction of available tool set.
+- `tui/mod.rs` — TUI plugin registration.
+- `tui/events.rs` — TUI event definitions.
+- `tui/commands/mod.rs` — REPL command dispatcher.
+- `tui/commands/builtin.rs` — Built‑in REPL commands (`/help`, `/clear`, `/exit`).
+- `tui/commands/git.rs` — `/git` command implementation.
+- `tui/core/mod.rs` — Core TUI structures and constants.
+- `tui/core/action_system.rs` — Systems handling TUI actions (scrolling, toggling, etc.).
+- `tui/input/mod.rs` — Input handling (keyboard, mouse) via `bevy_ratatui`.
+- `tui/renderer/mod.rs` — Main TUI rendering system.
+- `tui/renderer/cursor.rs` — Cursor animation logic.
+- `tui/renderer/display_utils.rs` — Display utilities for line wrapping.
+- `tui/renderer/widgets/mod.rs` — Widget registry.
+- `tui/renderer/widgets/response.rs` — Rendering of agent text responses.
+- `tui/renderer/widgets/thinking.rs` — Rendering of thinking process widget.
+- `tui/renderer/widgets/tool_call.rs` — Rendering of tool call widget.
 - `tui/tests.rs` — Unit tests for TUI components.
-- `tui/core/mod.rs` — Core TUI data structures (e.g., `TuiMain`, `OutputBlock`) and constants.
-- `tui/core/action_system.rs` — System for processing TUI actions like scrolling and toggling UI states.
-- `tui/input/mod.rs` — Systems for handling keyboard and mouse input via `bevy_ratatui`.
-- `tui/renderer/mod.rs` — Main TUI rendering system using `ratatui`.
-- `tui/renderer/cursor.rs` — Cursor animation implementation (Blink ↔ Breathing modes).
-- `tui/renderer/display_utils.rs` — Utilities for line wrapping and display calculations.
-- `tui/renderer/widgets/mod.rs` — Registry and common traits for UI widgets.
-- `tui/renderer/widgets/thinking.rs` — Widget for displaying agent thinking process.
-- `tui/renderer/widgets/tool_call.rs` — Widget for displaying tool calls and their results.
-- `tui/renderer/widgets/response.rs` — Widget for displaying agent text responses.
-- `tui/commands/mod.rs` — REPL command registry and dispatcher.
-- `tui/commands/builtin.rs` — Implementation of built-in commands like `/help`, `/clear`, `/exit`.
-- `tui/commands/git.rs` — Implementation of the `/git` REPL command.
-- `tests/cli_stats.rs` — Tests for CLI statistics command.
-- `tests/evolve_cli.rs` — Tests for the evolution CLI interface.
-- `tests/evolve_protection.rs` — Tests for safety guards during evolution.
-- `tests/repl_error_handling.rs` — Tests for REPL error robustness.
-- `tests/truncate.rs` — Tests for tool output truncation logic.
-- `tests/cli_stats.rs` — Tests for CLI statistics command.
-- `tests/evolve_cli.rs` — Tests for the evolution CLI interface.
-- `tests/evolve_protection.rs` — Tests for safety guards during evolution.
-- `tests/repl_error_handling.rs` — Tests for REPL error robustness.
-- `tests/task_01_execution.rs` — Execution tests for the evolution pipeline task 01.
-- `tests/task_01_placeholder.rs` — Placeholder tests for the evolution pipeline task 01.
-- `tests/task_02_execution.rs` — Execution tests for the evolution pipeline task 02.
-- `tests/task_02_placeholder.rs` — Placeholder tests for the evolution pipeline task 02.
-- `tests/task_03_execution.rs` — Execution tests for the evolution pipeline task 03.
-- `tests/task_03_placeholder.rs` — Placeholder tests for the evolution pipeline task 03.
+
+**Test suite** (`src/tests/`):
+- `assessment_ci_status.rs`
+- `cli_stats.rs`
+- `evolve_cli.rs`
+- `evolve_protection.rs`
+- `repl_error_handling.rs`
+- `task_01_execution.rs`
+- `task_01_placeholder.rs`
+- `task_02_execution.rs`
+- `task_02_placeholder.rs`
+- `task_03_execution.rs`
+- `task_03_placeholder.rs`
+- `truncate.rs`
+
 
 Uses `yoagent::Agent` with `OpenAiCompatProvider`, `build_tools()` (see `agents/tools.rs`), and an optional `SkillSet`.
 
