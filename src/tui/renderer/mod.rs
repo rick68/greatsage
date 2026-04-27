@@ -318,7 +318,7 @@ fn apply_selection_style(
                                 span_content,
                                 if in_selection { style } else { span.style },
                             ));
-                            () = span_content = String::new();
+                            span_content = String::new();
                         }
                         in_selection = ch_in_sel;
                     }

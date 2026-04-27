@@ -80,10 +80,10 @@ pub fn handle_global_input(
             KeyCode::Esc => {
                 let now = std::time::Instant::now();
                 let last_esc = tui_main.last_click;
-                if let Some((last_time, (999, 999), 0)) = last_esc {
-                    if now.duration_since(last_time).as_millis() < 500 {
-                        _ = actions.write(TuiAction::Quit);
-                    }
+                if let Some((last_time, (999, 999), 0)) = last_esc
+                    && now.duration_since(last_time).as_millis() < 500
+                {
+                    _ = actions.write(TuiAction::Quit);
                 }
                 tui_main.bypass_change_detection().last_click = Some((now, (999, 999), 0));
                 **dirty = true;
@@ -287,12 +287,11 @@ pub fn handle_mouse_input(
             MouseEventKind::Down(MouseButton::Left) => {
                 let now = std::time::Instant::now();
                 let mut click_count = 1;
-                if let Some((last_time, last_pos, last_count)) = tui_main.last_click {
-                    if now.duration_since(last_time).as_millis() < 500
-                        && last_pos == (row as usize, column as usize)
-                    {
-                        click_count = (last_count % 3) + 1;
-                    }
+                if let Some((last_time, last_pos, last_count)) = tui_main.last_click
+                    && now.duration_since(last_time).as_millis() < 500
+                    && last_pos == (row as usize, column as usize)
+                {
+                    click_count = (last_count % 3) + 1;
                 }
                 tui_main.bypass_change_detection().last_click =
                     Some((now, (row as usize, column as usize), click_count));

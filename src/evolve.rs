@@ -90,8 +90,26 @@ pub fn assessment_phase(base_dir: impl AsRef<Path>) -> Result<String, Box<dyn st
             }
             let src_files = count_rs(base_dir.join("src")).await;
 
-            // Placeholder for latest CI status.
-            let ci_status = "unknown";
+            // Detect CI workflow presence.
+            // Detect CI workflow presence.
+            let ci_status = if std::fs::read_dir(base_dir.join(".github/workflows"))
+                .map(|rd| {
+                    rd.filter_map(Result::ok).any(|entry| {
+                        entry
+                            .path()
+                            .extension()
+                            .and_then(|s| s.to_str())
+                            .is_some_and(|ext| {
+                                ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml")
+                            })
+                    })
+                })
+                .unwrap_or(false)
+            {
+                "present"
+            } else {
+                "none"
+            };
 
             Ok::<String, Box<dyn std::error::Error>>(format!(
                 "Version: {version}\nSource files: {src_files}\nCI last: {ci_status}"

@@ -6,6 +6,8 @@
 //!
 //! [`TuiAction`]: crate::tui::events::TuiAction
 
+#![allow(clippy::collapsible_if)]
+
 use {
     crate::{
         agents::CodingAgentPromptChannel,
