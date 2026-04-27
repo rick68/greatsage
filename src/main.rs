@@ -183,9 +183,14 @@ fn main() {
         _ = process::exit(1);
     }
 
-    // Evolve subcommand
-    if let Some(Command::Evolve) = args.command {
-        if let Err(e) = evolve::run_evolve() {
+    // Evolve subcommand (supports dry-run)
+    if let Some(Command::Evolve { dry_run }) = args.command {
+        if dry_run {
+            if let Err(e) = evolve::run_evolve_dry() {
+                eprintln!("{e}");
+                _ = process::exit(1);
+            }
+        } else if let Err(e) = evolve::run_evolve() {
             eprintln!("{e}");
             _ = process::exit(1);
         }

@@ -105,7 +105,11 @@ pub enum Command {
     Stats,
     /// Run the self‑evolution pipeline
     #[command(about = "Run the self‑evolution pipeline")]
-    Evolve,
+    Evolve {
+        /// Perform a dry run (assessment + planning only)
+        #[arg(long, action = ArgAction::SetTrue, help = "Perform a dry run (assessment + planning only)")]
+        dry_run: bool,
+    },
 }
 
 pub fn complete() {
