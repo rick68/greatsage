@@ -1,6 +1,7 @@
-use git2::{IndexAddOption, Repository};
-use std::error::Error;
-use std::process::Command;
+use {
+    git2::{IndexAddOption, Repository},
+    std::process::Command
+};
 
 /// Stage all changes in the current repository using `git2`.
 /// Returns `Ok(())` on success or an `Err` containing a description.
@@ -88,7 +89,7 @@ pub fn revert_last() -> Result<(), git2::Error> {
 /// Runs `git add -A && git commit -m "message"`.
 /// Returns `Ok(())` on success, or an `Err` containing the command's stderr.
 #[allow(dead_code)]
-pub fn commit_changes(message: &str) -> Result<(), Box<dyn Error>> {
+pub fn commit_changes(message: impl AsRef<str>) -> Result<(), Box<dyn std::error::Error>> {
     // Stage all changes.
     let add_output = Command::new("git").args(["add", "-A"]).output()?;
     if !add_output.status.success() {
@@ -97,7 +98,7 @@ pub fn commit_changes(message: &str) -> Result<(), Box<dyn Error>> {
     }
     // Commit with the provided message.
     let commit_output = Command::new("git")
-        .args(["commit", "-m", message])
+        .args(["commit", "-m", message.as_ref()])
         .output()?;
     if commit_output.status.success() {
         Ok(())
