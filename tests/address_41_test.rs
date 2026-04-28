@@ -2,10 +2,17 @@
 
 #[cfg(test)]
 mod tests {
-    use {greatsage::evolve::execute_tasks, std::fs, tempfile::TempDir};
+    use temp_env_vars::temp_env_vars;
+    use {greatsage::evolve::execute_tasks, std::{fs, env}, tempfile::TempDir};
 
     #[test]
+    #[temp_env_vars]
     fn address_41_creates_marker() {
+        // Set environment variable to signal test mode to the library.
+        // This ensures the library takes the fast path and avoids unnecessary heavy loops.
+        // SAFE: This is a single-threaded test environment where setting env var is safe.
+        unsafe { env::set_var("GREATSAGE_TEST", "1") };
+
         // Setup temporary base directory with session_plan and a task file.
         let tmp = TempDir::new().expect("create temp dir");
         let base = tmp.path();

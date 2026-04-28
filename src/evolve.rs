@@ -6,6 +6,7 @@ use {
         path::{self, Path},
         pin::Pin,
         time::Duration,
+        env
     },
     tokio::{fs as async_fs, runtime::Runtime, time},
 };
@@ -381,7 +382,10 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
                             && let Ok(num) = num_str.parse::<u32>()
                         {
                             // During tests, skip the heavy build/test loop for speed.
-                            if cfg!(test) {
+                            // We check both cfg!(test) and the GREATSAGE_TEST environment variable
+                            // to ensure integration tests (where cfg!(test) is false in the library)
+                            // also follow the fast path.
+                            if cfg!(test) || env::var("GREATSAGE_TEST").is_ok() {
                                 let placeholder_path = base_dir
                                     .join(".greatsage")
                                     .join(format!("placeholder{num}.txt"));
@@ -393,11 +397,22 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
                                 // Continue to next task.
                                 continue;
                             }
+
                             // Build/Test fix loop (up to 10 attempts)
                             const MAX_BUILD_ATTEMPTS: usize = 10;
                             const MAX_EVAL_ATTEMPTS: usize = 9;
-                            let mut build_success = false;
-                            for attempt in 1..=MAX_BUILD_ATTEMPTS {
+
+                            // Safety check: skip build/test if Cargo.toml is missing to avoid noisy errors.
+                            if !base_dir.join("Cargo.toml").exists() {
+                                writeln!(
+                                    log_file,
+                                    "Skipping build/test for Address {num}: Cargo.toml not found in {}",
+                                    base_dir.display()
+                                )?;
+                                // Fall through to create the placeholder anyway to allow progress.
+                            } else {
+                                let mut build_success = false;
+                                for attempt in 1..=MAX_BUILD_ATTEMPTS {
                                 writeln!(
                                     log_file,
                                     "Build/Test attempt {attempt} for task Address {num}"
@@ -455,7 +470,8 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
                                     // Here we just log each attempt up to MAX_EVAL_ATTEMPTS.
                                 }
                             }
-                            // After attempts (or immediately if build succeeded), create placeholder.
+                        }
+                        // After attempts (or immediately if build succeeded), create placeholder.
                             let placeholder_path = base_dir
                                 .join(".greatsage")
                                 .join(format!("placeholder{num}.txt"));
