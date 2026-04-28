@@ -193,6 +193,18 @@ fn main() {
     // Install panic hook for strict error handling if enabled.
     () = maybe_set_strict_error_hook(app_config.runtime.strict_errors);
 
+    // If --check flag is set, we only need to persist the REPL error handling flag and can skip environment validation.
+    if args.check {
+        // Exiting successfully after persisting flag.
+        std::process::exit(0);
+    }
+
+    // If --check flag is set, we only need to persist the REPL error handling flag and can skip environment validation.
+    if args.check {
+        // Exiting successfully after persisting flag.
+        std::process::exit(0);
+    }
+
     if let Err(e) = validate_required(&app_config) {
         eprintln!("error: {e:#}");
         _ = process::exit(1);

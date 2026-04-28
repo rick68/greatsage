@@ -17,7 +17,7 @@ mod tests {
         // Run the binary with --check and the custom config path.
         // Use `cargo run` to build and execute the binary.
         let output = Command::new("cargo")
-            .args(&["run", "--quiet", "--", "--check", "--config", &config_path.to_string_lossy()])
+            .args(["run", "--quiet", "--", "--check", "--config", &config_path.to_string_lossy()])
             .output()
             .expect("failed to execute cargo run");
         assert!(output.status.success(), "binary exited with failure: {:?}", output);
