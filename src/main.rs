@@ -213,9 +213,11 @@ fn main() {
         }
         _ = process::exit(0);
     }
-    // Evolve mode placeholder (deprecated flag)
+    // Backward‑compatible --evolve flag (legacy). Executes the evolve pipeline.
     if args.evolve {
-        eprintln!("warning: --evolve flag is deprecated, use 'evolve' subcommand instead");
+        // Historically this flag was deprecated; we now treat it as an alias for the
+        // `evolve` subcommand without requiring the `dry_run` or `push` options.
+        // It runs the full evolution pipeline and then exits.
         if let Err(e) = evolve::run_evolve() {
             eprintln!("{e}");
             _ = process::exit(1);
