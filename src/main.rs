@@ -117,7 +117,9 @@ pub fn handle_prompt(prompt: String, repl_error_handling: bool) -> Result<(), Re
     let force_panic_val = std::env::var("FORCE_PANIC");
     if let Ok(_val) = &force_panic_val {
         // Clear it so other tests won't see it.
-        unsafe { env::remove_var("FORCE_PANIC"); }
+        unsafe {
+            env::remove_var("FORCE_PANIC");
+        }
     }
     if force_panic_val.as_deref() == Ok("1") {
         static FORCE_PANIC_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -196,13 +198,14 @@ fn main() {
     app_config.runtime.strict_errors = args.strict_errors;
     app_config.runtime.error_handling = args.error_handling;
     // If strict-errors flag is set and FORCE_PANIC env var is present, trigger a panic to test the hook.
-    if app_config.runtime.strict_errors {
-        if let Ok(val) = std::env::var("FORCE_PANIC") {
-            if val == "1" {
-                unsafe { std::env::remove_var("FORCE_PANIC"); }
-                panic!("Forced panic for strict-errors test");
-            }
+    if app_config.runtime.strict_errors
+        && let Ok(val) = std::env::var("FORCE_PANIC")
+        && val == "1"
+    {
+        unsafe {
+            std::env::remove_var("FORCE_PANIC");
         }
+        panic!("Forced panic for strict-errors test");
     }
     // REPL error handling: CLI flag overrides persisted config
     // Determine REPL error handling flag: --check overrides others, then --error-handling, then persisted config.
@@ -219,18 +222,19 @@ fn main() {
     // Install panic hook for strict error handling if enabled.
     () = maybe_set_strict_error_hook(app_config.runtime.strict_errors);
     // Trigger forced panic for strict-errors test if env var set.
-    if app_config.runtime.strict_errors {
-        if let Ok(val) = std::env::var("FORCE_PANIC") {
-            if val == "1" {
-                unsafe { std::env::remove_var("FORCE_PANIC"); }
-                panic!("Forced panic for strict-errors test");
-            }
+    if app_config.runtime.strict_errors
+        && let Ok(val) = env::var("FORCE_PANIC")
+        && val == "1"
+    {
+        unsafe {
+            () = env::remove_var("FORCE_PANIC");
         }
+        panic!("Forced panic for strict-errors test");
     }
     // If --check flag is set, we only need to persist the REPL error handling flag and can skip environment validation.
     if args.check {
         // Exiting successfully after persisting flag.
-        std::process::exit(0);
+        () = process::exit(0);
     }
 
     if let Err(e) = validate_required(&app_config) {

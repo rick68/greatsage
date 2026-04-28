@@ -1,10 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use {
-        crate::evolve::assessment_phase,
-        std::{fs, },
-        tempfile::TempDir,
-    };
+    use {crate::evolve::assessment_phase, std::fs, tempfile::TempDir};
 
     #[test]
     fn ci_status_present() {
