@@ -83,7 +83,7 @@ pub struct Args {
     #[arg(short = 'v', long, action = ArgAction::SetTrue)]
     pub verbose: bool,
     /// Enable REPL error handling validation (experimental)
-    #[arg(long, action = ArgAction::SetTrue)]
+    #[arg(short = 'e', long, action = ArgAction::SetTrue)]
     pub error_handling: bool,
     /// Enable REPL error handling validation (alias for --check)
     #[arg(long = "handle-errors", action = ArgAction::SetTrue)]
