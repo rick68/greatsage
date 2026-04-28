@@ -47,49 +47,6 @@ ANTHROPIC_API_KEY=sk-... ./scripts/evolve.sh
 
 ## Architecture
 
-**Source layout** (`src/`):
-- `main.rs` — Application entry point, sets up Bevy App and plugins.
-- `lib.rs` — Library root, re‑exports the `evolve` module.
-- `cli.rs` — Command‑line argument parsing with `clap`.
-- `config.rs` — Application configuration handling.
-- `tokio.rs` — Tokio integration, provides cancellation token.
-- `evolve.rs` — Self‑evolution pipeline implementation.
-- `git.rs` — Safe Git utility functions.
-- `agents/mod.rs` — Agents subsystem entry point and permission config.
-- `agents/coding.rs` — Coding agent core logic.
-- `agents/tools.rs` — Construction of available tool set.
-- `tui/mod.rs` — TUI plugin registration.
-- `tui/events.rs` — TUI event definitions.
-- `tui/commands/mod.rs` — REPL command dispatcher.
-- `tui/commands/builtin.rs` — Built‑in REPL commands (`/help`, `/clear`, `/exit`).
-- `tui/commands/git.rs` — `/git` command implementation.
-- `tui/core/mod.rs` — Core TUI structures and constants.
-- `tui/core/action_system.rs` — Systems handling TUI actions (scrolling, toggling, etc.).
-- `tui/input/mod.rs` — Input handling (keyboard, mouse) via `bevy_ratatui`.
-- `tui/renderer/mod.rs` — Main TUI rendering system.
-- `tui/renderer/cursor.rs` — Cursor animation logic.
-- `tui/renderer/display_utils.rs` — Display utilities for line wrapping.
-- `tui/renderer/widgets/mod.rs` — Widget registry.
-- `tui/renderer/widgets/response.rs` — Rendering of agent text responses.
-- `tui/renderer/widgets/thinking.rs` — Rendering of thinking process widget.
-- `tui/renderer/widgets/tool_call.rs` — Rendering of tool call widget.
-- `tui/tests.rs` — Unit tests for TUI components.
-
-**Test suite** (`src/tests/`):
-- `assessment_ci_status.rs`
-- `cli_stats.rs`
-- `evolve_cli.rs`
-- `evolve_protection.rs`
-- `repl_error_handling.rs`
-- `task_01_execution.rs`
-- `task_01_placeholder.rs`
-- `task_02_execution.rs`
-- `task_02_placeholder.rs`
-- `task_03_execution.rs`
-- `task_03_placeholder.rs`
-- `truncate.rs`
-
-
 Uses `yoagent::Agent` with `OpenAiCompatProvider`, `build_tools()` (see `agents/tools.rs`), and an optional `SkillSet`.
 
 **Dynamic Prompt Assembly & Self-Evolution**
