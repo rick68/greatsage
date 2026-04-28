@@ -1,9 +1,10 @@
 #[cfg(test)]
 mod tests {
+    use temp_env_vars::temp_env_vars;
     #[allow(unused_imports)]
     use {
         crate::{handle_prompt, maybe_set_strict_error_hook},
-        std::io::Write,
+        std::{io::Write, panic, env},
         tempfile::Builder,
     };
 
@@ -24,21 +25,22 @@ mod tests {
     }
 
     #[test]
+    #[temp_env_vars]
     fn test_forced_panic_is_caught() {
         // Set environment variable to trigger panic inside handle_prompt.
         unsafe {
-            std::env::set_var("FORCE_PANIC", "1");
+            () = env::set_var("FORCE_PANIC", "1");
         }
 
         // Since REPL error handling flag must be true to enable the panic simulation.
-        let result = std::panic::catch_unwind(|| {
-            let _ = handle_prompt("any input".to_string(), true);
+        let result = panic::catch_unwind(|| {
+            _ = handle_prompt("any input".to_string(), true);
         });
         // The panic should be caught and not unwind the test.
         assert!(result.is_err(), "Expected panic to be triggered and caught");
         // Clean up env var.
         unsafe {
-            std::env::remove_var("FORCE_PANIC");
+            () = env::remove_var("FORCE_PANIC");
         }
     }
 
