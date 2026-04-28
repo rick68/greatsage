@@ -415,8 +415,7 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
                                         "Evaluator attempt {e_attempt} for task Address {num}"
                                     )?;
                                     // Placeholder: in real implementation, invoke evaluator agent.
-                                    // Here we just log and break after first attempt for demo.
-                                    break;
+                                    // Here we just log each attempt up to MAX_EVAL_ATTEMPTS.
                                 }
                             }
                             // After attempts (or immediately if build succeeded), create placeholder.
