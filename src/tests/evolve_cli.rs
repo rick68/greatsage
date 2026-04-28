@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use {crate::cli::{Args, Command}, clap::Parser};
+    use {
+        crate::cli::{Args, Command},
+        clap::Parser,
+    };
 
     #[test]
     fn test_args_parsing_evolve_subcommand() {
@@ -13,6 +16,9 @@ mod tests {
             other => panic!("Expected Command::Evolve, got {other:?}"),
         }
         // Ensure backward compatibility flag is false
-        assert!(!args.evolve, "evolve flag should be false when using subcommand");
+        assert!(
+            !args.evolve,
+            "evolve flag should be false when using subcommand"
+        );
     }
 }

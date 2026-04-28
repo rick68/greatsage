@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use {
-        crate::{cli::Args , config::AppConfig},
-        clap::Parser
+        crate::{cli::Args, config::AppConfig},
+        clap::Parser,
     };
 
     #[test]
@@ -10,9 +10,15 @@ mod tests {
         let args = Args::parse_from(["test_bin", "--handle-errors"]);
         assert!(args.handle_errors, "--handle-errors should be true");
         let app_config = AppConfig {
-            repl_error_handling: args.check || args.error_handling || args.handle_errors || args.repl_error_handling,
+            repl_error_handling: args.check
+                || args.error_handling
+                || args.handle_errors
+                || args.repl_error_handling,
             ..Default::default()
         };
-        assert!(app_config.repl_error_handling, "repl_error_handling should be enabled by --handle-errors");
+        assert!(
+            app_config.repl_error_handling,
+            "repl_error_handling should be enabled by --handle-errors"
+        );
     }
 }

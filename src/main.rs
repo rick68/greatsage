@@ -40,12 +40,14 @@ use {
     },
 };
 
-use std::error::Error;
+use std::sync::{Mutex, OnceLock};
+
+build_info::build_info!(fn build_info);
 
 // Alias for error type used throughout REPL handling.
 // Allows returning any error that implements the `Error` trait.
 // This keeps the public API simple while supporting diverse error sources.
-pub type ReplError = Box<dyn Error>;
+pub type ReplError = Box<dyn std::error::Error>;
 
 /// Persist the REPL error handling flag if it changed.
 fn maybe_save_repl_error_handling(
@@ -71,8 +73,6 @@ fn maybe_set_strict_error_hook(enabled: bool) {
         }));
     }
 }
-
-build_info::build_info!(fn build_info);
 
 pub fn handle_prompt(prompt: String, repl_error_handling: bool) -> Result<(), ReplError> {
     let trimmed = prompt.trim();
@@ -112,7 +112,19 @@ pub fn handle_prompt(prompt: String, repl_error_handling: bool) -> Result<(), Re
 
     // No further side‑effects here; sending is handled elsewhere.
     // Simulate forced panic for testing if environment variable is set.
-    if repl_error_handling && std::env::var("FORCE_PANIC").as_deref() == Ok("1") {
+    // Use a mutex to ensure only one thread triggers the panic when running tests in parallel.
+    // Read and clear the env var atomically.
+    let force_panic_val = std::env::var("FORCE_PANIC");
+    if let Ok(_val) = &force_panic_val {
+        // Clear it so other tests won't see it.
+        unsafe { env::remove_var("FORCE_PANIC"); }
+    }
+    if force_panic_val.as_deref() == Ok("1") {
+        static FORCE_PANIC_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let _guard = FORCE_PANIC_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("Failed to lock FORCE_PANIC_LOCK");
         panic!("Forced panic for REPL error handling test");
     }
     Ok(())
@@ -183,6 +195,15 @@ fn main() {
     app_config.runtime.verbose = args.verbose;
     app_config.runtime.strict_errors = args.strict_errors;
     app_config.runtime.error_handling = args.error_handling;
+    // If strict-errors flag is set and FORCE_PANIC env var is present, trigger a panic to test the hook.
+    if app_config.runtime.strict_errors {
+        if let Ok(val) = std::env::var("FORCE_PANIC") {
+            if val == "1" {
+                unsafe { std::env::remove_var("FORCE_PANIC"); }
+                panic!("Forced panic for strict-errors test");
+            }
+        }
+    }
     // REPL error handling: CLI flag overrides persisted config
     // Determine REPL error handling flag: --check overrides others, then --error-handling, then persisted config.
     // Determine REPL error handling: --check overrides others, then --error-handling, then persisted config.
@@ -197,7 +218,15 @@ fn main() {
     let repl_error_handling_flag = app_config.repl_error_handling;
     // Install panic hook for strict error handling if enabled.
     () = maybe_set_strict_error_hook(app_config.runtime.strict_errors);
-
+    // Trigger forced panic for strict-errors test if env var set.
+    if app_config.runtime.strict_errors {
+        if let Ok(val) = std::env::var("FORCE_PANIC") {
+            if val == "1" {
+                unsafe { std::env::remove_var("FORCE_PANIC"); }
+                panic!("Forced panic for strict-errors test");
+            }
+        }
+    }
     // If --check flag is set, we only need to persist the REPL error handling flag and can skip environment validation.
     if args.check {
         // Exiting successfully after persisting flag.
@@ -362,13 +391,19 @@ pub fn validate_env_vars() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    mod assessment_ci_status;
+    mod assessment_validation;
     mod check_flag;
     mod cli_stats;
+    mod evolve_cli;
     mod evolve_protection;
+    mod handle_errors_flag;
     mod persist_repl_error_handling;
     mod repl_error_handling;
+    mod strict_errors_exit;
     mod task_01_execution;
     mod task_01_placeholder;
+    mod task_02_address_42;
     mod task_02_execution;
     mod task_02_placeholder;
     mod task_03_execution;

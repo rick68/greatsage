@@ -10,12 +10,12 @@ mod tests {
         let tmp = TempDir::new().expect("create temp dir");
         let base = tmp.path();
         let plan_dir = base.join("session_plan");
-        fs::create_dir_all(&plan_dir).expect("create session_plan");
+        () = fs::create_dir_all(&plan_dir).expect("create session_plan");
         let task_path = plan_dir.join("task_02.md");
         let task_content = "Title: Address 42\nDetails: none\n";
-        fs::write(&task_path, task_content).expect("write task file");
+        () = fs::write(&task_path, task_content).expect("write task file");
         // Run execute_tasks (test mode, so fast path).
-        evolve::execute_tasks(base).expect("execute_tasks should succeed");
+        () = evolve::execute_tasks(base).expect("execute_tasks should succeed");
         // Verify placeholder42.txt marker file exists with expected content.
         let marker_path = base.join(".greatsage").join("placeholder42.txt");
         assert!(marker_path.is_file(), "placeholder42.txt should be created");
@@ -24,6 +24,9 @@ mod tests {
         // Verify log contains the task title.
         let log_path = base.join(".greatsage").join("evolve.log");
         let log_content = fs::read_to_string(log_path).expect("read evolve.log");
-        assert!(log_content.contains("Address 42"), "log should contain task title");
+        assert!(
+            log_content.contains("Address 42"),
+            "log should contain task title"
+        );
     }
 }
