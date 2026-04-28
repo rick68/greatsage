@@ -2,21 +2,20 @@
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::{fs, path::Path};
+    use {crate::evolve, std::fs, tempfile::TempDir};
 
     #[test]
     fn test_execute_task_address_40() {
         // Setup temporary base directory with a session_plan and a task file titled "Address 40".
-        let tmp = tempfile::TempDir::new().expect("create temp dir");
+        let tmp = TempDir::new().expect("create temp dir");
         let base = tmp.path();
         let plan_dir = base.join("session_plan");
-        fs::create_dir_all(&plan_dir).expect("create session_plan dir");
+        () = fs::create_dir_all(&plan_dir).expect("create session_plan dir");
         let task_path = plan_dir.join("task_01.md");
         let task_content = "Title: Address 40\nDetails: none\n";
-        fs::write(&task_path, task_content).expect("write task file");
+        () = fs::write(&task_path, task_content).expect("write task file");
         // Execute tasks phase.
-        super::execute_tasks(base).expect("execute_tasks should succeed");
+        () = evolve::execute_tasks(base).expect("execute_tasks should succeed");
         // Verify evolve.log contains the task title.
         let log_path = base.join(".greatsage").join("evolve.log");
         assert!(log_path.is_file(), "evolve.log should be created");
