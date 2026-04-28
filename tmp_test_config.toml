@@ -1,0 +1,30 @@
+repl_error_handling = true
+
+[llm]
+model = "claude-opus-4-7"
+base_url = ""
+max_tokens = 4096
+context_window = 128000
+thinking_level = "medium"
+
+[agent]
+max_retry_attempts = 3
+context_strategy = "compaction"
+max_turns = 50
+
+[tools]
+max_output_chars = 40000
+truncation_head_lines = 100
+truncation_tail_lines = 50
+
+[tui]
+frames_per_second = 30.0
+cursor_blink_ms = 530
+cursor_idle_to_breathing_ms = 60000
+
+[mcp]
+sse_transports = []
+stdio_transports = []
+
+[permissions]
+allowed_dir = ""

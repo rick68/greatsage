@@ -34,6 +34,7 @@ use {
     std::{
         env, fs,
         io::{self, IsTerminal, Read, Write},
+        path::Path,
         process,
         time::Duration,
     },
@@ -46,15 +47,22 @@ use std::error::Error;
 // This keeps the public API simple while supporting diverse error sources.
 pub type ReplError = Box<dyn Error>;
 
+/// Persist the REPL error handling flag if it changed.
+fn maybe_save_repl_error_handling(app_config: &mut AppConfig, config_path: &Path, original: bool) {
+    if app_config.repl_error_handling != original
+        && let Err(e) = app_config.save(config_path)
+    {
+        eprintln!("Failed to save config: {e}");
+    }
+}
+
 /// Install a panic hook that aborts with a clear message and exit code 101
 /// when `--strict-errors` is enabled. This provides a guard‑rail so that REPL
 /// panics do not silently crash the process.
 fn maybe_set_strict_error_hook(enabled: bool) {
     if enabled {
         std::panic::set_hook(Box::new(|panic_info| {
-            // Write the panic information to stderr.
             let _ = writeln!(std::io::stderr(), "panic: {}", panic_info);
-            // Exit with a non‑zero status to signal failure.
             std::process::exit(101);
         }));
     }
@@ -174,8 +182,12 @@ fn main() {
     // REPL error handling: CLI flag overrides persisted config
     // Determine REPL error handling flag: --check overrides others, then --error-handling, then persisted config.
     // Determine REPL error handling: --check overrides others, then --error-handling, then persisted config.
+    // Capture original value before potentially updating.
+    let original_repl_error_handling = app_config.repl_error_handling;
     app_config.repl_error_handling =
         args.check || args.error_handling || args.handle_errors || args.repl_error_handling;
+    // Persist the REPL error handling flag if it changed.
+    maybe_save_repl_error_handling(&mut app_config, &config_path, original_repl_error_handling);
     // Capture REPL error handling flag before moving app_config into Bevy resource.
     let repl_error_handling_flag = app_config.repl_error_handling;
     // Install panic hook for strict error handling if enabled.
