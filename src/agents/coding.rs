@@ -578,12 +578,13 @@ fn handle_coding_agent_events(
                     *in_text = true;
                 }
 
+                // Always accumulate so AgentEnd can check buf.ends_with('\n').
+                () = buf.push_str(delta);
+
                 if tui.is_none() {
                     print!("{delta}");
                     () = stdout().flush().unwrap();
                 } else if let Some(tui) = tui.as_mut() {
-                    () = buf.push_str(delta);
-
                     // Render the accumulated buffer as plain lines.
                     // termimad + ansi-to-tui is used for final markdown presentation;
                     // during streaming we use raw splits so content is always visible.
@@ -618,6 +619,13 @@ fn handle_coding_agent_events(
                         let md_lines = render_markdown(&buf);
                         () = tui.update_streaming_text(md_lines);
                         () = tui.finalize_streaming_text();
+                    } else {
+                        // Ensure the last line of streaming output ends with a newline
+                        // so the shell prompt appears on its own line.
+                        if !buf.ends_with('\n') {
+                            println!();
+                            () = stdout().flush().unwrap();
+                        }
                     }
                     *in_text = false;
                 }

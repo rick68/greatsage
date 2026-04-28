@@ -9,7 +9,10 @@ use {
         prelude::Deref,
         tasks::futures_lite::StreamExt,
     },
-    bevy_ratatui::crossterm::{self, execute, terminal::LeaveAlternateScreen},
+    bevy_ratatui::{
+        RatatuiContext,
+        crossterm::{self, execute, terminal::LeaveAlternateScreen},
+    },
     bevy_tokio_tasks::{MainThreadContext, TokioTasksPlugin, TokioTasksRuntime},
     signal_hook::consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM},
     signal_hook_tokio::Signals,
@@ -31,10 +34,12 @@ fn setup_signal_handles(runtime: ResMut<TokioTasksRuntime>, cancel: Res<AppCance
         loop {
             tokio::select! {
                 Some(_signal) = signals.next(), if cfg!(not(target_os = "windows")) => {
-                    _ = crossterm::terminal::disable_raw_mode();
-                    _ = execute!(std::io::stdout(), LeaveAlternateScreen);
-
                     () = ctx.run_on_main_thread::<_, ()>(|ctx: MainThreadContext| {
+                        // Only restore terminal state when TUI is active.
+                        if ctx.world.get_resource::<RatatuiContext>().is_some() {
+                            let _ = crossterm::terminal::disable_raw_mode();
+                            let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+                        }
                         _ = ctx.world.write_message_default::<AppExit>();
                     }).await;
                 }
@@ -48,6 +53,7 @@ fn setup_signal_handles(runtime: ResMut<TokioTasksRuntime>, cancel: Res<AppCance
 fn shutdown_tokio_on_exit(
     mut messages: MessageReader<AppExit>,
     mut cancel: Option<Res<AppCancelToken>>,
+    tui_ctx: Option<Res<RatatuiContext>>,
 ) {
     for _message in messages.read() {
         if let Some(cancel) = cancel.take()
@@ -57,8 +63,13 @@ fn shutdown_tokio_on_exit(
 
             while Arc::strong_count(&cancel) != 1 {}
 
-            () = ratatui::restore();
-            _ = crossterm::terminal::disable_raw_mode();
+            // Only restore the terminal when the TUI was active.
+            // In non-TUI (-p / pipe) mode this would emit LeaveAlternateScreen
+            // to stdout, corrupting the streaming output.
+            if tui_ctx.is_some() {
+                () = ratatui::restore();
+                _ = crossterm::terminal::disable_raw_mode();
+            }
         }
     }
 }
