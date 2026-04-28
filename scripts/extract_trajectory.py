@@ -7,6 +7,7 @@ ground truth about its own recent trajectory before deciding what to work on.
 
 Inputs (env vars):
   GREATSAGE_AUDIT_DIR       Path to audit-log worktree's `sessions/` directory.
+  GREATSAGE_REPO            owner/repo slug for `gh` calls (e.g. "rick68/greatsage").
   GREATSAGE_ITERATION       Current iteration number (used only for window calc + display).
   GREATSAGE_TRAJECTORY_OUT  Output file path. Default: .greatsage/session_staging/trajectory.md.
 
@@ -175,11 +176,11 @@ def collect_task_commits(current_iteration: int) -> tuple[list[tuple[int, str]],
     )
     if rc != 0:
         return [], 0
-    
+
     tasks = []
     reverts = 0
     min_iteration = current_iteration - WINDOW_ITERATIONS
-    
+
     for line in stdout.splitlines():
         # Parse iteration and title from commit message
         m = TASK_COMMIT_RE.match(line)
@@ -188,11 +189,11 @@ def collect_task_commits(current_iteration: int) -> tuple[list[tuple[int, str]],
             if it_num >= min_iteration:
                 tasks.append((it_num, m.group(2).strip()))
             continue
-        
+
         # Check for session reverts within the iteration window
         if REVERT_COMMIT_RE.match(line):
             reverts += 1
-            
+
     return tasks, reverts
 
 
@@ -211,7 +212,7 @@ def render_task_success(tasks: list[tuple[int, str]]) -> str:
         if attempts >= STUCK_ON_THRESHOLD:
             # Store iterations list to show range later
             stuck_titles.append((title, attempts, iterations))
-        
+
         # Cap output at top 5 most-active titles
         if len(lines) > 6:
             continue
@@ -249,12 +250,27 @@ ERROR_LINE_RE = re.compile(r"(error|panicked|FAILED|fatal)", re.IGNORECASE)
 def fingerprint_error_line(line: str) -> str:
     """Normalize an error line to a clusterable fingerprint."""
     s = strip_ansi(line).strip()
-    # Strip leading log timestamps and noisy prefixes
+    # Strip GitHub Actions log prefix: <word> <word> ... <timestamp>
+    # e.g. "social unknown step 2026-04-15T15:31:42.5342991Z error: auth"
+    # The timestamp has format YYYY-MM-DDTHH:MM:SS[.fraction]Z
+    s = re.sub(
+        r"^(?:[A-Za-z_][\w-]*\s+)*"              # zero or more word prefixes
+        r"\d{4}-\d{2}-\d{2}T[\d:.]+Z?\s*",        # ISO timestamp with subseconds
+        "", s
+    )
+    # Strip leading log timestamps (standalone, at start of line)
     s = re.sub(r"^\d{4}-\d{2}-\d{2}T?[\d:.,Z+ ]*\s*", "", s)
+    # Strip CI step prefixes like "build |" or "test │"
     s = re.sub(r"^[A-Za-z_-]+\s*[\|│]\s*", "", s)
     # Normalize file:line:column to file:N:N
     s = re.sub(r":\d+:\d+", ":N:N", s)
     s = re.sub(r":\d+\b", ":N", s)
+    # Normalize hex addresses (0x7fff1234abcd) and UUIDs
+    s = re.sub(r"0x[0-9a-fA-F]{4,}", "<HEX>", s)
+    s = re.sub(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        "<UUID>", s
+    )
     # Lowercase, collapse whitespace, truncate to 80 chars
     return re.sub(r"\s+", " ", s.lower())[:80]
 
@@ -388,7 +404,7 @@ def main() -> int:
         current_iteration = int(iteration_str)
     except ValueError:
         current_iteration = 0
-        
+
     out_path_str = os.environ.get(
         "GREATSAGE_TRAJECTORY_OUT", ".greatsage/session_staging/trajectory.md"
     )
@@ -463,6 +479,72 @@ def main() -> int:
         return 1
     return 0
 
+def run_self_tests() -> int:
+    """Self-tests for fingerprint clustering. Run with --test flag."""
+    failures = 0
+    def assert_eq(label: str, got: str, want: str) -> None:
+        nonlocal failures
+        if got != want:
+            print(f"  FAIL: {label}")
+            print(f"    got:  {got!r}")
+            print(f"    want: {want!r}")
+            failures += 1
+        else:
+            print(f"  ok: {label}")
+    print("=== fingerprint_error_line self-tests ===\n")
+    # 1. GH Actions prefixes with different timestamps cluster together
+    line_a = "social unknown step 2026-04-15T15:31:42.5342991Z error: auth token expired"
+    line_b = "social unknown step 2026-04-08T07:12:03.8992940Z error: auth token expired"
+    fp_a = fingerprint_error_line(line_a)
+    fp_b = fingerprint_error_line(line_b)
+    assert_eq("GH Actions auth errors cluster", fp_a, fp_b)
+    # Verify the prefix was actually stripped
+    assert_eq("GH Actions prefix stripped", fp_a, "error: auth token expired")
+    # 2. Different GH Actions workflows with same error cluster
+    line_c = "evolve build test 2026-04-20T10:00:00.1Z FAILED: cargo test exit code 1"
+    line_d = "evolve build test 2026-04-21T14:30:00.9999Z FAILED: cargo test exit code 1"
+    fp_c = fingerprint_error_line(line_c)
+    fp_d = fingerprint_error_line(line_d)
+    assert_eq("different workflow timestamps cluster", fp_c, fp_d)
+    # 3. Standalone ISO timestamps at line start still stripped
+    line_e = "2026-04-15T15:31:42Z error: something broke"
+    line_f = "2026-04-08T07:12:03Z error: something broke"
+    fp_e = fingerprint_error_line(line_e)
+    fp_f = fingerprint_error_line(line_f)
+    assert_eq("standalone timestamps cluster", fp_e, fp_f)
+    # 4. Hex addresses are normalized
+    line_g = "panicked at 0x7fff1234abcd: null pointer"
+    line_h = "panicked at 0xdeadbeef9876: null pointer"
+    fp_g = fingerprint_error_line(line_g)
+    fp_h = fingerprint_error_line(line_h)
+    assert_eq("hex addresses cluster", fp_g, fp_h)
+    assert_eq("hex replaced with placeholder", "panicked at <hex>: null pointer", fp_g)
+    # 5. UUIDs are normalized
+    line_i = "error: session 550e8400-e29b-41d4-a716-446655440000 not found"
+    line_j = "error: session a1b2c3d4-e5f6-7890-abcd-ef1234567890 not found"
+    fp_i = fingerprint_error_line(line_i)
+    fp_j = fingerprint_error_line(line_j)
+    assert_eq("UUIDs cluster", fp_i, fp_j)
+    # 6. file:line:column normalised
+    line_k = "error[E0308]: src/main.rs:42:10: type mismatch"
+    line_l = "error[E0308]: src/main.rs:99:5: type mismatch"
+    fp_k = fingerprint_error_line(line_k)
+    fp_l = fingerprint_error_line(line_l)
+    assert_eq("file:line:col clusters", fp_k, fp_l)
+    # 7. ANSI codes stripped
+    line_m = "\x1b[31merror\x1b[0m: something failed"
+    fp_m = fingerprint_error_line(line_m)
+    assert_eq("ANSI stripped", fp_m, "error: something failed")
+    # 8. Subsecond precision doesn't prevent clustering
+    line_n = "ci build run 2026-01-01T00:00:00.1Z fatal: git push rejected"
+    line_o = "ci build run 2026-06-15T23:59:59.9999999Z fatal: git push rejected"
+    fp_n = fingerprint_error_line(line_n)
+    fp_o = fingerprint_error_line(line_o)
+    assert_eq("subsecond precision clusters", fp_n, fp_o)
+    print(f"\n{'ALL PASSED' if failures == 0 else f'{failures} FAILURE(S)'}")
+    return 1 if failures else 0
 
 if __name__ == "__main__":
+    if "--test" in sys.argv:
+        sys.exit(run_self_tests())
     sys.exit(main())
