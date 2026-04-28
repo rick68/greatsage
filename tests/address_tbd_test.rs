@@ -18,20 +18,13 @@ mod tests {
         // Execute tasks phase.
         () = execute_tasks(base).expect("execute_tasks should succeed");
 
-        // Verify that no placeholder file was created.
-        let placeholder_dir = base.join(".greatsage");
-        // The directory may exist due to log file, but there should be no placeholder files.
-        if placeholder_dir.is_dir() {
-            for entry in fs::read_dir(&placeholder_dir).expect("read .greatsage dir") {
-                let entry = entry.expect("dir entry");
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-                assert!(
-                    !name_str.starts_with("placeholder"),
-                    "Unexpected placeholder file {} created",
-                    name_str
-                );
-            }
-        }
+        // Verify that placeholder_TBD marker file was created.
+        let placeholder_path = base.join(".greatsage").join("placeholder_tbd.txt");
+        assert!(
+            placeholder_path.is_file(),
+            "placeholder_tbd.txt should be created"
+        );
+        let content = fs::read_to_string(&placeholder_path).expect("read placeholder file");
+        assert_eq!(content, "Task TBD completed");
     }
 }

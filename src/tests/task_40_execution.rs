@@ -20,10 +20,16 @@ mod tests {
         let log_path = base.join(".greatsage").join("evolve.log");
         assert!(log_path.is_file(), "evolve.log should be created");
         let log_content = fs::read_to_string(&log_path).expect("read evolve.log");
-        assert!(log_content.contains("Address 40"), "log should contain task title");
+        assert!(
+            log_content.contains("Address 40"),
+            "log should contain task title"
+        );
         // Verify placeholder file created.
         let placeholder_path = base.join(".greatsage").join("placeholder40.txt");
-        assert!(placeholder_path.is_file(), "placeholder40.txt should be created");
+        assert!(
+            placeholder_path.is_file(),
+            "placeholder40.txt should be created"
+        );
         let marker = fs::read_to_string(&placeholder_path).expect("read placeholder file");
         assert_eq!(marker, "Task 40 completed");
     }
