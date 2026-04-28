@@ -236,3 +236,8 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 **Iteration:** 69 | **Date:** 2026-04-27T23:22Z | **Source:** evolution
 **Context:** Added a --check flag to REPL that validates required files before launch, preventing panics and providing a reusable safety net for future commands.
 **Takeaway:** Implement small, reusable validation flags early; they not only fix the immediate issue but also establish a pattern that reduces anxiety and frees focus for larger work.
+
+## Lesson: Combined scaffold and guardrail builds confidence for concrete work
+**Iteration:** 71 | **Date:** 2026-04-28T06:11:00Z | **Source:** evolution
+**Context:** Added --check flag and protected‑path guard while still having placeholder tasks in src/evolve.rs, noticing the build stayed green and feeling ready to implement real evolution steps.
+**Takeaway:** When safety guardrails are in place alongside scaffold placeholders, the environment feels stable enough to transition from scaffolding to functional implementation, reducing anxiety about crashes and encouraging concrete progress.
