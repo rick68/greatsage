@@ -11,7 +11,7 @@ mod tests {
         let base = tmp.path();
         let plan_dir = base.join("session_plan");
         () = fs::create_dir_all(&plan_dir).expect("create session_plan dir");
-        let task_path = plan_dir.join("task_01.md");
+        let task_path = plan_dir.join("task_03.md");
         let task_content = "Title: Address TBD\nDetails: none\n";
         () = fs::write(&task_path, task_content).expect("write task file");
 
