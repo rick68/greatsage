@@ -98,6 +98,19 @@ pub fn assessment_phase(base_dir: impl AsRef<Path>) -> Result<String, Box<dyn st
             }
             let src_files = count_rs(base_dir.join("src")).await;
 
+            // Load config to check repl_error_handling status.
+            let config_path = base_dir.join("config.toml");
+            let repl_status = if config_path.exists() {
+                let content = fs::read_to_string(&config_path).unwrap_or_default();
+                if content.contains("repl_error_handling = true") {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
+            } else {
+                "disabled"
+            };
+
             // Detect CI workflow presence.
             // Detect CI workflow presence.
             let ci_status = if std::fs::read_dir(base_dir.join(".github/workflows"))
@@ -120,7 +133,7 @@ pub fn assessment_phase(base_dir: impl AsRef<Path>) -> Result<String, Box<dyn st
             };
 
             Ok::<String, Box<dyn std::error::Error>>(format!(
-                "Version: {version}\nSource files: {src_files}\nCI last: {ci_status}"
+                "Version: {version}\nSource files: {src_files}\nCI last: {ci_status}\nREPL Error Handling: {repl_status}"
             ))
         };
 
