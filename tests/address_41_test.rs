@@ -2,8 +2,12 @@
 
 #[cfg(test)]
 mod tests {
-    use temp_env_vars::temp_env_vars;
-    use {greatsage::evolve::execute_tasks, std::{fs, env}, tempfile::TempDir};
+    use {
+        greatsage::evolve::execute_tasks,
+        std::{env, fs},
+        temp_env_vars::temp_env_vars,
+        tempfile::TempDir,
+    };
 
     #[test]
     #[temp_env_vars]

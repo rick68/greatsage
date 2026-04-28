@@ -1,12 +1,11 @@
 use {
     std::{
-        fs,
+        env, fs,
         future::Future,
         io::{ErrorKind, Write},
         path::{self, Path},
         pin::Pin,
         time::Duration,
-        env
     },
     tokio::{fs as async_fs, runtime::Runtime, time},
 };
@@ -413,65 +412,65 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
                             } else {
                                 let mut build_success = false;
                                 for attempt in 1..=MAX_BUILD_ATTEMPTS {
-                                writeln!(
-                                    log_file,
-                                    "Build/Test attempt {attempt} for task Address {num}"
-                                )?;
-                                // Run cargo fmt --check, clippy, build, test.
-                                let fmt_status = std::process::Command::new("cargo")
-                                    .arg("fmt")
-                                    .arg("--")
-                                    .arg("--check")
-                                    .current_dir(base_dir)
-                                    .status();
-                                let fmt_ok = matches!(fmt_status, Ok(s) if s.success());
-                                let clippy_status = std::process::Command::new("cargo")
-                                    .arg("clippy")
-                                    .arg("--all-targets")
-                                    .arg("--")
-                                    .arg("-D")
-                                    .arg("warnings")
-                                    .current_dir(base_dir)
-                                    .status();
-                                let clippy_ok = matches!(clippy_status, Ok(s) if s.success());
-                                let build_status = std::process::Command::new("cargo")
-                                    .arg("build")
-                                    .current_dir(base_dir)
-                                    .status();
-                                let build_ok = matches!(build_status, Ok(s) if s.success());
-                                let test_status = std::process::Command::new("cargo")
-                                    .arg("test")
-                                    .arg("--quiet")
-                                    .current_dir(base_dir)
-                                    .status();
-                                let test_ok = matches!(test_status, Ok(s) if s.success());
-                                if fmt_ok && clippy_ok && build_ok && test_ok {
                                     writeln!(
                                         log_file,
-                                        "Build/Test succeeded on attempt {attempt} for task Address {num}"
+                                        "Build/Test attempt {attempt} for task Address {num}"
                                     )?;
-                                    build_success = true;
-                                    break;
-                                } else {
-                                    writeln!(
-                                        log_file,
-                                        "Build/Test failed on attempt {attempt} for task Address {num}"
-                                    )?;
+                                    // Run cargo fmt --check, clippy, build, test.
+                                    let fmt_status = std::process::Command::new("cargo")
+                                        .arg("fmt")
+                                        .arg("--")
+                                        .arg("--check")
+                                        .current_dir(base_dir)
+                                        .status();
+                                    let fmt_ok = matches!(fmt_status, Ok(s) if s.success());
+                                    let clippy_status = std::process::Command::new("cargo")
+                                        .arg("clippy")
+                                        .arg("--all-targets")
+                                        .arg("--")
+                                        .arg("-D")
+                                        .arg("warnings")
+                                        .current_dir(base_dir)
+                                        .status();
+                                    let clippy_ok = matches!(clippy_status, Ok(s) if s.success());
+                                    let build_status = std::process::Command::new("cargo")
+                                        .arg("build")
+                                        .current_dir(base_dir)
+                                        .status();
+                                    let build_ok = matches!(build_status, Ok(s) if s.success());
+                                    let test_status = std::process::Command::new("cargo")
+                                        .arg("test")
+                                        .arg("--quiet")
+                                        .current_dir(base_dir)
+                                        .status();
+                                    let test_ok = matches!(test_status, Ok(s) if s.success());
+                                    if fmt_ok && clippy_ok && build_ok && test_ok {
+                                        writeln!(
+                                            log_file,
+                                            "Build/Test succeeded on attempt {attempt} for task Address {num}"
+                                        )?;
+                                        build_success = true;
+                                        break;
+                                    } else {
+                                        writeln!(
+                                            log_file,
+                                            "Build/Test failed on attempt {attempt} for task Address {num}"
+                                        )?;
+                                    }
+                                }
+                                if !build_success {
+                                    // Evaluator loop placeholder attempts.
+                                    for e_attempt in 1..=MAX_EVAL_ATTEMPTS {
+                                        writeln!(
+                                            log_file,
+                                            "Evaluator attempt {e_attempt} for task Address {num}"
+                                        )?;
+                                        // Placeholder: in real implementation, invoke evaluator agent.
+                                        // Here we just log each attempt up to MAX_EVAL_ATTEMPTS.
+                                    }
                                 }
                             }
-                            if !build_success {
-                                // Evaluator loop placeholder attempts.
-                                for e_attempt in 1..=MAX_EVAL_ATTEMPTS {
-                                    writeln!(
-                                        log_file,
-                                        "Evaluator attempt {e_attempt} for task Address {num}"
-                                    )?;
-                                    // Placeholder: in real implementation, invoke evaluator agent.
-                                    // Here we just log each attempt up to MAX_EVAL_ATTEMPTS.
-                                }
-                            }
-                        }
-                        // After attempts (or immediately if build succeeded), create placeholder.
+                            // After attempts (or immediately if build succeeded), create placeholder.
                             let placeholder_path = base_dir
                                 .join(".greatsage")
                                 .join(format!("placeholder{num}.txt"));
