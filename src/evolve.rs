@@ -366,6 +366,9 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
                             _ = fs::create_dir_all(parent);
                         }
                         () = fs::write(&placeholder_path, "Task 40 completed")?;
+                    } else if title == "Address TBD" {
+                        // No‑op task: intentionally does nothing and creates no marker.
+                        // Continue to next task without side effects.
                     } else {
                         // Generic handling for "Address <num>" tasks: create a placeholder marker file.
                         // Run build/test fix loop before creating marker.
