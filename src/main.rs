@@ -48,9 +48,9 @@ use std::error::Error;
 pub type ReplError = Box<dyn Error>;
 
 /// Persist the REPL error handling flag if it changed.
-fn maybe_save_repl_error_handling(app_config: &mut AppConfig, config_path: &Path, original: bool) {
+fn maybe_save_repl_error_handling(app_config: &mut AppConfig, config_path: impl AsRef<Path>, original: bool) {
     if app_config.repl_error_handling != original
-        && let Err(e) = app_config.save(config_path)
+        && let Err(e) = app_config.save(config_path.as_ref())
     {
         eprintln!("Failed to save config: {e}");
     }
@@ -187,7 +187,7 @@ fn main() {
     app_config.repl_error_handling =
         args.check || args.error_handling || args.handle_errors || args.repl_error_handling;
     // Persist the REPL error handling flag if it changed.
-    maybe_save_repl_error_handling(&mut app_config, &config_path, original_repl_error_handling);
+    () = maybe_save_repl_error_handling(&mut app_config, &config_path, original_repl_error_handling);
     // Capture REPL error handling flag before moving app_config into Bevy resource.
     let repl_error_handling_flag = app_config.repl_error_handling;
     // Install panic hook for strict error handling if enabled.
@@ -354,6 +354,7 @@ mod tests {
     mod check_flag;
     mod cli_stats;
     mod evolve_protection;
+    mod persist_repl_error_handling;
     mod repl_error_handling;
     mod task_01_execution;
     mod task_01_placeholder;

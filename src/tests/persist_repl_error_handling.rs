@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use std::{env, fs, path::PathBuf, process::Command};
-    use tempfile::Builder;
+    use {
+        std::{ fs,  process::Command},
+        tempfile::Builder
+    };
 
     #[test]
     fn test_check_flag_persists_to_config() {
