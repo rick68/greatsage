@@ -4,7 +4,7 @@ mod tests {
     #[allow(unused_imports)]
     use {
         crate::{handle_prompt, maybe_set_strict_error_hook},
-        std::{io::Write, panic, env},
+        std::{env, io::Write, panic},
         tempfile::Builder,
     };
 

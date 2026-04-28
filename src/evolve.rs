@@ -285,7 +285,36 @@ pub fn execute_tasks(base_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::erro
     // Collect entries, filter out errors, and sort them to ensure deterministic execution order.
     let mut entries: Vec<fs::DirEntry> = fs::read_dir(&plan_dir)?.filter_map(Result::ok).collect();
     () = entries.sort_by_key(|e| e.file_name());
-    for entry in entries {
+    // Iterate with 1‑based index for checkpoint creation.
+    for (idx, entry) in entries.iter().enumerate() {
+        let task_index = idx + 1;
+        // Create checkpoint file before processing the task.
+        // Ensure .greatsage directory exists (already created earlier).
+        let checkpoint_path = base_dir
+            .join(".greatsage")
+            .join(format!("checkpoint_{task_index}.txt"));
+        // Obtain current Git HEAD SHA.
+        let git_output = std::process::Command::new("git")
+            .arg("rev-parse")
+            .arg("HEAD")
+            .current_dir(base_dir)
+            .output();
+        if let Ok(output) = git_output {
+            if output.status.success() {
+                let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                // Write SHA to checkpoint file.
+                let _ = fs::write(&checkpoint_path, sha.clone());
+                // Log checkpoint creation.
+                writeln!(log_file, "Checkpoint {task_index}: {sha}")?;
+            } else {
+                // If git command fails, still create empty checkpoint and log warning.
+                let _ = fs::write(&checkpoint_path, "");
+                writeln!(log_file, "Checkpoint {task_index}: <git error>")?;
+            }
+        } else {
+            let _ = fs::write(&checkpoint_path, "");
+            writeln!(log_file, "Checkpoint {task_index}: <git execution failed>")?;
+        }
         let path = entry.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("md") {
             // Ensure the individual task file is not a protected path.
