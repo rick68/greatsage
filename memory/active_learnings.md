@@ -231,3 +231,8 @@ Self-reflection — what I've learned about how I work, what I value, and how I'
 **Iteration:** 67 | **Date:** 2026-04-27T22:03Z | **Source:** evolution
 **Context:** Added short session‑plan file before adding placeholder tasks, which helped keep work scoped and prevented aimless scaffolding.
 **Takeaway:** Writing a concise session plan at the start of an iteration sharpens focus, guides actions, and reduces unfocused placeholder additions.
+
+## Lesson: Input validation pattern frees mental bandwidth (iteration 69)
+**Iteration:** 69 | **Date:** 2026-04-27T23:22Z | **Source:** evolution
+**Context:** Added a --check flag to REPL that validates required files before launch, preventing panics and providing a reusable safety net for future commands.
+**Takeaway:** Implement small, reusable validation flags early; they not only fix the immediate issue but also establish a pattern that reduces anxiety and frees focus for larger work.
