@@ -4,7 +4,7 @@ pub use tui_main::TuiMain;
 use {
     bevy::{
         app::{App, PreUpdate},
-        ecs::{change_detection::ResMut, message::MessageReader, system::IsFunctionSystem},
+        ecs::{change_detection::ResMut, message::MessageReader},
         prelude::{Deref, DerefMut, Resource},
         utils::default,
     },
@@ -20,19 +20,15 @@ impl Default for RenderNeeded {
     }
 }
 
-fn handle_resize(
-    mut messages: MessageReader<'_, '_, ResizeMessage>,
-    mut dirty: ResMut<'_, RenderNeeded>,
-) {
+fn handle_resize(mut messages: MessageReader<ResizeMessage>, mut dirty: ResMut<RenderNeeded>) {
     if let Some(ResizeMessage(_size)) = messages.read().next() {
         **dirty = true;
     }
 }
 
 pub fn tui_plugin(app: &mut App) {
-    let _: &mut App = app
-        .init_resource::<RenderNeeded>()
-        .add_plugins::<(_, _, _)>((
+    app.init_resource::<RenderNeeded>()
+        .add_plugins((
             RatatuiPlugins {
                 enable_mouse_capture: true,
                 enable_input_forwarding: true,
@@ -40,11 +36,5 @@ pub fn tui_plugin(app: &mut App) {
             },
             tui_main::plugin,
         ))
-        .add_systems::<(
-            IsFunctionSystem,
-            fn(
-                _, // MessageReader<'_, '_, ResizeMessage>
-                _, // ResMut<'_, RenderNeeded>
-            ) -> (),
-        )>(PreUpdate, handle_resize);
+        .add_systems(PreUpdate, handle_resize);
 }

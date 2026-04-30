@@ -17,10 +17,10 @@ use {
             change_detection::Res,
             resource::Resource,
             schedule::{
-                IntoScheduleConfigs, ScheduleConfigTupleMarker,
+                IntoScheduleConfigs,
                 common_conditions::{condition_changed_to, resource_exists, run_once},
             },
-            system::{Commands, IsFunctionSystem},
+            system::Commands,
         },
     },
     clap::{Parser, ValueEnum},
@@ -61,10 +61,10 @@ struct Args {
 }
 
 fn main() {
-    let _: dotenvy::Result<PathBuf> = dotenvy::dotenv();
+    let _ = dotenvy::dotenv();
 
-    let args: Args = Args::parse();
-    let mut prompt_arg: Option<String> = args.prompt.clone();
+    let args = Args::parse();
+    let mut prompt_arg = args.prompt.clone();
 
     {
         let stdin: Stdin = stdin();
@@ -76,51 +76,35 @@ fn main() {
         }
     }
 
-    let mut app: App = App::new();
-    let _: &mut App = app.insert_resource::<Args>(args);
-    let _: &mut App = app.add_plugins::<(_, _, _, _)>((
-        DefaultPlugins.set::<ScheduleRunnerPlugin>(ScheduleRunnerPlugin::run_loop(
-            Duration::from_secs_f32(FRAMES_PER_SECOND.recip()),
-        )),
+    let mut app = App::new();
+    app.insert_resource::<Args>(args);
+    app.add_plugins((
+        DefaultPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f32(
+            FRAMES_PER_SECOND.recip(),
+        ))),
         tokio_plugin,
         agents_plugin,
     ));
 
     if let Some(prompt) = prompt_arg {
-        let _: &mut App = app.add_systems::<(ScheduleConfigTupleMarker, (), ())>(
+        app.add_systems(
             Update,
             (
-                (move |channel: Res<'_, CodingAgentPromptChannel>| {
-                    () = channel.sender.send(prompt.clone()).unwrap();
+                (move |channel: Res<CodingAgentPromptChannel>| {
+                    channel.sender.send(prompt.clone()).unwrap();
                 })
-                .run_if::<(
-                    IsFunctionSystem,
-                    fn(
-                        _, // Local<'_, bool>
-                    ) -> bool,
-                )>(run_once),
-                (|mut commands: Commands<'_, '_>| {
-                    let _: &mut Commands<'_, '_> =
-                        commands.write_message::<AppExit>(AppExit::Success);
+                .run_if(run_once),
+                (|mut commands: Commands| {
+                    commands.write_message::<AppExit>(AppExit::Success);
                 })
-                .run_if::<()>(condition_changed_to::<
-                    (
-                        IsFunctionSystem,
-                        fn(
-                            Option<
-                                _, // Res<'_, CodingAgentTask>
-                            >,
-                        ) -> bool,
-                    ),
-                    (),
-                    fn(Option<Res<'_, CodingAgentTask>>) -> bool,
-                >(
-                    false, resource_exists::<CodingAgentTask>
+                .run_if(condition_changed_to(
+                    false,
+                    resource_exists::<CodingAgentTask>,
                 )),
             ),
         );
     } else {
-        let _: &mut App = app.add_plugins::<_>(tui_plugin);
+        app.add_plugins(tui_plugin);
     }
 
     if let AppExit::Error(code) = app.run() {

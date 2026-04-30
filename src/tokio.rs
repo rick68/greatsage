@@ -4,14 +4,14 @@ use {
         app::{App, AppExit, PostUpdate, Startup},
         ecs::{
             change_detection::{NonSend, Res, ResMut},
-            message::{MessageId, MessageReader},
+            message::MessageReader,
             resource::Resource,
         },
         prelude::Deref,
         tasks::futures_lite::StreamExt,
     },
     bevy_ratatui::crossterm::{self, execute, terminal::LeaveAlternateScreen},
-    bevy_tokio_tasks::{MainThreadContext, TaskContext, TokioTasksPlugin, TokioTasksRuntime},
+    bevy_tokio_tasks::{TokioTasksPlugin, TokioTasksRuntime},
     signal_hook::consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM},
     signal_hook_tokio::Signals,
     std::sync::Arc,
@@ -25,19 +25,20 @@ pub struct AppCancelToken(Arc<CancellationToken>);
 
 fn setup_signal_handles(runtime: ResMut<TokioTasksRuntime>, cancel: Res<AppCancelToken>) {
     let cancel = cancel.clone();
-    _ = runtime.spawn_background_task(|mut ctx: TaskContext| async move {
+    runtime.spawn_background_task(|mut ctx| async move {
         #[cfg(not(target_os = "windows"))]
         let mut signals = Signals::new(SIGNALS).unwrap();
 
         loop {
             tokio::select! {
                 Some(_signal) = signals.next(), if cfg!(not(target_os = "windows")) => {
-                    _ = crossterm::terminal::disable_raw_mode();
-                    _ = execute!(std::io::stdout(), LeaveAlternateScreen);
-
-                    () = ctx.run_on_main_thread::<_, ()>(|ctx: MainThreadContext<'_>| {
-                        let _: Option<MessageId<AppExit>> =
-                            ctx.world.write_message_default::<AppExit>();
+                    () = ctx.run_on_main_thread::<_, ()>(|ctx| {
+                        let world = ctx.world;
+                        if world.get_non_send_resource::<NonSend<TuiMain>>().is_some() {
+                            _ = crossterm::terminal::disable_raw_mode();
+                            _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+                        }
+                        world.write_message_default::<AppExit>();
                     }).await;
                 }
                 _ = cancel.cancelled() => break,
@@ -61,8 +62,8 @@ fn shutdown_tokio_on_exit(
             while Arc::strong_count(&cancel) != 1 {}
 
             if tui.is_some() {
-                _ = ratatui::restore();
-                _ = crossterm::terminal::disable_raw_mode();
+                ratatui::restore();
+                let _ =  crossterm::terminal::disable_raw_mode();
             }
         }
     }
