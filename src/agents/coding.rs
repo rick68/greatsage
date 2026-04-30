@@ -36,7 +36,7 @@ use {
         sync::Arc,
     },
     termimad::MadSkin,
-    tokio::{sync::Mutex, task::JoinHandle},
+    tokio::sync::Mutex,
     yoagent::{
         agent::Agent,
         provider::{ModelConfig, openai_compat::OpenAiCompatProvider},
@@ -82,7 +82,7 @@ fn setup(
     tokio_runtime: ResMut<TokioTasksRuntime>,
 ) {
     if let Some(tui) = tui.as_mut() {
-        () = tui.output.push(Line::<'_>::from(
+        tui.output.push(Line::<'_>::from(
             "🚀 Starting Interactive Coding Agent Session",
         ));
     }

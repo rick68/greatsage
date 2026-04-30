@@ -230,7 +230,7 @@ fn handle_input_area_input(
 
         match code {
             KeyCode::Char(c) if kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat => {
-                () = tui_main.input.push(*c);
+                tui_main.input.push(*c);
                 if let Some(width) = UnicodeWidthChar::width(*c) {
                     tui_main.character_index = tui_main.character_index.saturating_add(width);
                 }
@@ -280,7 +280,7 @@ fn handle_output_area_input(
         let KeyEvent { code, .. } = &**message;
 
         if let KeyCode::Char(' ') = code {
-            () = tui_main.scroll_page_down();
+            tui_main.scroll_page_down();
             **dirty = true;
         }
     }
@@ -307,7 +307,7 @@ fn draw_scene_system(
 
     if **dirty {
         context.draw(|frame: &mut Frame| {
-            () = tui.draw(frame);
+             tui.draw(frame);
         })?;
     }
 
