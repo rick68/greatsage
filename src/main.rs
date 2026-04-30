@@ -1,12 +1,14 @@
 #![windows_subsystem = "windows"]
 
 mod agents;
+mod cli;
 mod tokio;
 mod tui;
 
 use {
     crate::{
         agents::{CodingAgentPromptChannel, CodingAgentTask, agents_plugin},
+        cli::Cli,
         tokio::tokio_plugin,
         tui::tui_plugin,
     },
@@ -15,7 +17,6 @@ use {
         app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update},
         ecs::{
             change_detection::Res,
-            resource::Resource,
             schedule::{
                 IntoScheduleConfigs,
                 common_conditions::{condition_changed_to, resource_exists, run_once},
@@ -23,47 +24,19 @@ use {
             system::Commands,
         },
     },
-    clap::{Parser, ValueEnum},
+    clap::Parser,
     std::{
         io::{IsTerminal, Read, Stdin, stdin},
-        path::PathBuf,
         time::Duration,
     },
 };
 
 const FRAMES_PER_SECOND: f32 = 30.0;
 
-/// Context management strategy.
-#[derive(Clone, Copy, Debug, Default, PartialEq, ValueEnum)]
-pub enum ContextStrategy {
-    /// Default: auto-compact conversation when approaching context limit
-    #[default]
-    Compaction,
-    /// Write checkpoint file and exit with code 2 when approaching limit
-    Checkpoint,
-}
-
-#[derive(Clone, Debug, Parser, Resource)]
-#[command(version, about, long_about = None)]
-struct Args {
-    // Model to use
-    #[arg(long, value_name = "name", default_value = "claude-opus-4-7")]
-    model: Option<String>,
-    /// Run a single prompt and exit (no REPL)
-    #[arg(short, long, value_name = "t")]
-    prompt: Option<String>,
-    /// Directory containing skill files
-    #[arg(long, value_name = "dir")]
-    skills: Option<Vec<PathBuf>>,
-    /// Context management: compaction or checkpoint
-    #[arg(long, value_name = "s", default_value = "compaction")]
-    context_strategy: ContextStrategy,
-}
-
 fn main() {
     let _ = dotenvy::dotenv();
 
-    let args = Args::parse();
+    let args = Cli::parse();
     let mut prompt_arg = args.prompt.clone();
 
     {
@@ -77,7 +50,7 @@ fn main() {
     }
 
     let mut app = App::new();
-    app.insert_resource::<Args>(args);
+    app.insert_resource::<Cli>(args);
     app.add_plugins((
         DefaultPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f32(
             FRAMES_PER_SECOND.recip(),
