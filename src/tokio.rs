@@ -70,7 +70,7 @@ fn shutdown_tokio_on_exit(
 }
 
 pub fn tokio_plugin(app: &mut App) {
-    let _: &mut App = app
+    app
         .add_plugins(TokioTasksPlugin::default())
         .init_resource::<AppCancelToken>()
         .add_systems(Startup, setup_signal_handles)
