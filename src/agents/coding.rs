@@ -115,7 +115,7 @@ fn setup(
     let app_cancel = app_cancel.clone();
     let agents_cancel = agents_cancel.clone();
 
-    let _: JoinHandle<()> = tokio_runtime.spawn_background_task(|_ctx| async move {
+    tokio_runtime.spawn_background_task(|_ctx| async move {
         tokio::select! {
             _ = app_cancel.cancelled() => (),
             _ = agents_cancel.cancelled() => (),
@@ -213,7 +213,7 @@ fn handle_coding_agent_events(
                     }
                     *in_text = false;
                 }
-                let summary: String = match tool_name.as_str() {
+                let summary = match tool_name.as_str() {
                     "bash" => {
                         let cmd = args
                             .get("command")

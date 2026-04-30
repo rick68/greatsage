@@ -57,7 +57,7 @@ fn shutdown_tokio_on_exit(
         if let Some(cancel) = cancel.take()
             && !cancel.is_cancelled()
         {
-            () = cancel.cancel();
+            cancel.cancel();
 
             while Arc::strong_count(&cancel) != 1 {}
 
