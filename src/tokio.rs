@@ -35,8 +35,8 @@ fn setup_signal_handles(runtime: ResMut<TokioTasksRuntime>, cancel: Res<AppCance
                     () = ctx.run_on_main_thread::<_, ()>(|ctx| {
                         let world = ctx.world;
                         if world.get_non_send_resource::<NonSend<TuiMain>>().is_some() {
-                            _ = crossterm::terminal::disable_raw_mode();
-                            _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+                            let _ = crossterm::terminal::disable_raw_mode();
+                            let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
                         }
                         world.write_message_default::<AppExit>();
                     }).await;
@@ -63,7 +63,7 @@ fn shutdown_tokio_on_exit(
 
             if tui.is_some() {
                 ratatui::restore();
-                let _ =  crossterm::terminal::disable_raw_mode();
+                let _ = crossterm::terminal::disable_raw_mode();
             }
         }
     }

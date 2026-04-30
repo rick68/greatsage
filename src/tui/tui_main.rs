@@ -180,34 +180,35 @@ fn handle_global_input(
             KeyCode::Tab => {
                 let TuiMain { focused, .. } = tui_main.as_mut();
                 let next: TuiMainFocus = focused.next().unwrap();
-                () = next_tui_main_focus.set(next);
+                next_tui_main_focus.set(next);
+                next_tui_main_focus.set(next);
                 **dirty = true;
             }
             KeyCode::Esc => {
                 let _: MessageId<AppExit> = exit.write_default();
             }
             KeyCode::Up if kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat => {
-                () = tui_main.scroll_up();
+                tui_main.scroll_up();
                 **dirty = true;
             }
             KeyCode::Down if kind == &KeyEventKind::Press || kind == &KeyEventKind::Repeat => {
-                () = tui_main.scroll_down();
+                tui_main.scroll_down();
                 **dirty = true;
             }
             KeyCode::PageUp => {
-                () = tui_main.scroll_page_up();
+                tui_main.scroll_page_up();
                 **dirty = true;
             }
             KeyCode::PageDown => {
-                () = tui_main.scroll_page_down();
+                tui_main.scroll_page_down();
                 **dirty = true;
             }
             KeyCode::Home => {
-                () = tui_main.scroll_to_top();
+                tui_main.scroll_to_top();
                 **dirty = true;
             }
             KeyCode::End => {
-                () = tui_main.scroll_to_bottom();
+                tui_main.scroll_to_bottom();
                 **dirty = true;
             }
             _ => (),
@@ -254,12 +255,12 @@ fn handle_input_area_input(
                         _ => (),
                     }
 
-                    () = tui_main.output.push(Line::raw(input.clone()));
-                    () = tui_main.input.clear();
+                    tui_main.output.push(Line::raw(input.clone()));
+                    tui_main.input.clear();
                     tui_main.character_index = 0;
-                    () = tui_main.scroll_to_bottom();
+                    tui_main.scroll_to_bottom();
 
-                    () = channel.sender.send(input).unwrap();
+                    channel.sender.send(input).unwrap();
                 }
                 **dirty = true;
             }
@@ -305,7 +306,7 @@ fn draw_scene_system(
     }
 
     if **dirty {
-        context.draw::<_>(|frame: &mut Frame<'_>| {
+        context.draw(|frame: &mut Frame| {
             () = tui.draw(frame);
         })?;
     }
@@ -316,7 +317,7 @@ fn draw_scene_system(
 }
 
 pub fn plugin(app: &mut App) {
-    app.init_non_send_resource::<TuiMain<'_>>()
+    app.init_non_send_resource::<TuiMain>()
         .init_state::<TuiMainFocus>()
         .add_systems(
             PreUpdate,
