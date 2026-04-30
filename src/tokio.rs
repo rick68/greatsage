@@ -32,7 +32,7 @@ fn setup_signal_handles(runtime: ResMut<TokioTasksRuntime>, cancel: Res<AppCance
         loop {
             tokio::select! {
                 Some(_signal) = signals.next(), if cfg!(not(target_os = "windows")) => {
-                    () = ctx.run_on_main_thread::<_, ()>(|ctx| {
+                    () = ctx.run_on_main_thread(|ctx| {
                         let world = ctx.world;
                         if world.get_non_send_resource::<NonSend<TuiMain>>().is_some() {
                             let _ = crossterm::terminal::disable_raw_mode();
