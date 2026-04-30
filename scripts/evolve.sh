@@ -852,7 +852,7 @@ Files: [files to modify]
 Issue: #N (or "none")
 
 [Detailed description of what to do — specific enough for a focused implementation agent.
-Include which docs need updating (YOYO.md, README.md, docs/src/) if the task changes behavior, features, or architecture.]
+Include which docs need updating (GREATSAGE.md, README.md, docs/src/) if the task changes behavior, features, or architecture.]
 
 TASK SIZING RULES — follow these strictly:
 - Each task MUST touch at most 3 source files. If a change needs more, split it into multiple tasks.
@@ -977,7 +977,7 @@ Follow the evolve skill rules:
 - After ALL checks pass, commit:
     git add -A && git commit -m "Iteration $ITERATION ($ISO_DATETIME): $task_title (Task $TASK_NUM)" || true
 - If you changed behavior, added features, or modified architecture, update the docs:
-  - YOYO.md — keep the "What This Is", "Build & Test", "Architecture", and "State files" sections accurate
+  - GREATSAGE.md — keep the "What This Is", "Build & Test", "Architecture", and "State files" sections accurate
   - README.md — keep "How It Evolves", commands table, and feature descriptions accurate
   - docs/src/ — update relevant pages for user-facing changes
   Stale docs are as bad as failing tests. If your change makes any doc statement wrong, fix it in the same commit.
