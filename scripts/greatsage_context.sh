@@ -69,6 +69,12 @@ if [ -f "$_GREATSAGE_REPO/ECONOMICS.md" ]; then
     _ECONOMICS=$(cat "$_GREATSAGE_REPO/ECONOMICS.md") || _ECONOMICS=""
 fi
 
+# Roadmap — optional file for the agent to reference
+_ROADMAP=""
+if [ -f "$_GREATSAGE_REPO/ROADMAP.md" ]; then
+    _ROADMAP=$(cat "$_GREATSAGE_REPO/ROADMAP.md") || _ROADMAP=""
+fi
+
 GREATSAGE_CONTEXT="=== WHO YOU ARE ===
 
 ${_IDENTITY:-Read IDENTITY.md for your rules and constitution.}
@@ -84,6 +90,10 @@ ${_LEARNINGS:-No learnings yet.}
 === SOCIAL WISDOM ===
 
 ${_SOCIAL_LEARNINGS:-No social learnings yet.}
+
+=== YOUR ROADMAP ===
+
+${_ROADMAP:-Read ROADMAP.md for the project\'s roadmap and milestones.}
 
 === YOUR ECONOMICS ===
 
