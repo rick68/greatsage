@@ -1,6 +1,6 @@
 use {
     crate::{
-        agents::{AgentsCancelToken, LlmConfig},
+        agents::{AgentsCancelToken, AgentConfig},
         cli::Cli,
         tokio::AppCancelToken,
         tui::TuiMain,
@@ -73,7 +73,7 @@ impl Default for CodingAgentPromptChannel {
 }
 
 fn setup(
-    llm_config: Res<LlmConfig>,
+    agent_config: Res<AgentConfig>,
     cli: Res<Cli>,
     mut tui: Option<NonSendMut<TuiMain>>,
     mut commands: Commands,
@@ -87,11 +87,11 @@ fn setup(
         ));
     }
 
-    let LlmConfig {
+    let AgentConfig {
         base_url,
         model,
         api_key,
-    } = llm_config.into_inner();
+    } = agent_config.into_inner();
     let cli = cli.into_inner();
 
     let model_config = ModelConfig::local(base_url, model);

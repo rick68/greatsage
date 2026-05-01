@@ -17,13 +17,13 @@ use {
 };
 
 #[derive(Resource)]
-pub struct LlmConfig {
+pub struct AgentConfig {
     pub base_url: String,
     pub model: String,
     pub api_key: String,
 }
 
-impl Default for LlmConfig {
+impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             base_url: dotenvy::var("BASE_URL").unwrap_or_default(),
@@ -54,7 +54,7 @@ fn setup(
 }
 
 pub fn agents_plugin(app: &mut App) {
-    app.init_resource::<LlmConfig>()
+    app.init_resource::<AgentConfig>()
         .init_resource::<AgentsCancelToken>()
         .add_plugins(coding_agent_plugin)
         .add_systems(Startup, setup);
