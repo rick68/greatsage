@@ -4,6 +4,7 @@ mod agents;
 mod cli;
 mod tokio;
 mod tui;
+mod utils;
 
 use {
     crate::{

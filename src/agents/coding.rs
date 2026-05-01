@@ -4,6 +4,7 @@ use {
         cli::Cli,
         tokio::AppCancelToken,
         tui::TuiMain,
+        utils::truncate,
     },
     ansi_to_tui::IntoText,
     bevy::{
@@ -177,13 +178,6 @@ fn spawn_agent_task(
 
         commands.init_resource::<CodingAgentTask>();
         next_state.set(CodingAgentState::Processing);
-    }
-}
-
-fn truncate(s: &str, max: usize) -> &str {
-    match s.char_indices().nth(max) {
-        Some((idx, _)) => &s[..idx],
-        None => s,
     }
 }
 
