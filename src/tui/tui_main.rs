@@ -1,6 +1,7 @@
 use {
     super::RenderNeeded,
     crate::agents::CodingAgentPromptChannel,
+    crate::utils::current_git_branch,
     bevy::{
         app::{App, AppExit, PreUpdate, Update},
         ecs::{
@@ -33,7 +34,7 @@ use {
 };
 
 const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
-const PROMPT_PREFIX: &str = "🤖 > ";
+
 const PROMPT_SUFFIX_LENGTH: usize = 5;
 
 #[derive(Clone, Copy, Debug, Default, EnumCount, Eq, FromRepr, Hash, PartialEq, States)]
@@ -119,9 +120,19 @@ impl<'a> TuiMain<'a> {
             &mut self.vertical_scroll_state,
         );
 
-        let input = Paragraph::new(format!("{PROMPT_PREFIX}{}", self.input))
-            .style(Style::default())
-            .block(Block::bordered().title("Input"));
+        let input = Paragraph::new(format!(
+            "{}{}",
+            {
+                if let Some(branch) = current_git_branch() {
+                    format!("greatsage ({})> ", branch)
+                } else {
+                    "greatsage> ".to_string()
+                }
+            },
+            self.input
+        ))
+        .style(Style::default())
+        .block(Block::bordered().title("Input"));
         frame.render_widget(input, input_area);
 
         if self.show_cursor && self.focused == TuiMainFocus::InputArea {
