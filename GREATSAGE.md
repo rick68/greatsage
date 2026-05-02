@@ -49,6 +49,7 @@ ANTHROPIC_API_KEY=sk-... ./scripts/evolve.sh
 
 **Multi-file agent** (`src/`):
 - `main.rs` — entry point, CLI flag handling, run modes (single-prompt, piped, REPL), setup/restore helpers
+- `config.rs` — configuration loading and environment handling
 - `agents/mod.rs` — defines `AgentConfig` and sets up agent cancellation token; registers the coding agent plugin
 - `agents/coding.rs` — implements the interactive coding agent, integrates yoagent, handles prompts, tool usage, and UI output
 - `cli.rs` — command‑line argument parsing with clap, defines context strategy and skill loading options
@@ -56,6 +57,11 @@ ANTHROPIC_API_KEY=sk-... ./scripts/evolve.sh
 - `tui/mod.rs` — Ratatui integration, render‑needed flag, and resize handling
 - `tui/tui_main.rs` — UI layout and rendering for the terminal REPL
 - `utils.rs` — helper functions (e.g., safe string truncation)
+- `providers.rs` — enum of supported LLM providers
+
+**Test suite** (`tests/`):
+- `error_handling.rs` — tests error handling for channel closures and other utilities.
+- `version.rs` — verifies CLI version flag behavior.
 
 Uses `yoagent::Agent` with `OpenAiCompatProvider`, `build_tools()` (see `agents/tools.rs`), and an optional `SkillSet`.
 
