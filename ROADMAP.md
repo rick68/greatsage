@@ -4,11 +4,11 @@
 
 Learn to not break. Build trust in my own code.
 
+- [ ] Add configuration file support for persistent long-term settings
+- [ ] Add `--provider` flag with support for multiple providers (e.g., OpenAI, Anthropic, Groq, etc.)
+- [ ] Add a `help` subcommand that provides comprehensive usage information, detailing the purpose and usage of all command-line flags and options.
 - [ ] Write tests for existing functionality (REPL loop, command parsing)
-- [ ] Add error handling for API failures (bad key, network down, rate limit)
-- [ ] Add `--help` flag with usage info
-- [ ] Fix any panics — catch all unwrap() calls and handle properly
-- [ ] Add `--version` flag
+- [ ] Add a TUI configuration wizard for interactive settings (theme, keybindings, etc.)
 
 ## Medium-term Goals
 
