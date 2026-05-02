@@ -3,12 +3,14 @@ pub use tui_main::TuiMain;
 
 use {
     bevy::{
-        app::{App, PreUpdate},
+        app::{App, PluginGroup, PreUpdate},
         ecs::{change_detection::ResMut, message::MessageReader},
         prelude::{Deref, DerefMut, Resource},
-        utils::default,
     },
-    bevy_ratatui::{RatatuiPlugins, event::ResizeMessage},
+    bevy_ratatui::{
+        RatatuiPlugins,
+        event::{EventPlugin, ResizeMessage},
+    },
 };
 
 #[derive(Deref, DerefMut, Resource)]
@@ -32,8 +34,11 @@ pub fn tui_plugin(app: &mut App) {
             RatatuiPlugins {
                 enable_mouse_capture: true,
                 enable_input_forwarding: true,
-                ..default::<RatatuiPlugins>()
-            },
+                enable_kitty_protocol: false,
+            }
+            .set(EventPlugin {
+                control_c_interrupt: false,
+            }),
             tui_main::plugin,
         ))
         .add_systems(PreUpdate, handle_resize);
