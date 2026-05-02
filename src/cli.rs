@@ -1,6 +1,7 @@
 use {
+    crate::providers::Provider,
     bevy::ecs::resource::Resource,
-    clap::{Parser, ValueEnum},
+    clap::{self, Parser, Subcommand, ValueEnum},
     std::path::PathBuf,
 };
 
@@ -14,12 +15,23 @@ pub enum ContextStrategy {
     Checkpoint,
 }
 
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Clone, Debug, Parser, Resource)]
-#[command(version, about, long_about = None)]
+#[command(
+    version = VERSION,
+    about,
+    long_about = None,
+    disable_help_subcommand = true,
+    disable_help_flag = true
+)]
 pub struct Cli {
-    // Model to use
-    #[arg(long, value_name = "name", default_value = "claude-opus-4-7")]
+    /// Model to use
+    #[arg(long, value_name = "name")]
     pub model: Option<String>,
+    /// Choose the LLM provider
+    #[arg(long, value_name = "name")]
+    pub provider: Option<Provider>,
     /// Run a single prompt and exit (no REPL)
     #[arg(short, long, value_name = "t")]
     pub prompt: Option<String>,
@@ -29,4 +41,61 @@ pub struct Cli {
     /// Context management: compaction or checkpoint
     #[arg(long, value_name = "s", default_value = "compaction")]
     pub context_strategy: ContextStrategy,
+    /// Subcommands
+    #[command(subcommand)]
+    pub command: Option<Command>,
+    /// Print help
+    #[arg(short = 'h', long, help = "Print help information")]
+    pub help: bool,
+}
+
+/// CLI subcommands
+#[derive(Subcommand, Clone, Debug, PartialEq)]
+/// Available subcommands for the greatsage CLI.
+pub enum Command {
+    /// Show help information
+    Help,
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        crate::cli::{Cli, ContextStrategy},
+        clap::error::ErrorKind,
+        pretty_assertions::assert_eq,
+    };
+
+    #[test]
+    fn defaults_when_no_args() {
+        // Simulate calling the binary with just its name
+        let cli = Cli::try_parse_from(["greatsage"]).expect("should parse defaults");
+        assert_eq!(cli.model, None);
+        assert_eq!(cli.context_strategy, ContextStrategy::Compaction);
+    }
+
+    #[test]
+    fn version_flag_triggers_display() {
+        let result = Cli::try_parse_from(["greatsage", "--version"]);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // Clap returns DisplayVersion when --version is used
+        assert_eq!(err.kind(), ErrorKind::DisplayVersion);
+    }
+
+    #[test]
+    fn provider_flag_parses() {
+        let cli = Cli::try_parse_from(["greatsage", "--provider", "custom"])
+            .expect("parse provider flag");
+        assert_eq!(cli.provider, Some(Provider::Custom));
+        // other defaults remain unchanged
+        assert_eq!(cli.model, None);
+        assert_eq!(cli.context_strategy, ContextStrategy::Compaction);
+    }
+
+    #[test]
+    fn provider_flag_default_none() {
+        let cli = Cli::try_parse_from(["greatsage"]).expect("parse defaults");
+        assert_eq!(cli.provider, None);
+    }
 }

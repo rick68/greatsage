@@ -1,6 +1,6 @@
 use {
     crate::{
-        agents::{AgentsCancelToken, AgentConfig},
+        agents::{AgentConfig, AgentsCancelToken},
         cli::Cli,
         tokio::AppCancelToken,
         tui::TuiMain,
@@ -30,7 +30,7 @@ use {
     bevy_tokio_tasks::TokioTasksRuntime,
     ratatui::{
         style::Stylize,
-        text::{Line, Span},
+        text::{Line, Span, Text},
     },
     std::{
         io::{Write, stdout},
@@ -92,6 +92,7 @@ fn setup(
         base_url,
         model,
         api_key,
+        ..
     } = agent_config.into_inner();
     let cli = cli.into_inner();
 
@@ -168,10 +169,13 @@ fn spawn_agent_task(
                 let world: &mut World = ctx.world;
                 world.remove_resource::<CodingAgentTask>();
 
-                world
-                    .get_resource_mut::<NextState<CodingAgentState>>()
-                    .unwrap()
-                    .set(CodingAgentState::Idle);
+                if let Some(mut next_state) =
+                    world.get_resource_mut::<NextState<CodingAgentState>>()
+                {
+                    next_state.set(CodingAgentState::Idle);
+                } else {
+                    eprintln!("Failed to get NextState<CodingAgentState> resource");
+                }
             })
             .await;
         });
@@ -290,7 +294,9 @@ fn handle_coding_agent_events(
 
                 if tui.is_none() {
                     print!("{delta}");
-                    stdout().flush().unwrap();
+                    if let Err(e) = stdout().flush() {
+                        eprintln!("Failed to flush stdout: {e}");
+                    }
                 } else if let Some(tui) = tui.as_mut() {
                     buf.push_str(delta);
 
@@ -300,10 +306,23 @@ fn handle_coding_agent_events(
                     tui.output.truncate(output_len - 1 - *tui_output_index);
 
                     let mut out = String::new();
-                    skin.write_text_on(unsafe { out.as_mut_vec() }, buf)
-                        .unwrap();
+                    match skin.write_text_on(unsafe { out.as_mut_vec() }, buf) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("Failed to write text on skin: {e}");
+                            // Proceed with empty output
+                        }
+                    }
 
-                    let text = out.into_text().unwrap();
+                    let text = match out.into_text() {
+                        Ok(t) => t,
+                        Err(e) => {
+                            eprintln!("Failed to convert output to text: {e}");
+                            // Return empty text with no lines
+                            ansi_to_tui::IntoText::into_text(&String::new())
+                                .unwrap_or_else(|_| Text::default())
+                        }
+                    };
                     *tui_output_index = text.lines.len();
                     for line in text.lines {
                         tui.output.push(line);

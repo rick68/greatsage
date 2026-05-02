@@ -27,7 +27,13 @@ fn setup_signal_handles(runtime: ResMut<TokioTasksRuntime>, cancel: Res<AppCance
     let cancel = cancel.clone();
     runtime.spawn_background_task(|mut ctx| async move {
         #[cfg(not(target_os = "windows"))]
-        let mut signals = Signals::new(SIGNALS).unwrap();
+        let mut signals = match Signals::new(SIGNALS) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to register signals: {e}");
+                return;
+            }
+        };
 
         loop {
             tokio::select! {
@@ -70,8 +76,7 @@ fn shutdown_tokio_on_exit(
 }
 
 pub fn tokio_plugin(app: &mut App) {
-    app
-        .add_plugins(TokioTasksPlugin::default())
+    app.add_plugins(TokioTasksPlugin::default())
         .init_resource::<AppCancelToken>()
         .add_systems(Startup, setup_signal_handles)
         .add_systems(PostUpdate, shutdown_tokio_on_exit);

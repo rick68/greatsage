@@ -2,6 +2,7 @@ mod coding;
 pub use coding::{CodingAgentPromptChannel, CodingAgentTask, coding_agent_plugin};
 
 use {
+    crate::providers::Provider,
     crate::tokio::AppCancelToken,
     bevy::{
         app::{App, Startup},
@@ -21,6 +22,8 @@ pub struct AgentConfig {
     pub base_url: String,
     pub model: String,
     pub api_key: String,
+    #[allow(dead_code)]
+    pub provider: Option<Provider>,
 }
 
 impl Default for AgentConfig {
@@ -29,6 +32,7 @@ impl Default for AgentConfig {
             base_url: dotenvy::var("BASE_URL").unwrap_or_default(),
             model: dotenvy::var("MODEL").unwrap_or_default(),
             api_key: dotenvy::var("API_KEY").unwrap_or_default(),
+            provider: None,
         }
     }
 }

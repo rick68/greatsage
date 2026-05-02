@@ -2,14 +2,16 @@
 
 mod agents;
 mod cli;
+mod config;
+mod providers;
 mod tokio;
 mod tui;
-mod utils;
+pub mod utils;
 
 use {
     crate::{
-        agents::{CodingAgentPromptChannel, CodingAgentTask, agents_plugin},
-        cli::Cli,
+        agents::{AgentConfig, CodingAgentPromptChannel, CodingAgentTask, agents_plugin},
+        cli::{Cli, Command},
         tokio::tokio_plugin,
         tui::tui_plugin,
     },
@@ -24,34 +26,53 @@ use {
             },
             system::Commands,
         },
+        utils::default,
     },
-    clap::Parser,
+    clap::{CommandFactory, Parser},
+    clap_help::Printer,
     std::{
-        io::{IsTerminal, Read, Stdin, stdin},
+        io::{IsTerminal, Read, stdin},
         time::Duration,
     },
+    termimad::crossterm::style::Color::{DarkYellow, White},
 };
 
 const FRAMES_PER_SECOND: f32 = 30.0;
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
 
-    let args = Cli::parse();
-    let mut prompt_arg = args.prompt.clone();
+    let cli = Cli::parse();
+    // Capture provider flag into AgentConfig for agents to use
+    let agent_config = AgentConfig {
+        provider: cli.provider,
+        ..default()
+    };
+    // Handle explicit help subcommand
+    if cli.help || Some(Command::Help) == cli.command {
+        // Print the help/usage information and exit gracefully.
+        let intro = Cli::command().get_about().unwrap_or_default().to_string();
+        let mut printer = Printer::new(Cli::command()).with("introduction", intro.as_str());
+        let skin = printer.skin_mut();
 
-    {
-        let stdin: Stdin = stdin();
+        skin.headers[0].compound_style.set_fg(DarkYellow);
+        skin.inline_code.set_fg(White);
+        printer.print_help();
 
-        if !stdin.is_terminal() && prompt_arg.is_none() {
-            let mut buf: String = String::new();
-            let _: usize = stdin.lock().read_to_string(&mut buf).unwrap();
-            prompt_arg = Some(buf);
-        }
+        return Ok(());
+    }
+    let mut prompt_arg = cli.prompt.clone();
+
+    if !stdin().is_terminal() && prompt_arg.is_none() {
+        let mut buf = String::new();
+        stdin().lock().read_to_string(&mut buf)?;
+        prompt_arg = Some(buf);
     }
 
     let mut app = App::new();
-    app.insert_resource::<Cli>(args);
+    app.insert_resource::<Cli>(cli.clone());
+    // Insert AgentConfig with provider flag for agents
+    app.insert_resource::<AgentConfig>(agent_config);
     app.add_plugins((
         DefaultPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f32(
             FRAMES_PER_SECOND.recip(),
@@ -61,11 +82,14 @@ fn main() {
     ));
 
     if let Some(prompt) = prompt_arg {
+        // One‑shot prompt mode: send the prompt then exit.
         app.add_systems(
             Update,
             (
                 (move |channel: Res<CodingAgentPromptChannel>| {
-                    channel.sender.send(prompt.clone()).unwrap();
+                    if let Err(e) = channel.sender.send(prompt.clone()) {
+                        eprintln!("Failed to send prompt: {e}");
+                    }
                 })
                 .run_if(run_once),
                 (|mut commands: Commands| {
@@ -81,7 +105,9 @@ fn main() {
         app.add_plugins(tui_plugin);
     }
 
-    if let AppExit::Error(code) = app.run() {
-        () = std::process::exit(code.get() as i32);
+    let exit = app.run();
+    if let AppExit::Error(code) = exit {
+        std::process::exit(code.get() as i32);
     }
+    Ok(())
 }

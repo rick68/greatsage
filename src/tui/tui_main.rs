@@ -20,7 +20,7 @@ use {
     ratatui::{
         Frame,
         layout::{Constraint, Layout, Rect},
-        style::Style,
+        style::{Style, Stylize},
         text::Line,
         widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     },
@@ -179,7 +179,7 @@ fn handle_global_input(
         match code {
             KeyCode::Tab => {
                 let TuiMain { focused, .. } = tui_main.as_mut();
-                let next: TuiMainFocus = focused.next().unwrap();
+                let next: TuiMainFocus = focused.next().unwrap_or(*focused);
                 next_tui_main_focus.set(next);
                 next_tui_main_focus.set(next);
                 **dirty = true;
@@ -260,7 +260,14 @@ fn handle_input_area_input(
                     tui_main.character_index = 0;
                     tui_main.scroll_to_bottom();
 
-                    channel.sender.send(input).unwrap();
+                    if let Err(e) = channel.sender.send(input) {
+                        // If the coding agent is unavailable, display error and exit REPL gracefully
+                        tui_main
+                            .output
+                            .push(Line::from(format!("❌ Failed to send input: {e}")).red());
+                        // Optionally trigger exit to stop the REPL loop
+                        let _: MessageId<AppExit> = exit.write_default();
+                    }
                 }
                 **dirty = true;
             }
@@ -307,7 +314,7 @@ fn draw_scene_system(
 
     if **dirty {
         context.draw(|frame: &mut Frame| {
-             tui.draw(frame);
+            tui.draw(frame);
         })?;
     }
 
@@ -329,4 +336,31 @@ pub fn plugin(app: &mut App) {
                 .chain(),
         )
         .add_systems(Update, draw_scene_system);
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        crossbeam_channel::unbounded,
+        ratatui::{style::Stylize, text::Line},
+    };
+
+    #[test]
+    fn error_handling_displays_message_on_closed_channel() {
+        let mut tui = TuiMain::default();
+        let (sender, receiver) = unbounded::<String>();
+        drop(receiver); // close the channel
+        let input = "test".to_string();
+        if let Err(e) = sender.send(input.clone()) {
+            tui.output
+                .push(Line::from(format!("❌ Failed to send input: {e}")).red());
+        }
+        assert!(!tui.output.is_empty(), "Output should contain error line");
+        let rendered = match tui.output.last() {
+            Some(line) => format!("{}", line),
+            None => String::new(),
+        };
+        assert!(rendered.contains("Failed to send input"));
+    }
 }
