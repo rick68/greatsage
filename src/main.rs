@@ -12,6 +12,8 @@ use {
     crate::{
         agents::{AgentConfig, CodingAgentPromptChannel, CodingAgentTask, agents_plugin},
         cli::{Cli, Command},
+        config::Config,
+        providers::Provider,
         tokio::tokio_plugin,
         tui::tui_plugin,
     },
@@ -43,9 +45,23 @@ fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
 
     let cli = Cli::parse();
-    // Capture provider flag into AgentConfig for agents to use
+    // Load configuration file (default to $HOME/.greatsage.toml if not provided)
+    let config_path = cli.config.clone().or_else(|| {
+        std::env::var("HOME")
+            .ok()
+            .map(|h| std::path::PathBuf::from(h).join(".greatsage.toml"))
+    });
+    let config = match config_path {
+        Some(ref p) => Config::load(p)
+            .map_err(|e| anyhow::anyhow!("Failed to load config file {}: {e}", p.display()))?,
+        None => Config::default(),
+    };
+    // Capture provider flag into AgentConfig for agents to use (override config if CLI flag set)
     let agent_config = AgentConfig {
-        provider: cli.provider,
+        provider: cli
+            .provider
+            .or(config.provider)
+            .or(Some(Provider::Anthropic)),
         ..default()
     };
     // Handle explicit help subcommand

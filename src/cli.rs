@@ -38,6 +38,9 @@ pub struct Cli {
     /// Directory containing skill files
     #[arg(long, value_name = "dir")]
     pub skills: Option<Vec<PathBuf>>,
+    /// Optional configuration file path (default: $HOME/.greatsage.toml)
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
     /// Context management: compaction or checkpoint
     #[arg(long, value_name = "s", default_value = "compaction")]
     pub context_strategy: ContextStrategy,
@@ -62,6 +65,7 @@ mod tests {
     use {
         super::*,
         crate::cli::{Cli, ContextStrategy},
+        crate::providers::Provider,
         clap::error::ErrorKind,
         pretty_assertions::assert_eq,
     };
@@ -94,8 +98,13 @@ mod tests {
     }
 
     #[test]
-    fn provider_flag_default_none() {
-        let cli = Cli::try_parse_from(["greatsage"]).expect("parse defaults");
+    fn default_provider_when_omitted() {
+        // No provider flag supplied
+        let cli = Cli::try_parse_from(["greatsage"]).expect("should parse defaults");
+        // Direct cli.provider should be None
         assert_eq!(cli.provider, None);
+        // After applying default logic, should be Anthropic
+        let provider = cli.provider.unwrap_or(Provider::Anthropic);
+        assert_eq!(provider, Provider::Anthropic);
     }
 }

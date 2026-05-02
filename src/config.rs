@@ -1,4 +1,4 @@
-use {std::path::Path, log::warn, serde::Deserialize};
+use {anyhow::Result, log::warn, serde::Deserialize, std::path::Path};
 
 #[derive(Debug, Default, Deserialize)]
 #[allow(dead_code)]
@@ -10,19 +10,22 @@ pub struct Config {
 #[allow(dead_code)]
 impl Config {
     #[allow(dead_code)]
-    pub fn load(path: &Path) -> Self {
+    pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             warn!("Config file not found: {}", path.display());
-            return Self::default();
+            return Ok(Self::default());
         }
         let content = std::fs::read_to_string(path).unwrap_or_else(|e| {
             warn!("Failed to read config file {}: {}", path.display(), e);
             String::new()
         });
-        toml::from_str(&content).unwrap_or_else(|e| {
-            warn!("Failed to parse config file {}: {}", path.display(), e);
-            Self::default()
-        })
+        match toml::from_str(&content) {
+            Ok(cfg) => Ok(cfg),
+            Err(e) => {
+                warn!("Failed to parse config file {}: {}", path.display(), e);
+                Ok(Self::default())
+            }
+        }
     }
 }
 
@@ -38,7 +41,7 @@ mod tests {
         if path.exists() {
             fs::remove_file(&path).unwrap();
         }
-        let cfg = Config::load(&path);
+        let cfg = Config::load(&path).expect("load should succeed with default");
         assert!(cfg.provider.is_none());
     }
 }
