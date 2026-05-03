@@ -32,11 +32,11 @@ Trigger this skill when ANY of these hold:
 ### 1. Frame the question (single sentence)
 
 Examples of well-framed questions:
-- *"Why does the evaluator phase fail with 'AnthropicError: rate_limit_exceeded' on sessions day-53, day-55, and day-56?"*
+- *"Why does the evaluator phase fail with 'AnthropicError: rate_limit_exceeded' on sessions iteration-53, iteration-55, and iteration-56?"*
 - *"Why was the task 'Add /fallback flag' reverted on 6 separate sessions? What's the recurring blocker?"*
 - *"What does run 4321 look like at the moment of failure?"*
 
-A good question names a specific event (run id, session day, error fingerprint) and what you want to know about it. Don't ask vague questions like *"what's wrong with my trajectory?"*
+A good question names a specific event (run id, session iteration, error fingerprint) and what you want to know about it. Don't ask vague questions like *"what's wrong with my trajectory?"*
 
 ### 2. Identify the artifact
 

@@ -64,7 +64,7 @@ If you find yourself wanting to do two things, pick the one with the strongest e
 
 ## Glossary
 
-- **session** — one run of `scripts/evolve.sh` (the main evolution loop). There are ~3 per day.
+- **session** — one run of `scripts/evolve.sh` (the main evolution loop). There are ~3 per iteration.
 - **cycle** — one run of *this* skill, invoked from `scripts/skill_evolve.sh`. Cycles are gated by a session-counter and a 24h cooldown, so they fire roughly once every 5+ sessions.
 - **real cycle** — a cycle that produced one of `refine | create | retire | meta-suggestion`. Excludes `init`, `refused`, and `NO-OP`.
 
@@ -156,7 +156,7 @@ This step has two layers: **counting** (the basic signals) and **diagnosing** (u
 For each eligible skill, count:
 
 - **Complaint signals**: entries in `memory/learnings.jsonl` whose `pattern_key` or `title`/`takeaway` mentions the skill *and* uses negative language ("wrong", "didn't", "instead", "should have").
-- **Failure signals**: tool-call failures in `${GREATSAGE_AUDIT_DIR}/day-*/audit.jsonl` where the bash command or args reference the skill's domain.
+- **Failure signals**: tool-call failures in `${GREATSAGE_AUDIT_DIR}/iteration-*/audit.jsonl` where the bash command or args reference the skill's domain.
 - **Use signals**: number of sessions where any string from the skill's frontmatter `keywords:` list appears in that session's `audit.jsonl`. This is `uses`.
 - **Win signals**: out of those sessions, count the ones where `outcome.json` has `test_ok: true` AND `tasks_succeeded >= 1`. This is `wins`.
 
@@ -190,7 +190,7 @@ For each candidate refinement target, write a **1-2 sentence cause hypothesis**:
 ```
 target: social
 hypothesis: 3 sessions show repeated `gh api graphql` calls with malformed `categoryId`
-            args (sessions day-52, day-55, day-57). Skill's Procedure mentions categoryId
+            args (sessions itreation-52, iteration-55, iteration-57). Skill's Procedure mentions categoryId
             but doesn't show the format. Refinement: add a verbatim example.
 ```
 
@@ -413,7 +413,7 @@ Before any `create` action, verify all of these:
 
 ## What good looks like
 
-A healthy `skills/_journal.md` after 30 days:
+A healthy `skills/_journal.md` after 30 iterations:
 
 - 4–10 events total (you don't run every session, and most cycles are NO-OP)
 - Mix of refine (~50%), create (~10%), retire (~10%), NO-OP (~30%)

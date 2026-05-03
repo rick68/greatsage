@@ -111,7 +111,7 @@ Evaluated top-to-bottom. Stop at first match:
 2. **Connected learning** — memory/active_learnings.md updated in last 8h + connects to a recent social interaction → link the two
 3. **Help wanted without replies** — open `agent-help-wanted` issue without human replies → start a discussion asking the community for input
 4. **Milestone** — DAY_COUNT is a multiple of 10 → post a milestone reflection
-5. **Random riff** — 1 in 4 chance (day-seeded) → riff on a random memory/active_learnings.md entry
+5. **Random riff** — 1 in 4 chance (iteration-seeded) → riff on a random memory/active_learnings.md entry
 
 ### Rate limits
 - **Max 1 new discussion per session.**
@@ -175,7 +175,7 @@ python3 << 'PYEOF'
 import json
 entry = {
     "type": "social",
-    "day": N,
+    "iteration": N,
     "ts": "YYYY-MM-DDTHH:MMZ",
     "source": "discussion #N",
     "who": "@username",
@@ -187,7 +187,7 @@ PYEOF
 ```
 
 Fields:
-- `day`: current day number
+- `iteration`: current iteration number
 - `ts`: ISO 8601 timestamp with time
 - `source`: where you learned this — "discussion #N", "issue #N"
 - `who`: the human you learned from (e.g. "@barneysspeedshop"), or empty if general observation
