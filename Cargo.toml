@@ -39,7 +39,7 @@ edition = "2024"
 keywords = []
 license = "MIT OR Apache-2.0"
 name = "greatsage"
-version = "0.0.1"
+version = "0.0.2"
 
 [profile.dev.package.backtrace]
 opt-level = 3
