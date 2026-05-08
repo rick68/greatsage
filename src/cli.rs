@@ -1,6 +1,6 @@
 use {
     bevy::ecs::resource::Resource,
-    clap::{CommandFactory, Parser},
+    clap::{ArgAction, CommandFactory, Parser},
     clap_help::Printer,
     std::path::PathBuf,
 };
@@ -24,8 +24,8 @@ pub struct Cli {
     /// Custom API endpoint (e.g., http://localhost:11434/v1)
     #[arg(long, value_name = "url", env = "BASE_URL")]
     pub base_url: Option<String>,
-    /// Directory containing skill files
-    #[arg(long, value_name = "dir")]
+    /// Directory containing skill files (repeatable)
+    #[arg(long, value_name = "dir", action = ArgAction::Append)]
     pub skills: Option<Vec<PathBuf>>,
     /// Run a single prompt and exit (no REPL)
     #[arg(short, long, value_name = "t")]
