@@ -1,7 +1,7 @@
 use {
     crate::{
         agents::{AgentConfig, AgentsCancelToken},
-        config::Config,
+        config::{Config, McpConfig},
         repl::show_prompt_symbol,
         tokio::AppCancelToken,
         utils::truncate,
@@ -51,13 +51,14 @@ After making changes, run tests or verify the result when appropriate."#;
 #[derive(Clone, Deref, DerefMut, Resource)]
 pub struct CodingAgent(Arc<Mutex<Agent>>);
 
-impl From<&AgentConfig> for CodingAgent {
-    fn from(agent_config: &AgentConfig) -> Self {
+impl CodingAgent {
+    pub async fn new_with_agent_config(agent_config: &AgentConfig) -> Self {
         let AgentConfig {
             base_url,
             model,
             skills,
             api_key,
+            mcp,
             ..
         } = agent_config;
 
@@ -71,6 +72,37 @@ impl From<&AgentConfig> for CodingAgent {
 
         if !skills.is_empty() {
             agent = agent.with_skills(skills.clone());
+        }
+
+        if !mcp.is_empty() {
+            for transport in mcp {
+                agent = match transport {
+                    McpConfig::SseTransports(url) => agent
+                        .with_mcp_server_http(url.as_str())
+                        .await
+                        .expect("Failed to connect to MCP server"),
+                    McpConfig::StdioTransports(cmd) => {
+                        if let Ok(args) = shell_words::split(cmd.as_str())
+                            && !args.is_empty()
+                        {
+                            let (command, args) = args.split_at(1);
+                            agent
+                                .with_mcp_server_stdio(
+                                    &command[0],
+                                    args.iter()
+                                        .map(String::as_str)
+                                        .collect::<Vec<&str>>()
+                                        .as_slice(),
+                                    None,
+                                )
+                                .await
+                                .expect("Failed to connect to MCP server")
+                        } else {
+                            agent
+                        }
+                    }
+                };
+            }
         }
 
         CodingAgent(Arc::new(Mutex::new(agent)))
@@ -115,15 +147,23 @@ fn print_banner() {
 
 fn setup(
     config: Res<Config>,
+    tokio_runtime: ResMut<TokioTasksRuntime>,
     mut commands: Commands,
     app_cancel: Res<AppCancelToken>,
     agents_cancel: Res<AgentsCancelToken>,
-    tokio_runtime: ResMut<TokioTasksRuntime>,
 ) {
-    let agent_config = AgentConfig::from(config.into_inner());
-    let coding_agent = CodingAgent::from(&agent_config);
+    let config = config.clone();
+    let agent_config = AgentConfig::from(&config);
 
-    commands.insert_resource::<CodingAgent>(coding_agent);
+    tokio_runtime.spawn_background_task(move |mut ctx| async move {
+        let agent_config = AgentConfig::from(&config);
+        let coding_agent = CodingAgent::new_with_agent_config(&agent_config).await;
+        ctx.run_on_main_thread(move |ctx| {
+            ctx.world.insert_resource::<CodingAgent>(coding_agent);
+        })
+        .await;
+    });
+
     commands.init_resource::<CodingAgentPromptChannel>();
 
     let app_cancel = app_cancel.clone();
@@ -149,6 +189,14 @@ fn setup(
         if !agent_config.skills.is_empty() {
             let _ = lock.write(
                 format!("  skills: {} loaded\r\n", agent_config.skills.len())
+                    .dimmed()
+                    .to_string()
+                    .as_bytes(),
+            );
+        }
+        if !agent_config.mcp.is_empty() {
+            let _ = lock.write(
+                format!("  mcp: {} server(s) connected\r\n", agent_config.mcp.len())
                     .dimmed()
                     .to_string()
                     .as_bytes(),
@@ -183,16 +231,18 @@ pub struct CodingAgentTask {
 pub struct CodingAgentEvent(AgentEvent);
 
 fn spawn_agent_task(
+    coding_agent: Option<ResMut<CodingAgent>>,
     channel: Res<CodingAgentPromptChannel>,
-    runtime: ResMut<TokioTasksRuntime>,
-    coding_agent: ResMut<CodingAgent>,
+    tokio_runtime: ResMut<TokioTasksRuntime>,
     mut commands: Commands,
     mut next_state: ResMut<NextState<CodingAgentState>>,
 ) {
-    if let Ok(prompt) = channel.receiver.try_recv() {
+    if let Some(coding_agent) = coding_agent
+        && let Ok(prompt) = channel.receiver.try_recv()
+    {
         let coding_agent = coding_agent.clone();
 
-        runtime.spawn_background_task(move |mut ctx| async move {
+        tokio_runtime.spawn_background_task(move |mut ctx| async move {
             let mut rx = coding_agent.lock().await.prompt(prompt.clone()).await;
 
             while let Some(event) = rx.recv().await {
@@ -250,7 +300,6 @@ fn handle_coding_agent_events(
                 tool_name, args, ..
             } => {
                 if *in_text {
-                    println!();
                     *in_text = false;
                 }
                 let summary = match tool_name.as_str() {
