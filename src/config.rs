@@ -6,12 +6,30 @@ use {
         prelude::Deref,
     },
     config::builder::DefaultState,
+    serde::{Deserialize, Serialize},
+    serde_json::json,
     std::{fs, path::PathBuf},
     toml_edit::{DocumentMut, Value},
     url::Url,
 };
 
-#[derive(Deref, Resource)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum McpConfig {
+    SseTransports(Url),
+    StdioTransports(String),
+}
+
+impl From<String> for McpConfig {
+    fn from(value: String) -> Self {
+        if let Ok(url) = Url::parse(&value) {
+            McpConfig::SseTransports(url)
+        } else {
+            McpConfig::StdioTransports(value)
+        }
+    }
+}
+
+#[derive(Clone, Deref, Resource)]
 pub struct Config(config::Config);
 
 impl Config {
@@ -95,6 +113,13 @@ impl From<&Cli> for Config {
                 .unwrap_or(config_builder);
         }
 
+        if let Some(mcp) = &cli.mcp {
+            config_builder = config_builder
+                .clone()
+                .set_override("mcp", json!(mcp).to_string())
+                .unwrap_or(config_builder);
+        };
+
         Config(config_builder.build().unwrap_or_default())
     }
 }
@@ -152,6 +177,16 @@ impl Config {
         {
             doc["api_key"] = toml_edit::Item::Value(api_key.into());
             let _ = fs::write(Self::get_config_file(), doc.to_string());
+        }
+    }
+
+    pub fn get_mcp(&self) -> Vec<McpConfig> {
+        if let Ok(serialized) = self.get_string("mcp")
+            && let Ok(mcp) = serde_json::from_str(serialized.as_str())
+        {
+            mcp
+        } else {
+            vec![]
         }
     }
 }

@@ -1,4 +1,5 @@
 use {
+    crate::config::McpConfig,
     bevy::ecs::resource::Resource,
     clap::{ArgAction, CommandFactory, Parser},
     clap_help::Printer,
@@ -34,6 +35,9 @@ pub struct Cli {
     ///  API key (overrides provider-specific env var)
     #[arg(long, value_name = "key", env = "API_KEY")]
     pub api_key: Option<String>,
+    /// MCP server to connect: HTTP URL or stdio command (repeatable)
+    #[arg(long, value_name = "server", action = ArgAction::Append)]
+    pub mcp: Option<Vec<McpConfig>>,
     /// Print help
     #[arg(long)]
     pub help: bool,

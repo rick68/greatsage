@@ -2,7 +2,10 @@ mod coding;
 pub use coding::{CodingAgent, CodingAgentPromptChannel, CodingAgentTask, coding_agent_plugin};
 
 use {
-    crate::{config::Config, tokio::AppCancelToken},
+    crate::{
+        config::{Config, McpConfig},
+        tokio::AppCancelToken,
+    },
     bevy::{
         app::{App, Startup},
         ecs::{
@@ -18,12 +21,13 @@ use {
     yoagent::SkillSet,
 };
 
-#[derive(Debug, Resource)]
+#[derive(Clone, Debug, Resource)]
 pub struct AgentConfig {
     pub model: String,
     pub base_url: String,
     pub skills: SkillSet,
     pub api_key: String,
+    pub mcp: Vec<McpConfig>,
 }
 
 impl From<&Config> for AgentConfig {
@@ -32,12 +36,14 @@ impl From<&Config> for AgentConfig {
         let base_url = config.get_base_url().unwrap_or_default();
         let skills = SkillSet::load(config.get_skills().as_slice()).expect("Failed to load skills");
         let api_key = config.get_api_key().unwrap_or_default();
+        let mcp = config.get_mcp();
 
         AgentConfig {
             model,
             base_url,
             skills,
             api_key,
+            mcp,
         }
     }
 }
