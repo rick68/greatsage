@@ -105,6 +105,7 @@ pub(crate) fn show_prompt_symbol() {
     let _ = lock.flush();
 }
 
+#[allow(clippy::too_many_arguments)]
 fn read_stdin_stream(
     mut messages: MessageReader<StdinKeyMessage>,
     mut cursor: Local<usize>,
@@ -113,6 +114,7 @@ fn read_stdin_stream(
     mut commands: Commands,
     prompt_channel: Res<CodingAgentPromptChannel>,
     mut agent_config: ResMut<AgentConfig>,
+    tokio_runtime: ResMut<TokioTasksRuntime>,
 ) {
     for StdinKeyMessage(KeyEvent {
         code,
@@ -230,15 +232,34 @@ fn read_stdin_stream(
                             return;
                         }
                         "/clear" => {
-                            commands.insert_resource(CodingAgent::from(agent_config.as_ref()));
+                            let agent_config = agent_config.clone();
+                            tokio_runtime.spawn_background_task(|mut ctx| async move {
+                                let coding_agent =
+                                    CodingAgent::new_with_agent_config(&agent_config).await;
+                                ctx.run_on_main_thread(|ctx| {
+                                    ctx.world.insert_resource(coding_agent);
+                                })
+                                .await;
+                            });
                         }
                         s if s.starts_with("/model ") => {
+                            let agent_config = agent_config.as_mut();
                             let new_model = s.trim_start_matches("/model ").trim();
                             if new_model.is_empty() {
                                 continue;
                             }
                             agent_config.model = new_model.to_string();
-                            commands.insert_resource(CodingAgent::from(agent_config.as_ref()));
+
+                            let agent_config = agent_config.clone();
+
+                            tokio_runtime.spawn_background_task(|mut ctx| async move {
+                                let coding_agent =
+                                    CodingAgent::new_with_agent_config(&agent_config).await;
+                                ctx.run_on_main_thread(|ctx| {
+                                    ctx.world.insert_resource(coding_agent);
+                                })
+                                .await;
+                            });
                         }
                         _ => continue,
                     }
