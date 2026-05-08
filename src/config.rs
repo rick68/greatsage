@@ -8,6 +8,7 @@ use {
     config::builder::DefaultState,
     std::{fs, path::PathBuf},
     toml_edit::{DocumentMut, Value},
+    url::Url,
 };
 
 #[derive(Deref, Resource)]
@@ -65,7 +66,7 @@ impl From<&Cli> for Config {
         if let Some(base_url) = &cli.base_url {
             config_builder = config_builder
                 .clone()
-                .set_override("base_url", base_url.clone())
+                .set_override("base_url", base_url.as_str())
                 .unwrap_or(config_builder);
         };
 

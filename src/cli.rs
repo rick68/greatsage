@@ -3,6 +3,7 @@ use {
     clap::{ArgAction, CommandFactory, Parser},
     clap_help::Printer,
     std::path::PathBuf,
+    url::Url,
 };
 
 #[derive(Clone, Debug, Parser, Resource)]
@@ -23,7 +24,7 @@ pub struct Cli {
     pub model: Option<String>,
     /// Custom API endpoint (e.g., http://localhost:11434/v1)
     #[arg(long, value_name = "url", env = "BASE_URL")]
-    pub base_url: Option<String>,
+    pub base_url: Option<Url>,
     /// Directory containing skill files (repeatable)
     #[arg(long, value_name = "dir", action = ArgAction::Append)]
     pub skills: Option<Vec<PathBuf>>,
