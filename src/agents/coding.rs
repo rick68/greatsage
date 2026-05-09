@@ -62,7 +62,7 @@ impl CodingAgent {
             ..
         } = agent_config;
 
-        let model_config = ModelConfig::local(base_url, model.clone());
+        let model_config = ModelConfig::local(base_url, model);
         let mut agent = Agent::new(OpenAiCompatProvider)
             .with_model_config(model_config)
             .with_system_prompt(SYSTEM_PROMPT)
