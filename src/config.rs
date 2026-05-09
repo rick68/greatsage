@@ -29,7 +29,7 @@ impl From<String> for McpConfig {
     }
 }
 
-#[derive(Clone, Deref, Resource)]
+#[derive(Clone, Debug, Deref, Resource)]
 pub struct Config(config::Config);
 
 impl Config {
@@ -181,10 +181,12 @@ impl Config {
     }
 
     pub fn get_mcp(&self) -> Vec<McpConfig> {
-        if let Ok(serialized) = self.get_string("mcp")
-            && let Ok(mcp) = serde_json::from_str(serialized.as_str())
-        {
-            mcp
+        if let Ok(array) = self.get_array("mcp") {
+            array.into_iter()
+                .map(|v| v.into_string().unwrap_or_default())
+                .filter(|s| !s.is_empty())
+                .map(McpConfig::from)
+                .collect::<Vec<McpConfig>>()
         } else {
             vec![]
         }
