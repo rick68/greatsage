@@ -101,11 +101,30 @@ impl From<&Cli> for Config {
                 .unwrap_or(config_builder);
         };
 
-        if let Some(system_prompt) = &cli.system {
-            config_builder = config_builder
-                .clone()
-                .set_override("system_prompt", system_prompt.to_string())
-                .unwrap_or(config_builder);
+        match (&cli.system, &cli.system_file) {
+            (Some(system_prompt), None) => {
+                config_builder = config_builder
+                    .clone()
+                    .set_override("system_prompt", system_prompt.clone())
+                    .unwrap_or(config_builder);
+            }
+            (system_prompt, Some(system_prompt_file)) => {
+                let system_prompt = {
+                    if fs::exists(system_prompt_file).unwrap_or_default()
+                        && let Ok(system_prompt) = fs::read_to_string(system_prompt_file)
+                    {
+                        system_prompt
+                    } else {
+                        system_prompt.clone().unwrap_or(String::from(SYSTEM_PROMPT))
+                    }
+                };
+
+                config_builder = config_builder
+                    .clone()
+                    .set_override("system_prompt", system_prompt)
+                    .unwrap_or(config_builder);
+            }
+            _ => (),
         }
 
         if let Some(api_key) = &cli.api_key {

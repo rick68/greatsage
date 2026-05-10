@@ -32,6 +32,9 @@ pub struct Cli {
     /// Custom system prompt (overrides default)
     #[arg(long, value_name = "text")]
     pub system: Option<String>,
+    /// Read system prompt from file
+    #[arg(long, value_name = "f")]
+    pub system_file: Option<PathBuf>,
     /// Run a single prompt and exit (no REPL)
     #[arg(short, long, value_name = "t")]
     pub prompt: Option<String>,
