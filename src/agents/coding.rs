@@ -42,7 +42,7 @@ use {
     },
 };
 
-const SYSTEM_PROMPT: &str = r#"You are a coding assistant working in the user's terminal.
+pub const SYSTEM_PROMPT: &str = r#"You are a coding assistant working in the user's terminal.
 You have access to the filesystem and shell. Be direct and concise.
 When the user asks you to do something, do it — don't just explain how.
 Use tools proactively: read files to understand context, run commands to verify your work.
@@ -57,6 +57,7 @@ impl CodingAgent {
             base_url,
             model,
             skills,
+            system_prompt,
             api_key,
             mcp,
             ..
@@ -65,7 +66,7 @@ impl CodingAgent {
         let model_config = ModelConfig::local(base_url, model);
         let mut agent = Agent::new(OpenAiCompatProvider)
             .with_model_config(model_config)
-            .with_system_prompt(SYSTEM_PROMPT)
+            .with_system_prompt(system_prompt)
             .with_model(model)
             .with_api_key(api_key)
             .with_tools(default_tools());

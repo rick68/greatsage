@@ -1,5 +1,7 @@
 mod coding;
-pub use coding::{CodingAgent, CodingAgentPromptChannel, CodingAgentTask, coding_agent_plugin};
+pub use coding::{
+    CodingAgent, CodingAgentPromptChannel, CodingAgentTask, SYSTEM_PROMPT, coding_agent_plugin,
+};
 
 use {
     crate::{
@@ -26,6 +28,7 @@ pub struct AgentConfig {
     pub model: String,
     pub base_url: String,
     pub skills: SkillSet,
+    pub system_prompt: String,
     pub api_key: String,
     pub mcp: Vec<McpConfig>,
 }
@@ -35,6 +38,7 @@ impl From<&Config> for AgentConfig {
         let model = config.get_model().unwrap_or_default();
         let base_url = config.get_base_url().unwrap_or_default();
         let skills = SkillSet::load(config.get_skills().as_slice()).expect("Failed to load skills");
+        let system_prompt = config.get_system_prompt();
         let api_key = config.get_api_key().unwrap_or_default();
         let mcp = config.get_mcp();
 
@@ -42,6 +46,7 @@ impl From<&Config> for AgentConfig {
             model,
             base_url,
             skills,
+            system_prompt,
             api_key,
             mcp,
         }

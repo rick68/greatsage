@@ -1,5 +1,5 @@
 use {
-    crate::Cli,
+    crate::{Cli, agents::SYSTEM_PROMPT},
     bevy::{
         app::{App, PreStartup},
         ecs::{change_detection::Res, resource::Resource, system::Commands},
@@ -101,6 +101,13 @@ impl From<&Cli> for Config {
                 .unwrap_or(config_builder);
         };
 
+        if let Some(system_prompt) = &cli.system {
+            config_builder = config_builder
+                .clone()
+                .set_override("system_prompt", system_prompt.to_string())
+                .unwrap_or(config_builder);
+        }
+
         if let Some(api_key) = &cli.api_key {
             config_builder = config_builder
                 .clone()
@@ -166,6 +173,11 @@ impl Config {
             .unwrap_or_default()
     }
 
+    pub fn get_system_prompt(&self) -> String {
+        self.get_string("system_prompt")
+            .unwrap_or(String::from(SYSTEM_PROMPT))
+    }
+
     pub fn get_api_key(&self) -> Option<String> {
         self.get_string("api_key").ok()
     }
@@ -182,7 +194,8 @@ impl Config {
 
     pub fn get_mcp(&self) -> Vec<McpConfig> {
         if let Ok(array) = self.get_array("mcp") {
-            array.into_iter()
+            array
+                .into_iter()
                 .map(|v| v.into_string().unwrap_or_default())
                 .filter(|s| !s.is_empty())
                 .map(McpConfig::from)

@@ -29,6 +29,9 @@ pub struct Cli {
     /// Directory containing skill files (repeatable)
     #[arg(long, value_name = "dir", action = ArgAction::Append)]
     pub skills: Option<Vec<PathBuf>>,
+    /// Custom system prompt (overrides default)
+    #[arg(long, value_name = "text")]
+    pub system: Option<String>,
     /// Run a single prompt and exit (no REPL)
     #[arg(short, long, value_name = "t")]
     pub prompt: Option<String>,
