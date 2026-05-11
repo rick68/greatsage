@@ -1,3 +1,11 @@
+#[cfg(not(target_os = "windows"))]
+use {
+    bevy::tasks::futures_lite::StreamExt,
+    bevy_ratatui::crossterm::{self, execute, terminal::LeaveAlternateScreen},
+    signal_hook::consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM},
+    signal_hook_tokio::Signals,
+    std::io::{self, IsTerminal},
+};
 use {
     bevy::{
         app::{App, AppExit, PostUpdate, Startup},
@@ -7,19 +15,13 @@ use {
             resource::Resource,
         },
         prelude::Deref,
-        tasks::futures_lite::StreamExt,
     },
-    bevy_ratatui::crossterm::{self, execute, terminal::LeaveAlternateScreen},
     bevy_tokio_tasks::{TokioTasksPlugin, TokioTasksRuntime},
-    signal_hook::consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM},
-    signal_hook_tokio::Signals,
-    std::{
-        io::{self, IsTerminal},
-        sync::Arc,
-    },
+    std::sync::Arc,
     tokio_util::sync::CancellationToken,
 };
 
+#[cfg(not(target_os = "windows"))]
 const SIGNALS: &[i32] = &[SIGHUP, SIGINT, SIGQUIT, SIGTERM];
 
 #[derive(Default, Deref, Resource)]
@@ -27,24 +29,36 @@ pub struct AppCancelToken(Arc<CancellationToken>);
 
 fn setup_signal_handles(runtime: ResMut<TokioTasksRuntime>, cancel: Res<AppCancelToken>) {
     let cancel = cancel.clone();
+    #[allow(unused_mut, unused_variables)]
     runtime.spawn_background_task(|mut ctx| async move {
         #[cfg(not(target_os = "windows"))]
-        let mut signals = Signals::new(SIGNALS).unwrap();
+        {
+            let mut signals = Signals::new(SIGNALS).unwrap();
 
-        loop {
-            tokio::select! {
-                Some(_signal) = signals.next(), if cfg!(not(target_os = "windows")) => {
-                    () = ctx.run_on_main_thread(|ctx| {
-                        let world = ctx.world;
-                        if io::stdout().is_terminal() {
-                            let _ = crossterm::terminal::disable_raw_mode();
-                            let _ = execute!(io::stdout(), LeaveAlternateScreen);
-                        }
-                        world.write_message_default::<AppExit>();
-                    }).await;
+            loop {
+                tokio::select! {
+                    Some(_signal) = signals.next(), if cfg!(not(target_os = "windows")) => {
+                        () = ctx.run_on_main_thread(|ctx| {
+                            let world = ctx.world;
+                            if io::stdout().is_terminal() {
+                                let _ = crossterm::terminal::disable_raw_mode();
+                                let _ = execute!(io::stdout(), LeaveAlternateScreen);
+                            }
+                            world.write_message_default::<AppExit>();
+                        }).await;
+                    }
+                    _ = cancel.cancelled() => break,
+                    else => unreachable!(),
                 }
-                _ = cancel.cancelled() => break,
-                else => unreachable!(),
+            }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    else => unreachable!(),
+                }
             }
         }
     });
