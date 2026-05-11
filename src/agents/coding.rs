@@ -272,16 +272,16 @@ fn spawn_agent_task(
     }
 }
 
-fn print_usage(usage: &Usage) {
-    if usage.input > 0 || usage.output > 0 {
-        println!(
-            "{}",
-            format!(
-                "\r\n\r\n  tokens: {} in / {} out",
-                usage.input, usage.output
-            )
-            .dimmed()
+fn print_usage(Usage { input, output, .. }: &Usage) {
+    if *input > 0 || *output > 0 {
+        let mut lock = io::stdout().lock();
+        let _ = lock.write(
+            format!("\r\n\r\n  tokens: {input} in / {output} out\r\n")
+                .dimmed()
+                .to_string()
+                .as_bytes(),
         );
+        let _ = lock.flush();
     }
 }
 
