@@ -226,7 +226,7 @@ impl Config {
 }
 
 fn setup(mut commands: Commands, cli: Res<Cli>) {
-    commands.insert_resource(Config::from(cli.into_inner()))
+    commands.insert_resource(Config::from(cli.into_inner()));
 }
 
 pub(crate) fn config_plugin(app: &mut App) {
