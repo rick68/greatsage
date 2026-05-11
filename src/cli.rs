@@ -44,6 +44,9 @@ pub struct Cli {
     /// MCP server to connect: HTTP URL or stdio command (repeatable)
     #[arg(long, value_name = "server", action = ArgAction::Append)]
     pub mcp: Option<Vec<McpConfig>>,
+    /// Print the fully assembled system prompt and exit
+    #[arg(long)]
+    pub print_system_prompt: bool,
     /// Print help
     #[arg(long)]
     pub help: bool,

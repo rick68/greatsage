@@ -5,7 +5,6 @@ mod repl;
 mod tokio;
 mod utils;
 
-use bevy_ratatui::crossterm;
 use {
     crate::{
         agents::{CodingAgentPromptChannel, CodingAgentTask, agents_plugin},
@@ -26,6 +25,7 @@ use {
             system::Commands,
         },
     },
+    bevy_ratatui::crossterm,
     colored::Colorize,
     std::{
         io::{self, IsTerminal, Read, Write},
@@ -87,8 +87,10 @@ fn main() {
         () = std::process::exit(code.get() as i32);
     }
 
-    let mut lock = io::stdout();
-    let _ = lock.write("\r\n  bye 👋\r\n\r\n".dimmed().as_bytes());
-    let _ = lock.flush();
+    if !cli.print_system_prompt {
+        let mut lock = io::stdout();
+        let _ = lock.write("\r\n  bye 👋\r\n\r\n".dimmed().as_bytes());
+        let _ = lock.flush();
+    }
     let _ = crossterm::terminal::disable_raw_mode();
 }

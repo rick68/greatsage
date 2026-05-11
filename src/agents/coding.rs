@@ -1,6 +1,7 @@
 use {
     crate::{
         agents::{AgentConfig, AgentsCancelToken},
+        cli::Cli,
         config::{Config, McpConfig},
         repl::show_prompt_symbol,
         tokio::AppCancelToken,
@@ -46,7 +47,8 @@ pub const SYSTEM_PROMPT: &str = r#"You are a coding assistant working in the use
 You have access to the filesystem and shell. Be direct and concise.
 When the user asks you to do something, do it — don't just explain how.
 Use tools proactively: read files to understand context, run commands to verify your work.
-After making changes, run tests or verify the result when appropriate."#;
+After making changes, run tests or verify the result when appropriate.
+"#;
 
 #[derive(Clone, Deref, DerefMut, Resource)]
 pub struct CodingAgent(Arc<Mutex<Agent>>);
@@ -152,6 +154,7 @@ fn setup(
     mut commands: Commands,
     app_cancel: Res<AppCancelToken>,
     agents_cancel: Res<AgentsCancelToken>,
+    cli: Res<Cli>,
 ) {
     let config = config.clone();
     let agent_config = AgentConfig::from(&config);
@@ -211,7 +214,9 @@ fn setup(
                     .as_bytes(),
             );
         }
-        show_prompt_symbol();
+        if !cli.print_system_prompt {
+            show_prompt_symbol();
+        }
     }
 }
 

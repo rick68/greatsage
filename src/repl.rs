@@ -1,6 +1,8 @@
 use {
     crate::{
         agents::{AgentConfig, CodingAgent, CodingAgentPromptChannel, CodingAgentTask},
+        cli::Cli,
+        config::Config,
         tokio::AppCancelToken,
     },
     bevy::{
@@ -72,6 +74,20 @@ fn forward_stdin_input_to_messsage(
     while let Ok(key) = stdin_keys.try_recv() {
         messages.write(StdinKeyMessage(key));
     }
+}
+
+fn print_system_prompt(config: Res<Config>, mut exit: MessageWriter<AppExit>) {
+    let system_prompt = config
+        .get_system_prompt()
+        .trim_end_matches(&[' ', '\t', '\n'])
+        .replace("\n", "\r\n");
+    {
+        let mut lock = io::stdout().lock();
+        let _ = lock.write(system_prompt.as_bytes());
+        let _ = lock.write(b"\r\n");
+        let _ = lock.flush();
+    }
+    exit.write_default();
 }
 
 fn ctrl_c(
@@ -288,7 +304,13 @@ fn read_stdin_stream(
 pub(crate) fn repl_plugin(app: &mut App) {
     app.add_message::<StdinKeyMessage>()
         .add_systems(Startup, setup)
-        .add_systems(PreUpdate, forward_stdin_input_to_messsage)
+        .add_systems(
+            PreUpdate,
+            (
+                forward_stdin_input_to_messsage,
+                print_system_prompt.run_if(|cli: Res<Cli>| cli.print_system_prompt),
+            ),
+        )
         .add_systems(Update, (ctrl_c, read_stdin_stream).chain())
         .add_systems(
             Update,
