@@ -3,75 +3,49 @@ use {
         agents::{AgentConfig, CodingAgent, CodingAgentPromptChannel, CodingAgentTask},
         cli::Cli,
         config::Config,
+        stdin::StdinKeyMessage,
         stdout::StdoutMessage,
         tokio::AppCancelToken,
     },
     bevy::{
-        app::{App, AppExit, PreUpdate, Startup, Update},
+        app::{App, AppExit, PostUpdate, PreUpdate, Startup, Update},
         ecs::{
             change_detection::{Res, ResMut},
-            message::{Message, MessageReader, MessageWriter},
-            resource::Resource,
+            message::{ MessageReader, MessageWriter},
             schedule::{IntoScheduleConfigs, common_conditions::resource_removed},
             system::{Commands, Local},
         },
-        prelude::Deref,
     },
     bevy_ratatui::crossterm::{
         self,
-        event::{self, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+        event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     },
     bevy_tokio_tasks::TokioTasksRuntime,
     colored::Colorize,
-    crossbeam_channel::{Receiver, unbounded},
-    std::time::Duration,
+    std::{
+        io::{self, Write},
+    },
     unicode_width::UnicodeWidthChar,
 };
 
-const STDIN_POLL_TIMEOUT_MS: u64 = 100;
-
-#[derive(Message)]
-struct StdinKeyMessage(KeyEvent);
-
-#[derive(Deref, Resource)]
-struct StreamReceiver(Receiver<KeyEvent>);
-
-fn setup(
-    mut commands: Commands,
-    app_cancel: Res<AppCancelToken>,
-    tokio_runtime: ResMut<TokioTasksRuntime>,
-) {
-    let (tx, rx) = unbounded::<KeyEvent>();
-    commands.insert_resource(StreamReceiver(rx));
-
-    crossterm::terminal::enable_raw_mode().expect("Failed to enable raw mode");
-
+fn setup(app_cancel: Res<AppCancelToken>, tokio_runtime: ResMut<TokioTasksRuntime>, cli: Res<Cli>) {
+    let print_system_prompt = cli.print_system_prompt;
     let app_cancel = app_cancel.clone();
 
-    tokio_runtime.spawn_background_task(|_ctx| async move {
-        let app_cancel = app_cancel.clone();
-
-        tokio::task::spawn_blocking(move || {
-            let timeout = Duration::from_millis(STDIN_POLL_TIMEOUT_MS);
-            while !app_cancel.is_cancelled() {
-                if event::poll(timeout).expect("Failed to poll stdin") {
-                    let evt = event::read().expect("Failed to read stdin event");
-                    if let event::Event::Key(key) = evt {
-                        tx.send(key).expect("Failed to transmit key event");
-                    }
+    tokio_runtime.spawn_background_task(move |_ctx| async move {
+        tokio::select! {
+            _ = app_cancel.cancelled() => {
+                if !print_system_prompt {
+                    let mut lock = io::stdout();
+                    let _ = lock.write("\r\n  bye 👋\r\n".dimmed().as_bytes());
+                    let _ = lock.flush();
                 }
-            }
-        });
+            },
+            else => unreachable!(),
+        }
     });
-}
 
-fn forward_stdin_input_to_messsage(
-    stdin_keys: ResMut<StreamReceiver>,
-    mut messages: MessageWriter<StdinKeyMessage>,
-) {
-    while let Ok(key) = stdin_keys.try_recv() {
-        messages.write(StdinKeyMessage(key));
-    }
+    crossterm::terminal::enable_raw_mode().expect("Failed to enable raw mode");
 }
 
 fn print_system_prompt(
@@ -262,19 +236,22 @@ fn read_stdin_stream(
     }
 }
 
+fn shutdown_repl(mut messages: MessageReader<AppExit>) {
+    for _message in messages.read() {
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+}
+
 pub(crate) fn repl_plugin(app: &mut App) {
-    app.add_message::<StdinKeyMessage>()
-        .add_systems(Startup, setup)
+    app.add_systems(Startup, setup)
         .add_systems(
             PreUpdate,
-            (
-                forward_stdin_input_to_messsage,
-                print_system_prompt.run_if(|cli: Res<Cli>| cli.print_system_prompt),
-            ),
+            print_system_prompt.run_if(|cli: Res<Cli>| cli.print_system_prompt),
         )
         .add_systems(Update, (ctrl_c, read_stdin_stream).chain())
         .add_systems(
             Update,
             show_prompt_symbol.run_if(resource_removed::<CodingAgentTask>),
-        );
+        )
+        .add_systems(PostUpdate, shutdown_repl);
 }

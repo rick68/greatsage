@@ -7,6 +7,7 @@ mod agents;
 mod cli;
 mod config;
 mod repl;
+mod stdin;
 mod stdout;
 mod tokio;
 mod utils;
@@ -17,6 +18,7 @@ use {
         cli::Cli,
         config::config_plugin,
         repl::repl_plugin,
+        stdin::stdin_plugin,
         stdout::stdout_plugin,
         tokio::tokio_plugin,
     },
@@ -32,8 +34,6 @@ use {
             system::Commands,
         },
     },
-    bevy_ratatui::crossterm,
-    colored::Colorize,
     std::{
         io::{self, IsTerminal, Read, Write},
         time::Duration,
@@ -61,6 +61,7 @@ fn main() {
         ))),
         tokio_plugin,
         config_plugin,
+        stdin_plugin,
         stdout_plugin,
         agents_plugin,
     ));
@@ -94,11 +95,4 @@ fn main() {
     if let AppExit::Error(code) = app.run() {
         () = std::process::exit(code.get() as i32);
     }
-
-    if !cli.print_system_prompt {
-        let mut lock = io::stdout();
-        let _ = lock.write("\r\n  bye 👋\r\n\r\n".dimmed().as_bytes());
-        let _ = lock.flush();
-    }
-    let _ = crossterm::terminal::disable_raw_mode();
 }
