@@ -11,7 +11,7 @@ use {
         app::{App, AppExit, PostUpdate, PreUpdate, Startup, Update},
         ecs::{
             change_detection::{Res, ResMut},
-            message::{ MessageReader, MessageWriter},
+            message::{MessageReader, MessageWriter},
             schedule::{IntoScheduleConfigs, common_conditions::resource_removed},
             system::{Commands, Local},
         },
@@ -22,9 +22,7 @@ use {
     },
     bevy_tokio_tasks::TokioTasksRuntime,
     colored::Colorize,
-    std::{
-        io::{self, Write},
-    },
+    std::io::{self, Write},
     unicode_width::UnicodeWidthChar,
 };
 

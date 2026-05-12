@@ -1,4 +1,3 @@
-use bevy::prelude::MessageWriter;
 use {
     crate::{
         agents::{AgentConfig, AgentsCancelToken},
@@ -13,7 +12,7 @@ use {
         app::{App, AppExit, PostUpdate, Startup, Update},
         ecs::{
             change_detection::{Res, ResMut},
-            message::{Message, MessageReader},
+            message::{Message, MessageReader, MessageWriter},
             resource::Resource,
             schedule::{
                 IntoScheduleConfigs, SystemCondition,
@@ -31,13 +30,13 @@ use {
     },
     bevy_tokio_tasks::TokioTasksRuntime,
     colored::Colorize,
-    std::{env, sync::Arc},
+    std::{env, fs, sync::Arc},
     tokio::sync::Mutex,
     yoagent::{
         agent::Agent,
         provider::{ModelConfig, openai_compat::OpenAiCompatProvider},
         tools::default_tools,
-        types::{AgentEvent, AgentMessage, StreamDelta, Usage},
+        types::{AgentEvent, AgentMessage, Content, StreamDelta, Usage},
     },
 };
 
@@ -270,6 +269,7 @@ fn handle_coding_agent_events(
     mut messages: MessageReader<CodingAgentEvent>,
     mut coding_agent_task: ResMut<CodingAgentTask>,
     mut stdout: MessageWriter<StdoutMessage>,
+    cli: Res<Cli>,
 ) {
     for CodingAgentEvent(event) in messages.read() {
         let CodingAgentTask {
@@ -335,6 +335,18 @@ fn handle_coding_agent_events(
                     *in_text = true;
                 }
                 stdout.write(StdoutMessage::from(delta));
+            }
+            AgentEvent::MessageEnd {
+                message: AgentMessage::Llm(yoagent::types::Message::Assistant { content, .. }),
+                ..
+            } => {
+                if let Some(output) = cli.output.as_ref() {
+                    for cnt in content.iter() {
+                        if let Content::Text { text } = cnt {
+                            let _ = fs::write(output, text);
+                        }
+                    }
+                }
             }
             AgentEvent::AgentEnd { messages } => {
                 for msg in messages.iter().rev() {
