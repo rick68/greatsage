@@ -8,7 +8,7 @@ use {
     config::builder::DefaultState,
     serde::{Deserialize, Serialize},
     serde_json::json,
-    std::{fs, path::PathBuf},
+    std::{env, fs, path::PathBuf},
     toml_edit::{DocumentMut, Value},
     url::Url,
 };
@@ -34,30 +34,35 @@ pub struct Config(config::Config);
 
 impl Config {
     #[inline]
-    fn get_config_dir() -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_default()
-            .join(".config")
-            .join("greatsage")
-    }
+    fn config_file() -> PathBuf {
+        if let Ok(cwd) = env::current_dir()
+            && let Some(project_level_config) = Some(cwd.join(".greatsage.toml"))
+            && fs::exists(&project_level_config).unwrap_or_default()
+        {
+            return project_level_config.canonicalize().unwrap();
+        }
 
-    #[inline]
-    fn get_config_file() -> PathBuf {
-        Self::get_config_dir().join("config.toml")
+        let home = dirs::home_dir().unwrap();
+
+        if let Some(home_directory_config) = Some(home.join(".greatsage.toml"))
+            && fs::exists(&home_directory_config).unwrap_or_default()
+        {
+            return home_directory_config.canonicalize().unwrap();
+        }
+
+        let user_level_conifg = home.join(".config").join("greatsage").join("config.toml");
+        if !fs::exists(&user_level_conifg).unwrap_or_default()
+            && let Some(parent) = user_level_conifg.parent()
+        {
+            let _ = fs::create_dir_all(parent);
+            let _ = fs::File::create(&user_level_conifg);
+        }
+
+        user_level_conifg.canonicalize().unwrap()
     }
 
     fn get_builder() -> config::ConfigBuilder<DefaultState> {
-        let config_dir = Self::get_config_dir();
-        let config_file = Self::get_config_file();
-
-        if let Ok(false) = fs::exists(&config_dir) {
-            let _ = fs::create_dir_all(&config_dir);
-        }
-
-        if let Ok(false) = fs::exists(&config_file) {
-            let _ = fs::File::create(&config_file);
-        }
-
+        let config_file = Self::config_file();
         config::Config::builder().add_source(
             config::File::with_name(format!("{}", config_file.display()).as_str()).required(true),
         )
@@ -157,11 +162,11 @@ impl Config {
 
     #[allow(dead_code)]
     pub fn set_model(&mut self, model: impl Into<Value>) {
-        if let Ok(content) = fs::read_to_string(Self::get_config_file())
+        if let Ok(content) = fs::read_to_string(Self::config_file())
             && let Ok(mut doc) = content.parse::<DocumentMut>()
         {
             doc["model"] = toml_edit::Item::Value(model.into());
-            let _ = fs::write(Self::get_config_file(), doc.to_string());
+            let _ = fs::write(Self::config_file(), doc.to_string());
         }
     }
 
@@ -171,11 +176,11 @@ impl Config {
 
     #[allow(dead_code)]
     pub fn set_base_url(&mut self, base_url: impl Into<Value>) {
-        if let Ok(content) = fs::read_to_string(Self::get_config_file())
+        if let Ok(content) = fs::read_to_string(Self::config_file())
             && let Ok(mut doc) = content.parse::<DocumentMut>()
         {
             doc["base_url"] = toml_edit::Item::Value(base_url.into());
-            let _ = fs::write(Self::get_config_file(), doc.to_string());
+            let _ = fs::write(Self::config_file(), doc.to_string());
         }
     }
 
@@ -203,11 +208,11 @@ impl Config {
 
     #[allow(dead_code)]
     pub fn set_api_key(&mut self, api_key: impl Into<Value>) {
-        if let Ok(content) = fs::read_to_string(Self::get_config_file())
+        if let Ok(content) = fs::read_to_string(Self::config_file())
             && let Ok(mut doc) = content.parse::<DocumentMut>()
         {
             doc["api_key"] = toml_edit::Item::Value(api_key.into());
-            let _ = fs::write(Self::get_config_file(), doc.to_string());
+            let _ = fs::write(Self::config_file(), doc.to_string());
         }
     }
 

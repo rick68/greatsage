@@ -77,6 +77,11 @@ impl Cli {
 **Environment:**
   ANTHROPIC_API_KEY    API key for Anthropic (required)
   API_KEY              Alternative env var for API key
+
+**Config files (searched in order, first found wins):**
+  .greatsage.toml                  Project-level config (current directory)
+  ~/.greatsage.toml                Home directory config
+  ~/.config/greatsage/config.toml  User-level config (XDG)
 "#,
         );
 
