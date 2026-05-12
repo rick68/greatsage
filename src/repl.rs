@@ -3,6 +3,7 @@ use {
         agents::{AgentConfig, CodingAgent, CodingAgentPromptChannel, CodingAgentTask},
         cli::Cli,
         config::Config,
+        stdout::StdoutMessage,
         tokio::AppCancelToken,
     },
     bevy::{
@@ -23,10 +24,7 @@ use {
     bevy_tokio_tasks::TokioTasksRuntime,
     colored::Colorize,
     crossbeam_channel::{Receiver, unbounded},
-    std::{
-        io::{self, Write, stdout},
-        time::Duration,
-    },
+    std::time::Duration,
     unicode_width::UnicodeWidthChar,
 };
 
@@ -76,56 +74,50 @@ fn forward_stdin_input_to_messsage(
     }
 }
 
-fn print_system_prompt(config: Res<Config>, mut exit: MessageWriter<AppExit>) {
-    let system_prompt = config
-        .get_system_prompt()
-        .trim_end_matches(&[' ', '\t', '\n'])
-        .replace("\n", "\r\n");
-    {
-        let mut lock = io::stdout().lock();
-        let _ = lock.write(system_prompt.as_bytes());
-        let _ = lock.write(b"\r\n");
-        let _ = lock.flush();
-    }
+fn print_system_prompt(
+    config: Res<Config>,
+    mut stdout: MessageWriter<StdoutMessage>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let system_prompt = config.get_system_prompt();
+    stdout.write(StdoutMessage::from(
+        system_prompt.trim_end_matches([' ', '\t', '\n']),
+    ));
     exit.write_default();
 }
 
 fn ctrl_c(
     mut commands: Commands,
-    mut messages: MessageReader<StdinKeyMessage>,
+    mut stdin_key_message: MessageReader<StdinKeyMessage>,
     mut exit: MessageWriter<AppExit>,
+    mut stdout: MessageWriter<StdoutMessage>,
 ) {
     for StdinKeyMessage(KeyEvent {
         code, modifiers, ..
-    }) in messages.read()
+    }) in stdin_key_message.read()
     {
         if *code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL) {
             commands.remove_resource::<CodingAgentTask>();
             exit.write_default();
-
-            let mut lock = stdout().lock();
-            let _ = lock.write(b"\r\n");
-            let _ = lock.flush();
+            stdout.write(StdoutMessage::newline());
         }
     }
 }
 
-pub(crate) fn show_prompt_symbol() {
-    let mut lock = io::stdout().lock();
-    let _ = lock.write(
-        <&str as Colorize>::bold("\r\n> ")
-            .green()
-            .to_string()
-            .as_bytes(),
-    );
-    let _ = lock.flush();
+pub fn prompt_symbol() -> String {
+    <&str as Colorize>::bold("\n> ").green().to_string()
+}
+
+fn show_prompt_symbol(mut stdout: MessageWriter<StdoutMessage>) {
+    stdout.write(StdoutMessage::from(prompt_symbol()));
 }
 
 #[allow(clippy::too_many_arguments)]
 fn read_stdin_stream(
-    mut messages: MessageReader<StdinKeyMessage>,
+    mut stdin_key_messages: MessageReader<StdinKeyMessage>,
     mut cursor: Local<usize>,
     mut content: Local<String>,
+    mut stdout: MessageWriter<StdoutMessage>,
     mut exit: MessageWriter<AppExit>,
     mut commands: Commands,
     prompt_channel: Res<CodingAgentPromptChannel>,
@@ -137,7 +129,7 @@ fn read_stdin_stream(
         modifiers,
         kind,
         ..
-    }) in messages.read()
+    }) in stdin_key_messages.read()
     {
         match *code {
             KeyCode::Char(c)
@@ -145,14 +137,10 @@ fn read_stdin_stream(
                     && !modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 let mut buf = [0_u8; 4];
-                let bytes = c.encode_utf8(&mut buf).as_bytes();
+                let bytes = c.encode_utf8(&mut buf);
 
                 if *cursor == content.chars().count() {
-                    {
-                        let mut lock = stdout().lock();
-                        let _ = lock.write(bytes);
-                        let _ = lock.flush();
-                    }
+                    stdout.write(StdoutMessage::from(bytes));
                     *cursor += 1;
                     content.push(c);
                 } else if let Some((byte_idx, _c)) = content.char_indices().nth(*cursor) {
@@ -161,15 +149,11 @@ fn read_stdin_stream(
                         .chars()
                         .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
                         .sum();
-                    {
-                        let mut lock = stdout().lock();
-                        let _ = lock.write(bytes);
-                        let _ = lock.write(b"\x1b[K");
-                        let _ = lock.write(suffix.as_bytes());
-                        for _ in 0..move_back_width {
-                            let _ = lock.write(b"\x1b[1D");
-                        }
-                        let _ = lock.flush();
+                    stdout.write(StdoutMessage::from(bytes));
+                    stdout.write(StdoutMessage::clear_line_from_cursor_to_end());
+                    stdout.write(StdoutMessage::from(suffix));
+                    for _ in 0..move_back_width {
+                        stdout.write(StdoutMessage::move_cursor_left());
                     }
                     *cursor += 1;
                     content.insert(byte_idx, c);
@@ -187,17 +171,14 @@ fn read_stdin_stream(
                         .chars()
                         .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
                         .sum();
-                    {
-                        let mut lock = stdout().lock();
-                        for _ in 0..width {
-                            let _ = lock.write(b"\x1b[1D");
-                        }
-                        let _ = lock.write(b"\x1b[K");
-                        let _ = lock.write(suffix.as_bytes());
-                        for _ in 0..move_back_width {
-                            let _ = lock.write(b"\x1b[1D");
-                        }
-                        let _ = lock.flush();
+
+                    for _ in 0..width {
+                        stdout.write(StdoutMessage::move_cursor_left());
+                    }
+                    stdout.write(StdoutMessage::clear_line_from_cursor_to_end());
+                    stdout.write(StdoutMessage::from(suffix));
+                    for _ in 0..move_back_width {
+                        stdout.write(StdoutMessage::move_cursor_left());
                     }
                     *pos -= 1;
                 }
@@ -208,12 +189,8 @@ fn read_stdin_stream(
                     && let Some((_byte_idx, c)) = content.char_indices().nth(*pos - 1)
                     && let Some(width) = UnicodeWidthChar::width(c)
                 {
-                    {
-                        let mut lock = stdout().lock();
-                        for _ in 0..width {
-                            let _ = lock.write(b"\x1b[1D");
-                        }
-                        let _ = lock.flush();
+                    for _ in 0..width {
+                        stdout.write(StdoutMessage::move_cursor_left());
                     }
                     *pos -= 1;
                 }
@@ -224,12 +201,8 @@ fn read_stdin_stream(
                     && let Some(c) = content.chars().nth(*pos)
                     && let Some(width) = UnicodeWidthChar::width(c)
                 {
-                    {
-                        let mut lock = stdout().lock();
-                        for _ in 0..width {
-                            let _ = lock.write(b"\x1b[1C");
-                        }
-                        let _ = lock.flush();
+                    for _ in 0..width {
+                        stdout.write(StdoutMessage::move_cursor_right());
                     }
                     *pos += 1;
                 }
@@ -240,11 +213,7 @@ fn read_stdin_stream(
                         "/exit" | "/quit" => {
                             commands.remove_resource::<CodingAgentTask>();
                             exit.write_default();
-
-                            let mut lock = stdout().lock();
-                            let _ = lock.write(b"\r\n");
-                            let _ = lock.flush();
-
+                            stdout.write(StdoutMessage::newline());
                             return;
                         }
                         "/clear" => {
@@ -264,7 +233,7 @@ fn read_stdin_stream(
                             if new_model.is_empty() {
                                 continue;
                             }
-                            agent_config.model = new_model.to_string();
+                            agent_config.model = String::from(new_model);
 
                             let agent_config = agent_config.clone();
 
@@ -279,19 +248,11 @@ fn read_stdin_stream(
                         }
                         _ => continue,
                     }
-                    {
-                        let mut lock = stdout().lock();
-                        let _ = lock.write(b"\r\n");
-                        let _ = lock.flush();
-                    }
-                    show_prompt_symbol();
+                    stdout.write(StdoutMessage::newline());
+                    stdout.write(StdoutMessage::from(prompt_symbol()));
                 } else {
                     prompt_channel.send_prompt(content.clone());
-                    {
-                        let mut lock = stdout().lock();
-                        let _ = lock.write(b"\r\n");
-                        let _ = lock.flush();
-                    }
+                    stdout.write(StdoutMessage::newline());
                 }
                 *cursor = 0;
                 content.clear();

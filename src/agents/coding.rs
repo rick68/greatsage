@@ -1,9 +1,11 @@
+use bevy::prelude::MessageWriter;
 use {
     crate::{
         agents::{AgentConfig, AgentsCancelToken},
         cli::Cli,
         config::{Config, McpConfig},
-        repl::show_prompt_symbol,
+        repl::prompt_symbol,
+        stdout::StdoutMessage,
         tokio::AppCancelToken,
         utils::truncate,
     },
@@ -29,11 +31,7 @@ use {
     },
     bevy_tokio_tasks::TokioTasksRuntime,
     colored::Colorize,
-    std::{
-        env,
-        io::{self, Write},
-        sync::Arc,
-    },
+    std::{env, sync::Arc},
     tokio::sync::Mutex,
     yoagent::{
         agent::Agent,
@@ -135,17 +133,12 @@ impl CodingAgentPromptChannel {
     }
 }
 
-fn print_banner() {
-    let mut lock = io::stdout().lock();
-    let _ = lock.write(
-        format!(
-            "\r\n{} {}\r\n",
-            <&str as Colorize>::bold("greatsage").cyan(),
-            "— a coding agent growing up in public".dimmed()
-        )
-        .as_bytes(),
-    );
-    let _ = lock.flush();
+fn banner() -> String {
+    format!(
+        "\n{} {}\n",
+        <&str as Colorize>::bold("greatsage").cyan(),
+        "— a coding agent growing up in public".dimmed()
+    )
 }
 
 fn setup(
@@ -154,6 +147,7 @@ fn setup(
     mut commands: Commands,
     app_cancel: Res<AppCancelToken>,
     agents_cancel: Res<AgentsCancelToken>,
+    mut stdout: MessageWriter<StdoutMessage>,
     cli: Res<Cli>,
 ) {
     let config = config.clone();
@@ -181,42 +175,27 @@ fn setup(
         }
     });
 
-    print_banner();
-    {
-        let mut lock = io::stdout().lock();
-        let _ = lock.write(
-            format!("  model: {}\r\n", agent_config.model)
-                .dimmed()
-                .to_string()
-                .as_bytes(),
-        );
-        if !agent_config.skills.is_empty() {
-            let _ = lock.write(
-                format!("  skills: {} loaded\r\n", agent_config.skills.len())
-                    .dimmed()
-                    .to_string()
-                    .as_bytes(),
-            );
-        }
-        if !agent_config.mcp.is_empty() {
-            let _ = lock.write(
-                format!("  mcp: {} server(s) connected\r\n", agent_config.mcp.len())
-                    .dimmed()
-                    .to_string()
-                    .as_bytes(),
-            );
-        }
-        if let Ok(cwd) = env::current_dir() {
-            let _ = lock.write(
-                format!("  cwd: {}\r\n", cwd.display())
-                    .dimmed()
-                    .to_string()
-                    .as_bytes(),
-            );
-        }
-        if !cli.print_system_prompt {
-            show_prompt_symbol();
-        }
+    stdout.write(StdoutMessage::from(banner()));
+    stdout.write(StdoutMessage::from(
+        format!("  model: {}\n", agent_config.model).dimmed(),
+    ));
+    if !agent_config.skills.is_empty() {
+        stdout.write(StdoutMessage::from(
+            format!("  skills: {} loaded\n", agent_config.skills.len()).dimmed(),
+        ));
+    }
+    if !agent_config.mcp.is_empty() {
+        stdout.write(StdoutMessage::from(
+            format!("  mcp: {} server(s) connected\n", agent_config.mcp.len()).dimmed(),
+        ));
+    }
+    if let Ok(cwd) = env::current_dir() {
+        stdout.write(StdoutMessage::from(
+            format!("  cwd: {}\n", cwd.display()).dimmed(),
+        ));
+    }
+    if !cli.print_system_prompt {
+        stdout.write(StdoutMessage::from(prompt_symbol()));
     }
 }
 
@@ -277,22 +256,20 @@ fn spawn_agent_task(
     }
 }
 
-fn print_usage(Usage { input, output, .. }: &Usage) {
+fn usage_info(Usage { input, output, .. }: &Usage) -> String {
     if *input > 0 || *output > 0 {
-        let mut lock = io::stdout().lock();
-        let _ = lock.write(
-            format!("\r\n\r\n  tokens: {input} in / {output} out\r\n")
-                .dimmed()
-                .to_string()
-                .as_bytes(),
-        );
-        let _ = lock.flush();
+        format!("\n\n  tokens: {input} in / {output} out\n")
+            .dimmed()
+            .to_string()
+    } else {
+        String::new()
     }
 }
 
 fn handle_coding_agent_events(
     mut messages: MessageReader<CodingAgentEvent>,
     mut coding_agent_task: ResMut<CodingAgentTask>,
+    mut stdout: MessageWriter<StdoutMessage>,
 ) {
     for CodingAgentEvent(event) in messages.read() {
         let CodingAgentTask {
@@ -338,49 +315,32 @@ fn handle_coding_agent_events(
                     }
                     _ => tool_name.clone(),
                 };
-                let mut lock = io::stdout().lock();
-                let _ = lock.write(
-                    <&str as Colorize>::yellow(format!("  ▶ {summary}").as_str())
-                        .to_string()
-                        .as_bytes(),
-                );
-                let _ = lock.flush();
+                stdout.write(StdoutMessage::from(<&str as Colorize>::yellow(
+                    format!("  ▶ {summary}").as_str(),
+                )));
             }
             AgentEvent::ToolExecutionEnd { is_error, .. } => {
-                let mut lock = io::stdout().lock();
-                let _ = lock.write(
-                    if *is_error {
-                        <&str as Colorize>::red(" ✗\r\n")
-                    } else {
-                        <&str as Colorize>::green(" ✓\r\n")
-                    }
-                    .to_string()
-                    .as_bytes(),
-                );
+                if *is_error {
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::red(" ✗\r\n")));
+                } else {
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::green(" ✓\r\n")));
+                }
             }
             AgentEvent::MessageUpdate {
                 delta: StreamDelta::Text { delta },
                 ..
             } => {
-                let mut lock = io::stdout().lock();
                 if !*in_text {
-                    let _ = lock.write(b"\r\n");
+                    stdout.write(StdoutMessage::newline());
                     *in_text = true;
                 }
-                let _ = lock.write(
-                    delta
-                        .replace("\n", "\r\n")
-                        .bright_white()
-                        .to_string()
-                        .as_bytes(),
-                );
-                let _ = lock.flush();
+                stdout.write(StdoutMessage::from(delta));
             }
             AgentEvent::AgentEnd { messages } => {
                 for msg in messages.iter().rev() {
                     if let AgentMessage::Llm(yoagent::types::Message::Assistant { usage, .. }) = msg
                     {
-                        print_usage(usage);
+                        stdout.write(StdoutMessage::from(usage_info(usage)));
                         *last_usage = usage.clone();
                         break;
                     }

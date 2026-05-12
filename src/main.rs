@@ -7,6 +7,7 @@ mod agents;
 mod cli;
 mod config;
 mod repl;
+mod stdout;
 mod tokio;
 mod utils;
 
@@ -16,6 +17,7 @@ use {
         cli::Cli,
         config::config_plugin,
         repl::repl_plugin,
+        stdout::stdout_plugin,
         tokio::tokio_plugin,
     },
     bevy::{
@@ -59,6 +61,7 @@ fn main() {
         ))),
         tokio_plugin,
         config_plugin,
+        stdout_plugin,
         agents_plugin,
     ));
 

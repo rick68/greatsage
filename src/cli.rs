@@ -38,6 +38,9 @@ pub struct Cli {
     /// Run a single prompt and exit (no REPL)
     #[arg(short, long, value_name = "t")]
     pub prompt: Option<String>,
+    /// Write final response text to a file
+    #[arg(short, long, value_name = "f")]
+    pub output: Option<PathBuf>,
     ///  API key (overrides provider-specific env var)
     #[arg(long, value_name = "key", env = "API_KEY")]
     pub api_key: Option<String>,
