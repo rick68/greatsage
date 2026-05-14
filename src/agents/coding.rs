@@ -193,7 +193,7 @@ fn setup(
             format!("  cwd: {}\n", cwd.display()).dimmed(),
         ));
     }
-    if !cli.print_system_prompt {
+    if cli.prompt.is_none() && !cli.print_system_prompt {
         stdout.write(StdoutMessage::from(prompt_symbol()));
     }
 }
