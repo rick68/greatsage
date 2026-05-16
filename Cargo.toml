@@ -41,6 +41,7 @@ edition = "2024"
 keywords = []
 license = "MIT OR Apache-2.0"
 name = "greatsage"
+repository = "https://github.com/rick68/greatsage"
 version = "0.0.4"
 
 [profile.dev.package.backtrace]
