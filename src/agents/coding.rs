@@ -178,25 +178,28 @@ fn setup(
         }
     });
 
-    stdout.write(StdoutMessage::from(banner()));
-    stdout.write(StdoutMessage::from(
-        format!("  model: {}\n", agent_config.model).dimmed(),
-    ));
-    if !agent_config.skills.is_empty() {
+    if !cli.no_hints {
+        stdout.write(StdoutMessage::from(banner()));
         stdout.write(StdoutMessage::from(
-            format!("  skills: {} loaded\n", agent_config.skills.len()).dimmed(),
+            format!("  model: {}\n", agent_config.model).dimmed(),
         ));
+        if !agent_config.skills.is_empty() {
+            stdout.write(StdoutMessage::from(
+                format!("  skills: {} loaded\n", agent_config.skills.len()).dimmed(),
+            ));
+        }
+        if !agent_config.mcp.is_empty() {
+            stdout.write(StdoutMessage::from(
+                format!("  mcp: {} server(s) connected\n", agent_config.mcp.len()).dimmed(),
+            ));
+        }
+        if let Ok(cwd) = env::current_dir() {
+            stdout.write(StdoutMessage::from(
+                format!("  cwd: {}\n", cwd.display()).dimmed(),
+            ));
+        }
     }
-    if !agent_config.mcp.is_empty() {
-        stdout.write(StdoutMessage::from(
-            format!("  mcp: {} server(s) connected\n", agent_config.mcp.len()).dimmed(),
-        ));
-    }
-    if let Ok(cwd) = env::current_dir() {
-        stdout.write(StdoutMessage::from(
-            format!("  cwd: {}\n", cwd.display()).dimmed(),
-        ));
-    }
+
     if cli.prompt.is_none() && !cli.print_system_prompt && io::stdin().is_terminal() {
         stdout.write(StdoutMessage::from(prompt_symbol()));
     }
@@ -319,15 +322,17 @@ fn handle_coding_agent_events(
                     }
                     _ => tool_name.clone(),
                 };
-                stdout.write(StdoutMessage::from(<&str as Colorize>::yellow(
-                    format!("  ▶ {summary}").as_str(),
-                )));
+                if !cli.no_hints {
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::yellow(
+                        format!("  ▶ {summary}").as_str(),
+                    )));
+                }
             }
-            AgentEvent::ToolExecutionEnd { is_error, .. } => {
+            AgentEvent::ToolExecutionEnd { is_error, .. } if !cli.no_hints => {
                 if *is_error {
-                    stdout.write(StdoutMessage::from(<&str as Colorize>::red(" ✗\r\n")));
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::red(" ✗\n")));
                 } else {
-                    stdout.write(StdoutMessage::from(<&str as Colorize>::green(" ✓\r\n")));
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::green(" ✓\n")));
                 }
             }
             AgentEvent::MessageUpdate {
@@ -335,7 +340,9 @@ fn handle_coding_agent_events(
                 ..
             } => {
                 if !*in_text {
-                    stdout.write(StdoutMessage::newline());
+                    if !cli.no_hints {
+                        stdout.write(StdoutMessage::newline());
+                    }
                     *in_text = true;
                 }
                 stdout.write(StdoutMessage::from(delta));
@@ -347,7 +354,7 @@ fn handle_coding_agent_events(
                 if let Some(output) = cli.output.as_ref() {
                     for cnt in content.iter() {
                         if let Content::Text { text } = cnt {
-                            let _ = fs::write(output, text);
+                            let _ = fs::write(output, text.clone() + "\n");
                         }
                     }
                 }
@@ -356,7 +363,11 @@ fn handle_coding_agent_events(
                 for msg in messages.iter().rev() {
                     if let AgentMessage::Llm(yoagent::types::Message::Assistant { usage, .. }) = msg
                     {
-                        stdout.write(StdoutMessage::from(usage_info(usage)));
+                        if cli.no_hints {
+                            stdout.write(StdoutMessage::newline());
+                        } else {
+                            stdout.write(StdoutMessage::from(usage_info(usage)));
+                        }
                         *last_usage = usage.clone();
                         break;
                     }

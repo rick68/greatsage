@@ -53,6 +53,9 @@ pub struct Cli {
     /// Print the fully assembled system prompt and exit
     #[arg(long)]
     pub print_system_prompt: bool,
+    /// Do not print startup hints, banner, and usage statistics
+    #[arg(short = 'n', long)]
+    pub no_hints: bool,
     /// Print help
     #[arg(long)]
     pub help: bool,

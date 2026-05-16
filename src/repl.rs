@@ -28,12 +28,13 @@ use {
 
 fn setup(app_cancel: Res<AppCancelToken>, tokio_runtime: ResMut<TokioTasksRuntime>, cli: Res<Cli>) {
     let print_system_prompt = cli.print_system_prompt;
+    let no_hints = cli.no_hints;
     let app_cancel = app_cancel.clone();
 
     tokio_runtime.spawn_background_task(move |_ctx| async move {
         tokio::select! {
             _ = app_cancel.cancelled() => {
-                if !print_system_prompt {
+                if !print_system_prompt && !no_hints {
                     let mut lock = io::stdout();
                     let _ = lock.write("\r\n  bye 👋\r\n\r\n".dimmed().as_bytes());
                     let _ = lock.flush();
