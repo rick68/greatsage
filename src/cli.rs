@@ -57,7 +57,7 @@ pub struct Cli {
     #[arg(short = 'n', long)]
     pub no_hints: bool,
     /// Print help
-    #[arg(long)]
+    #[arg(short, long)]
     pub help: bool,
 }
 
