@@ -35,7 +35,7 @@ fn setup(app_cancel: Res<AppCancelToken>, tokio_runtime: ResMut<TokioTasksRuntim
             _ = app_cancel.cancelled() => {
                 if !print_system_prompt {
                     let mut lock = io::stdout();
-                    let _ = lock.write("\r\n  bye 👋\r\n".dimmed().as_bytes());
+                    let _ = lock.write("\r\n  bye 👋\r\n\r\n".dimmed().as_bytes());
                     let _ = lock.flush();
                 }
             },
