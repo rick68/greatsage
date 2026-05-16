@@ -35,7 +35,8 @@ use {
         },
     },
     std::{
-        io::{self, IsTerminal, Read, Write},
+        fs,
+        io::{self, IsTerminal, Read},
         time::Duration,
     },
 };
@@ -45,13 +46,27 @@ const FRAMES_PER_SECOND: f32 = 30.0;
 fn main() {
     let _ = dotenvy::dotenv();
 
-    let cli = Cli::parse_and_check_help();
+    let mut cli = Cli::parse_and_check_help();
+
+    if let Some(file_path) = &cli.prompt_file
+        && let Ok(buf) = fs::read_to_string(file_path)
+    {
+        if let Some((_lhs, rhs)) = buf.trim().trim_start_matches("#!").split_once('\n') {
+            let tail = rhs.trim();
+            if !tail.is_empty() {
+                cli.prompt = Some(tail.to_owned());
+            }
+        } else {
+            return;
+        }
+    }
+
     let mut prompt_arg = cli.prompt.clone();
 
     if !io::stdin().is_terminal() && prompt_arg.is_none() {
         let mut buf: String = String::new();
         let _: usize = io::stdin().lock().read_to_string(&mut buf).unwrap();
-        prompt_arg = Some(buf.trim_end_matches('\n').to_string());
+        prompt_arg = Some(String::from(buf.trim_end_matches('\n')));
     }
 
     let mut app = App::new();
@@ -61,10 +76,13 @@ fn main() {
         ))),
         tokio_plugin,
         config_plugin,
-        stdin_plugin,
         stdout_plugin,
         agents_plugin,
     ));
+
+    if io::stdin().is_terminal() {
+        app.add_plugins(stdin_plugin);
+    }
 
     if let Some(prompt) = prompt_arg {
         app.add_systems(
@@ -74,9 +92,6 @@ fn main() {
                     if let Err(e) = channel.sender.send(prompt.clone()) {
                         eprintln!("Failed to send prompt: {e}");
                     }
-                    let mut lock = io::stdout().lock();
-                    let _ = lock.write(format!("{prompt}\r\n").as_bytes());
-                    let _ = lock.flush();
                 })
                 .run_if(run_once),
                 (|mut commands: Commands| {

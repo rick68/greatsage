@@ -30,7 +30,11 @@ use {
     },
     bevy_tokio_tasks::TokioTasksRuntime,
     colored::Colorize,
-    std::{env, fs, sync::Arc},
+    std::{
+        env, fs,
+        io::{self, IsTerminal},
+        sync::Arc,
+    },
     tokio::sync::Mutex,
     yoagent::{
         agent::Agent,
@@ -193,7 +197,7 @@ fn setup(
             format!("  cwd: {}\n", cwd.display()).dimmed(),
         ));
     }
-    if cli.prompt.is_none() && !cli.print_system_prompt {
+    if cli.prompt.is_none() && !cli.print_system_prompt && io::stdin().is_terminal() {
         stdout.write(StdoutMessage::from(prompt_symbol()));
     }
 }

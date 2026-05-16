@@ -15,6 +15,9 @@ use {
     disable_help_flag = true,
 )]
 pub struct Cli {
+    /// Prompt file to execute
+    #[arg(index = 1)]
+    pub prompt_file: Option<PathBuf>,
     /// Model to use
     #[arg(
         long,
@@ -57,7 +60,10 @@ pub struct Cli {
 
 impl Cli {
     fn print_help() {
-        let mut printer = Printer::new(Cli::command());
+        let command = Cli::command().bin_name("greatsage");
+        let mut printer = Printer::new(command);
+
+        printer.set_template("usage", "Usage: `gs [PROMPT_FILE] [options]`");
 
         printer.template_keys_mut().push("repl-commands");
         printer.set_template(
