@@ -3,6 +3,7 @@ use {
         agents::{AgentConfig, AgentsCancelToken},
         cli::Cli,
         config::{Config, McpConfig},
+        providers::Provider,
         repl::prompt_symbol,
         stdout::StdoutMessage,
         tokio::AppCancelToken,
@@ -38,7 +39,7 @@ use {
     tokio::sync::Mutex,
     yoagent::{
         agent::Agent,
-        provider::{ModelConfig, openai_compat::OpenAiCompatProvider},
+        provider::{AnthropicProvider, GoogleProvider, ModelConfig, OpenAiCompatProvider},
         tools::default_tools,
         types::{AgentEvent, AgentMessage, Content, StreamDelta, Usage},
     },
@@ -57,8 +58,9 @@ pub struct CodingAgent(Arc<Mutex<Agent>>);
 impl CodingAgent {
     pub async fn new_with_agent_config(agent_config: &AgentConfig) -> Self {
         let AgentConfig {
-            base_url,
             model,
+            provider,
+            base_url,
             skills,
             system_prompt,
             api_key,
@@ -66,8 +68,58 @@ impl CodingAgent {
             ..
         } = agent_config;
 
-        let model_config = ModelConfig::local(base_url, model);
-        let mut agent = Agent::new(OpenAiCompatProvider)
+        let (agent, model_config) = match provider {
+            Provider::Anthropic => (
+                Agent::new(AnthropicProvider),
+                ModelConfig::anthropic(model, model),
+            ),
+            Provider::Cerebras => (
+                Agent::new(OpenAiCompatProvider),
+                ModelConfig::openai(model, model),
+            ),
+            Provider::Custom => (
+                Agent::new(OpenAiCompatProvider),
+                ModelConfig::local(base_url, model),
+            ),
+            Provider::DeepSeek => (
+                Agent::new(OpenAiCompatProvider),
+                ModelConfig::deepseek(model, model),
+            ),
+            Provider::Google => (
+                Agent::new(GoogleProvider),
+                ModelConfig::google(model, model),
+            ),
+            Provider::Groq => (
+                Agent::new(OpenAiCompatProvider),
+                ModelConfig::groq(model, model),
+            ),
+            Provider::MiniMax => (
+                Agent::new(OpenAiCompatProvider),
+                ModelConfig::minimax(model, model),
+            ),
+            Provider::Mistral => (
+                Agent::new(OpenAiCompatProvider),
+                ModelConfig::mistral(model, model),
+            ),
+            Provider::OpenAi => (
+                Agent::new(OpenAiCompatProvider),
+                ModelConfig::openai(model, model),
+            ),
+            Provider::OpenRouter => (
+                Agent::new(OpenAiCompatProvider),
+                ModelConfig::openai(model, model),
+            ),
+            Provider::Xai => (
+                Agent::new(OpenAiCompatProvider),
+                ModelConfig::xai(model, model),
+            ),
+            Provider::Zai => (
+                Agent::new(OpenAiCompatProvider),
+                ModelConfig::zai(model, model),
+            ),
+        };
+
+        let mut agent = agent
             .with_model_config(model_config)
             .with_system_prompt(system_prompt)
             .with_model(model)

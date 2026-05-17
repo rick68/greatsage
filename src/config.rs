@@ -1,5 +1,5 @@
 use {
-    crate::{Cli, agents::SYSTEM_PROMPT},
+    crate::{Cli, agents::SYSTEM_PROMPT, providers::Provider},
     bevy::{
         app::{App, PreStartup},
         ecs::{change_detection::Res, resource::Resource, system::Commands},
@@ -8,7 +8,7 @@ use {
     config::builder::DefaultState,
     serde::{Deserialize, Serialize},
     serde_json::json,
-    std::{env, fs, path::PathBuf},
+    std::{env, fs, path::PathBuf, str::FromStr},
     toml_edit::{DocumentMut, Value},
     url::Url,
 };
@@ -78,6 +78,7 @@ impl Default for Config {
 impl From<&Cli> for Config {
     fn from(cli: &Cli) -> Self {
         let mut config_builder = Self::get_builder();
+        let mut current_provider = None;
 
         if let Some(model) = &cli.model {
             config_builder = config_builder
@@ -137,10 +138,90 @@ impl From<&Cli> for Config {
                 .clone()
                 .set_override("api_key", api_key.clone())
                 .unwrap_or(config_builder);
-        } else if let Ok(anthropic_api_key) = dotenvy::var("ANTHROPIC_API_KEY") {
+            current_provider = Some(&Provider::Custom);
+        }
+        if let Ok(anthropic_api_key) = dotenvy::var("ANTHROPIC_API_KEY") {
             config_builder = config_builder
                 .clone()
-                .set_override("api_key", anthropic_api_key)
+                .set_override("anthropic_api_key", anthropic_api_key)
+                .unwrap_or(config_builder);
+            current_provider = Some(&Provider::Anthropic);
+        }
+        if let Ok(cerebras_api_key) = dotenvy::var("CEREBRAS_API_KEY") {
+            config_builder = config_builder
+                .clone()
+                .set_override("cerebras_api_key", cerebras_api_key)
+                .unwrap_or(config_builder);
+            current_provider = Some(&Provider::Cerebras);
+        }
+        if let Ok(deepseek_api_key) = dotenvy::var("DEEPSEEK_API_KEY") {
+            config_builder = config_builder
+                .clone()
+                .set_override("deepseek_api_key", deepseek_api_key)
+                .unwrap_or(config_builder);
+            current_provider = Some(&Provider::DeepSeek);
+        }
+        if let Ok(google_api_key) = dotenvy::var("GOOGLE_API_KEY") {
+            config_builder = config_builder
+                .clone()
+                .set_override("google_api_key", google_api_key)
+                .unwrap_or(config_builder);
+            current_provider = Some(&Provider::Google);
+        }
+        if let Ok(groq_api_key) = dotenvy::var("GROQ_API_KEY") {
+            config_builder = config_builder
+                .clone()
+                .set_override("groq_api_key", groq_api_key)
+                .unwrap_or(config_builder);
+            current_provider = Some(&Provider::Groq);
+        }
+        if let Ok(minimax_api_key) = dotenvy::var("MINIMAX_API_KEY") {
+            config_builder = config_builder
+                .clone()
+                .set_override("minimax_api_key", minimax_api_key)
+                .unwrap_or(config_builder);
+            current_provider = Some(&Provider::MiniMax);
+        }
+        if let Ok(mistral_api_key) = dotenvy::var("MISTRAL_API_KEY") {
+            config_builder = config_builder
+                .clone()
+                .set_override("mistral_api_key", mistral_api_key)
+                .unwrap_or(config_builder);
+            current_provider = Some(&Provider::Mistral);
+        }
+        if let Ok(openai_api_key) = dotenvy::var("OPENAI_API_KEY") {
+            config_builder = config_builder
+                .clone()
+                .set_override("openai_api_key", openai_api_key)
+                .unwrap_or(config_builder);
+            current_provider = Some(&Provider::OpenAi);
+        }
+        if let Ok(openrouter_api_key) = dotenvy::var("OPENROUTER_API_KEY") {
+            config_builder = config_builder
+                .clone()
+                .set_override("openrouter_api_key", openrouter_api_key)
+                .unwrap_or(config_builder);
+            current_provider = Some(&Provider::OpenRouter);
+        }
+        if let Ok(xai_api_key) = dotenvy::var("XAI_API_KEY") {
+            config_builder = config_builder
+                .clone()
+                .set_override("xai_api_key", xai_api_key)
+                .unwrap_or(config_builder);
+            current_provider = Some(&Provider::Xai);
+        }
+        if let Ok(zai_api_key) = dotenvy::var("ZAI_API_KEY") {
+            config_builder = config_builder
+                .clone()
+                .set_override("zai_api_key", zai_api_key)
+                .unwrap_or(config_builder);
+            current_provider = Some(&Provider::Zai);
+        }
+
+        if let Some(provider) = cli.provider.as_ref().or(current_provider) {
+            config_builder = config_builder
+                .clone()
+                .set_override("provider", provider)
                 .unwrap_or(config_builder);
         }
 
@@ -168,6 +249,10 @@ impl Config {
             doc["model"] = toml_edit::Item::Value(model.into());
             let _ = fs::write(Self::config_file(), doc.to_string());
         }
+    }
+
+    pub fn get_provider(&self) -> Option<Provider> {
+        Provider::from_str(self.get_string("provider").ok()?.as_str()).ok()
     }
 
     pub fn get_base_url(&self) -> Option<String> {
@@ -202,8 +287,23 @@ impl Config {
             .unwrap_or(String::from(SYSTEM_PROMPT))
     }
 
-    pub fn get_api_key(&self) -> Option<String> {
-        self.get_string("api_key").ok()
+    pub fn get_api_key(&self, provider: Option<Provider>) -> Option<String> {
+        let api_key = self.get_string("api_key").ok();
+        match provider {
+            Some(Provider::Anthropic) => self.get_string("anthropic_api_key").ok(),
+            Some(Provider::Cerebras) => self.get_string("cerebras_api_key").ok(),
+            Some(Provider::DeepSeek) => self.get_string("deepseek_api_key").ok(),
+            Some(Provider::Google) => self.get_string("google_api_key").ok(),
+            Some(Provider::Groq) => self.get_string("groq_api_key").ok(),
+            Some(Provider::MiniMax) => self.get_string("minimax_api_key").ok(),
+            Some(Provider::Mistral) => self.get_string("mistral_api_key").ok(),
+            Some(Provider::OpenAi) => self.get_string("openai_api_key").ok(),
+            Some(Provider::OpenRouter) => self.get_string("openrouter_api_key").ok(),
+            Some(Provider::Xai) => self.get_string("xai_api_key").ok(),
+            Some(Provider::Zai) => self.get_string("zai_api_key").ok(),
+            Some(Provider::Custom) | None => api_key.clone(),
+        }
+        .or(api_key)
     }
 
     #[allow(dead_code)]

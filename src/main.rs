@@ -6,6 +6,7 @@
 mod agents;
 mod cli;
 mod config;
+mod providers;
 mod repl;
 mod stdin;
 mod stdout;

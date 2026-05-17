@@ -1,5 +1,5 @@
 use {
-    crate::config::McpConfig,
+    crate::{config::McpConfig, providers::Provider},
     bevy::ecs::resource::Resource,
     clap::{ArgAction, CommandFactory, Parser},
     clap_help::Printer,
@@ -26,6 +26,9 @@ pub struct Cli {
         env = "MODEL"
     )]
     pub model: Option<String>,
+    /// Provider to use
+    #[arg(long, value_name = "name", env = "PROVIDER")]
+    pub provider: Option<Provider>,
     /// Custom API endpoint (e.g., http://localhost:11434/v1)
     #[arg(long, value_name = "url", env = "BASE_URL")]
     pub base_url: Option<Url>,
@@ -41,7 +44,7 @@ pub struct Cli {
     /// Run a single prompt and exit (no REPL)
     #[arg(short, long, value_name = "t")]
     pub prompt: Option<String>,
-    /// Write final response text to a file
+    /// Write a final response text to a file
     #[arg(short, long, value_name = "f")]
     pub output: Option<PathBuf>,
     ///  API key (overrides provider-specific env var)
@@ -84,8 +87,21 @@ impl Cli {
             "environment",
             r#"
 **Environment:**
-  ANTHROPIC_API_KEY    API key for Anthropic (required)
-  API_KEY              Alternative env var for API key
+  PROVIDER            Provider to use (via env or `--provider` flag)
+  API_KEY             Fallback API key (any provider)
+
+  ANTHROPIC_API_KEY   API key for Anthropic (default provider)
+  CEREBRAS_API_KEY    API key for Cerebras
+  DEEPSEEK_API_KEY    API key for DeepSeek
+  GOOGLE_API_KEY      API key for Google/Gemini
+  GROQ_API_KEY        API key for Groq
+  MISTRAL_API_KEY     API key for Mistral
+  MINIMAX_API_KEY     API key for MiniMax
+  OPENAI_API_KEY      API key for OpenAI
+  OPENROUTER_API_KEY  API key for OpenRouter
+  XAI_API_KEY         API key for xAI
+  ZAI_API_KEY         API key for ZAI (Zhipu AI / z.ai)
+  BASE_URL            Custom base URL (mainly used with `--provider` custom)
 
 **Config files (searched in order, first found wins):**
   .greatsage.toml                  Project-level config (current directory)

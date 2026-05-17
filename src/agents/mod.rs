@@ -6,6 +6,7 @@ pub use coding::{
 use {
     crate::{
         config::{Config, McpConfig},
+        providers::Provider,
         tokio::AppCancelToken,
     },
     bevy::{
@@ -26,6 +27,7 @@ use {
 #[derive(Clone, Debug, Resource)]
 pub struct AgentConfig {
     pub model: String,
+    pub provider: Provider,
     pub base_url: String,
     pub skills: SkillSet,
     pub system_prompt: String,
@@ -36,13 +38,15 @@ pub struct AgentConfig {
 impl From<&Config> for AgentConfig {
     fn from(config: &Config) -> Self {
         let model = config.get_model().unwrap_or_default();
+        let provider = config.get_provider();
         let base_url = config.get_base_url().unwrap_or_default();
         let skills = SkillSet::load(config.get_skills().as_slice()).expect("Failed to load skills");
         let system_prompt = config.get_system_prompt();
-        let api_key = config.get_api_key().unwrap_or_default();
+        let api_key = config.get_api_key(provider).unwrap_or_default();
         let mcp = config.get_mcp();
 
         AgentConfig {
+            provider: provider.unwrap_or_default(),
             model,
             base_url,
             skills,
