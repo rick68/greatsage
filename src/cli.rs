@@ -69,7 +69,7 @@ impl Cli {
         let command = Cli::command().bin_name("greatsage");
         let mut printer = Printer::new(command);
 
-        printer.set_template("usage", "Usage: `gs [PROMPT_FILE] [options]`");
+        printer.set_template("usage", "Usage: `greatsage [PROMPT_FILE] [options]`");
 
         printer.template_keys_mut().push("repl-commands");
         printer.set_template(
