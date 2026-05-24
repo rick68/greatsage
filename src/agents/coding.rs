@@ -338,13 +338,15 @@ fn usage_info(Usage { input, output, .. }: &Usage) -> String {
     }
 }
 
-/// Returns a dimmed "Thinking" header for starting a thinking block.
+/// Dimmed full-width header for the start of a thinking block.
+/// Newline before calling this is the caller's responsibility.
 fn thinking_header() -> StdoutMessage {
     let (width, _height) = terminal::size().unwrap_or((80, 24));
     StdoutMessage::from(format!("── Thinking {}\n", "─".repeat(width as usize - 12)).dimmed())
 }
 
-/// Returns a dimmed divider used when exiting a thinking block.
+/// Dimmed full-width divider for the end of a thinking block.
+/// Caller should ensure the previous content ends with a newline if needed.
 fn thinking_divider() -> StdoutMessage {
     let (width, _height) = terminal::size().unwrap_or((80, 24));
     StdoutMessage::from(format!("{}\n", "─".repeat(width as usize)).dimmed())
@@ -438,20 +440,21 @@ fn handle_coding_agent_events(
                 }
             }
             AgentEvent::ToolExecutionEnd { is_error, .. } if !cli.no_hints => {
+                // Append '\n' after tool status (✓/✗) so subsequent output starts on a new line.
                 if *is_error {
-                    stdout.write(StdoutMessage::from(<&str as Colorize>::red(" ✗")));
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::red(" ✗\n")));
                 } else {
-                    stdout.write(StdoutMessage::from(<&str as Colorize>::green(" ✓")));
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::green(" ✓\n")));
                 }
             }
             AgentEvent::MessageUpdate {
                 delta: StreamDelta::Text { delta },
                 ..
             } => {
-                // Exit thinking state if we were in it (print divider)
+                // When leaving a thinking block, print the divider.
+                // Note: the last thinking delta may not end with '\n'.
                 if *in_thinking {
                     if !cli.no_hints {
-                        stdout.write(StdoutMessage::newline());
                         stdout.write(thinking_divider());
                     }
                     *in_thinking = false;
@@ -468,10 +471,10 @@ fn handle_coding_agent_events(
             AgentEvent::MessageUpdate { delta, .. } if !cli.no_hints => {
                 if let Some(thinking_text) = extract_thinking_from_delta(delta) {
                     if !*in_thinking {
-                        // First thinking delta: print header and enter thinking state
+                        // First thinking of the block. Rely on previous output to have ended its line.
                         stdout.write(thinking_header());
                         *in_thinking = true;
-                        *thinking_shown = true; // Mark that we have shown thinking via streaming
+                        *thinking_shown = true;
                     }
 
                     // Reset text state when we receive thinking
@@ -493,6 +496,7 @@ fn handle_coding_agent_events(
                     && !*thinking_shown
                     && let Some(thinking_text) = extract_thinking_from_final_content(content)
                 {
+                    // Non-streaming final thinking. Add a leading newline before the header.
                     stdout.write(thinking_header());
                     stdout.write(StdoutMessage::from(thinking_text.dimmed()));
                     stdout.write(thinking_divider());
@@ -526,11 +530,11 @@ fn handle_coding_agent_events(
                     }
                 }
             }
-            _ => {} // NOTE:
-                    // - All agent streaming output (including thinking) must stay on Bevy 0.17+ buffered Message system.
-                    // - Thinking handling (2.1+) is implemented above.
-                    // - Styling must use `colored::Colorize` + `StdoutMessage::from(...)`.
-                    // - Thinking + token output must respect `cli.no_hints` (see design.md).
+            _ => {}
+                    // Note:
+                    // - All streaming output uses Bevy Message (not Event).
+                    // - Thinking output respects `no_hints` and uses `Colorize` + `StdoutMessage`.
+                    // - `thinking_shown` prevents duplicate thinking between deltas and final Content::Thinking.
         }
     }
 }
