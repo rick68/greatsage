@@ -440,6 +440,8 @@ fn handle_coding_agent_events(
                 }
             }
             AgentEvent::ToolExecutionEnd { is_error, .. } if !cli.no_hints => {
+                // Append the symbol without extra newline here; the caller (or next output)
+                // is responsible for spacing. This matches the original tool status style.
                 if *is_error {
                     stdout.write(StdoutMessage::from(<&str as Colorize>::red(" ✗")));
                 } else {
@@ -450,8 +452,9 @@ fn handle_coding_agent_events(
                 delta: StreamDelta::Text { delta },
                 ..
             } => {
-                // When leaving a thinking block, print the divider.
-                // Note: the last thinking delta may not end with '\n'.
+                // Exit thinking block when the first normal text delta arrives.
+                // We add a newline + divider here because the last thinking delta
+                // from the provider often does not end with '\n'.
                 if *in_thinking {
                     if !cli.no_hints {
                         stdout.write(StdoutMessage::newline());
@@ -476,18 +479,19 @@ fn handle_coding_agent_events(
                     }
 
                     if !*in_thinking {
-                        // First thinking of the block. Rely on previous output to have ended its line.
+                        // First thinking delta of this block → print header.
+                        // We rely on previous output (tool result or previous turn) to have ended its line.
                         stdout.write(thinking_header());
                         *in_thinking = true;
                         *thinking_shown = true;
                     }
 
-                    // Reset text state when we receive thinking
+                    // When we receive thinking, we are no longer in normal text output mode.
                     if *in_text {
                         *in_text = false;
                     }
 
-                    // Print the extracted thinking text (dimmed)
+                    // Print thinking content dimmed (no extra newlines — deltas are incremental).
                     stdout.write(StdoutMessage::from(thinking_text.dimmed()));
                 }
             }
@@ -495,8 +499,9 @@ fn handle_coding_agent_events(
                 message: AgentMessage::Llm(yoagent::types::Message::Assistant { content, .. }),
                 ..
             } => {
-                // Handle final Content::Thinking (only for non-streaming case)
-                // If we already showed thinking via StreamDelta::Thinking, skip to avoid duplication.
+                // Non-streaming fallback: if the entire response came back as one message
+                // containing Content::Thinking, we render it here.
+                // We only do this if we didn't already render via streaming deltas.
                 if !cli.no_hints
                     && !*thinking_shown
                     && let Some(thinking_text) = extract_thinking_from_final_content(content)
@@ -506,7 +511,7 @@ fn handle_coding_agent_events(
                         continue;
                     }
 
-                    // Non-streaming final thinking. Add a leading newline before the header.
+                    // Non-streaming path: add a leading newline before the header for spacing.
                     stdout.write(thinking_header());
                     stdout.write(StdoutMessage::from(thinking_text.dimmed()));
                     stdout.write(thinking_divider());
