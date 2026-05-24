@@ -29,6 +29,7 @@ use {
             state::{NextState, States},
         },
     },
+    bevy_ratatui::crossterm::terminal,
     bevy_tokio_tasks::TokioTasksRuntime,
     colored::Colorize,
     std::{
@@ -268,8 +269,21 @@ enum CodingAgentState {
 pub struct CodingAgentTask {
     last_usage: Usage,
     in_text: bool,
+    in_thinking: bool,
+    /// Tracks whether we have already displayed thinking content during this response
+    /// (via StreamDelta::Thinking). Used to avoid duplicating Content::Thinking in MessageEnd.
+    thinking_shown: bool,
 }
 
+/// Bevy Message (buffered) — introduced as a distinct concept in Bevy 0.17.
+///
+/// Since Bevy 0.17:
+/// - `Event` trait is reserved for observable/reactive events (Observer, trigger, On<Event>).
+/// - `Message` trait is for classic buffered, high-throughput fire-and-forget messages.
+///
+/// `CodingAgentEvent` uses the Message system because it carries a continuous stream
+/// of yoagent events (text/thinking/tool deltas + final usage) from the LLM agent
+/// into Bevy systems. This is the correct choice for this use case.
 #[derive(Debug, Deref, DerefMut, Message)]
 pub struct CodingAgentEvent(AgentEvent);
 
@@ -324,6 +338,27 @@ fn usage_info(Usage { input, output, .. }: &Usage) -> String {
     }
 }
 
+/// Returns a dimmed "Thinking" header for starting a thinking block.
+fn thinking_header() -> StdoutMessage {
+    let (width, _height) = terminal::size().unwrap_or((80, 24));
+    StdoutMessage::from(format!("── Thinking {}\n", "─".repeat(width as usize - 12)).dimmed())
+}
+
+/// Returns a dimmed divider used when exiting a thinking block.
+fn thinking_divider() -> StdoutMessage {
+    let (width, _height) = terminal::size().unwrap_or((80, 24));
+    StdoutMessage::from(format!("{}\n", "─".repeat(width as usize)).dimmed())
+}
+
+/// Bevy buffered Message handling (confirmed for this change).
+///
+/// Since Bevy 0.17, the engine distinguishes:
+/// - `Message` (buffered, via MessageReader/MessageWriter) — what we use here.
+/// - `Event` (observable/reactive, via Observer) — intentionally not used for agent streaming.
+///
+/// This function is the single place where yoagent events (including future
+/// StreamDelta::Thinking and Content::Thinking handling) are turned into
+/// visible StdoutMessage output.
 fn handle_coding_agent_events(
     mut messages: MessageReader<CodingAgentEvent>,
     mut coding_agent_task: ResMut<CodingAgentTask>,
@@ -334,6 +369,8 @@ fn handle_coding_agent_events(
         let CodingAgentTask {
             last_usage,
             in_text,
+            in_thinking,
+            thinking_shown,
             ..
         } = coding_agent_task.as_mut();
 
@@ -376,21 +413,30 @@ fn handle_coding_agent_events(
                 };
                 if !cli.no_hints {
                     stdout.write(StdoutMessage::from(<&str as Colorize>::yellow(
-                        format!("  ▶ {summary}").as_str(),
+                        format!("\n  ▶ {summary}").as_str(),
                     )));
                 }
             }
             AgentEvent::ToolExecutionEnd { is_error, .. } if !cli.no_hints => {
                 if *is_error {
-                    stdout.write(StdoutMessage::from(<&str as Colorize>::red(" ✗\n")));
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::red(" ✗")));
                 } else {
-                    stdout.write(StdoutMessage::from(<&str as Colorize>::green(" ✓\n")));
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::green(" ✓")));
                 }
             }
             AgentEvent::MessageUpdate {
                 delta: StreamDelta::Text { delta },
                 ..
             } => {
+                // Exit thinking state if we were in it (print divider)
+                if *in_thinking {
+                    if !cli.no_hints {
+                        stdout.write(StdoutMessage::newline());
+                        stdout.write(thinking_divider());
+                    }
+                    *in_thinking = false;
+                }
+
                 if !*in_text {
                     if !cli.no_hints {
                         stdout.write(StdoutMessage::newline());
@@ -399,10 +445,41 @@ fn handle_coding_agent_events(
                 }
                 stdout.write(StdoutMessage::from(delta));
             }
+            AgentEvent::MessageUpdate {
+                delta: StreamDelta::Thinking { delta },
+                ..
+            } if !cli.no_hints => {
+                if !*in_thinking {
+                    // First thinking delta: print header and enter thinking state
+                    stdout.write(thinking_header());
+                    *in_thinking = true;
+                    *thinking_shown = true; // Mark that we have shown thinking via streaming
+                }
+
+                // Reset text state when we receive thinking
+                if *in_text {
+                    *in_text = false;
+                }
+
+                // Print the thinking delta (dimmed)
+                stdout.write(StdoutMessage::from(delta.dimmed()));
+            }
             AgentEvent::MessageEnd {
                 message: AgentMessage::Llm(yoagent::types::Message::Assistant { content, .. }),
                 ..
             } => {
+                // Handle final Content::Thinking (only for non-streaming case)
+                // If we already showed thinking via StreamDelta::Thinking, skip to avoid duplication.
+                if !cli.no_hints && !*thinking_shown {
+                    for cnt in content.iter() {
+                        if let Content::Thinking { thinking, .. } = cnt {
+                            stdout.write(thinking_header());
+                            stdout.write(StdoutMessage::from(thinking.dimmed()));
+                            stdout.write(thinking_divider());
+                        }
+                    }
+                }
+
                 if let Some(output) = cli.output.as_ref() {
                     for cnt in content.iter() {
                         if let Content::Text { text } = cnt {
@@ -412,6 +489,12 @@ fn handle_coding_agent_events(
                 }
             }
             AgentEvent::AgentEnd { messages } => {
+                // Reset thinking-related state at the end of a turn
+                if *in_thinking {
+                    *in_thinking = false;
+                }
+                *thinking_shown = false;
+
                 for msg in messages.iter().rev() {
                     if let AgentMessage::Llm(yoagent::types::Message::Assistant { usage, .. }) = msg
                     {
@@ -425,7 +508,11 @@ fn handle_coding_agent_events(
                     }
                 }
             }
-            _ => {}
+            _ => {} // NOTE:
+                    // - All agent streaming output (including thinking) must stay on Bevy 0.17+ buffered Message system.
+                    // - Thinking handling (2.1+) is implemented above.
+                    // - Styling must use `colored::Colorize` + `StdoutMessage::from(...)`.
+                    // - Thinking + token output must respect `cli.no_hints` (see design.md).
         }
     }
 }
@@ -447,6 +534,9 @@ pub fn coding_agent_plugin(app: &mut App) {
     app.init_resource::<CodingAgentPromptChannel>()
         .add_systems(Startup, setup)
         .init_state::<CodingAgentState>()
+        // Bevy 0.17+ buffered Message registration (not add_event / Event).
+        // We use the Message system (not the new observable Event + Observer system)
+        // because CodingAgentEvent carries high-volume streaming data from yoagent.
         .add_message::<CodingAgentEvent>()
         .add_systems(
             Update,
