@@ -470,6 +470,11 @@ fn handle_coding_agent_events(
             }
             AgentEvent::MessageUpdate { delta, .. } if !cli.no_hints => {
                 if let Some(thinking_text) = extract_thinking_from_delta(delta) {
+                    if thinking_text.trim().is_empty() {
+                        // Ignore empty thinking deltas to avoid blank thinking blocks.
+                        continue;
+                    }
+
                     if !*in_thinking {
                         // First thinking of the block. Rely on previous output to have ended its line.
                         stdout.write(thinking_header());
@@ -496,6 +501,11 @@ fn handle_coding_agent_events(
                     && !*thinking_shown
                     && let Some(thinking_text) = extract_thinking_from_final_content(content)
                 {
+                    if thinking_text.trim().is_empty() {
+                        // Skip empty thinking content to avoid blank thinking blocks.
+                        continue;
+                    }
+
                     // Non-streaming final thinking. Add a leading newline before the header.
                     stdout.write(thinking_header());
                     stdout.write(StdoutMessage::from(thinking_text.dimmed()));
