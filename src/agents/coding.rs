@@ -350,6 +350,26 @@ fn thinking_divider() -> StdoutMessage {
     StdoutMessage::from(format!("{}\n", "─".repeat(width as usize)).dimmed())
 }
 
+/// Extracts the thinking text from a streaming `StreamDelta`, if it is a Thinking delta.
+fn extract_thinking_from_delta(delta: &StreamDelta) -> Option<String> {
+    match delta {
+        StreamDelta::Thinking { delta } => Some(delta.clone()),
+        _ => None,
+    }
+}
+
+/// Extracts the thinking text from the final assistant message content, if present.
+/// Returns the text of the first `Content::Thinking` variant found.
+fn extract_thinking_from_final_content(content: &[Content]) -> Option<String> {
+    content.iter().find_map(|c| {
+        if let Content::Thinking { thinking, .. } = c {
+            Some(thinking.clone())
+        } else {
+            None
+        }
+    })
+}
+
 /// Bevy buffered Message handling (confirmed for this change).
 ///
 /// Since Bevy 0.17, the engine distinguishes:
@@ -445,24 +465,23 @@ fn handle_coding_agent_events(
                 }
                 stdout.write(StdoutMessage::from(delta));
             }
-            AgentEvent::MessageUpdate {
-                delta: StreamDelta::Thinking { delta },
-                ..
-            } if !cli.no_hints => {
-                if !*in_thinking {
-                    // First thinking delta: print header and enter thinking state
-                    stdout.write(thinking_header());
-                    *in_thinking = true;
-                    *thinking_shown = true; // Mark that we have shown thinking via streaming
-                }
+            AgentEvent::MessageUpdate { delta, .. } if !cli.no_hints => {
+                if let Some(thinking_text) = extract_thinking_from_delta(delta) {
+                    if !*in_thinking {
+                        // First thinking delta: print header and enter thinking state
+                        stdout.write(thinking_header());
+                        *in_thinking = true;
+                        *thinking_shown = true; // Mark that we have shown thinking via streaming
+                    }
 
-                // Reset text state when we receive thinking
-                if *in_text {
-                    *in_text = false;
-                }
+                    // Reset text state when we receive thinking
+                    if *in_text {
+                        *in_text = false;
+                    }
 
-                // Print the thinking delta (dimmed)
-                stdout.write(StdoutMessage::from(delta.dimmed()));
+                    // Print the extracted thinking text (dimmed)
+                    stdout.write(StdoutMessage::from(thinking_text.dimmed()));
+                }
             }
             AgentEvent::MessageEnd {
                 message: AgentMessage::Llm(yoagent::types::Message::Assistant { content, .. }),
@@ -470,14 +489,13 @@ fn handle_coding_agent_events(
             } => {
                 // Handle final Content::Thinking (only for non-streaming case)
                 // If we already showed thinking via StreamDelta::Thinking, skip to avoid duplication.
-                if !cli.no_hints && !*thinking_shown {
-                    for cnt in content.iter() {
-                        if let Content::Thinking { thinking, .. } = cnt {
-                            stdout.write(thinking_header());
-                            stdout.write(StdoutMessage::from(thinking.dimmed()));
-                            stdout.write(thinking_divider());
-                        }
-                    }
+                if !cli.no_hints
+                    && !*thinking_shown
+                    && let Some(thinking_text) = extract_thinking_from_final_content(content)
+                {
+                    stdout.write(thinking_header());
+                    stdout.write(StdoutMessage::from(thinking_text.dimmed()));
+                    stdout.write(thinking_divider());
                 }
 
                 if let Some(output) = cli.output.as_ref() {
