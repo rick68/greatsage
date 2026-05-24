@@ -440,11 +440,10 @@ fn handle_coding_agent_events(
                 }
             }
             AgentEvent::ToolExecutionEnd { is_error, .. } if !cli.no_hints => {
-                // Append '\n' after tool status (✓/✗) so subsequent output starts on a new line.
                 if *is_error {
-                    stdout.write(StdoutMessage::from(<&str as Colorize>::red(" ✗\n")));
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::red(" ✗")));
                 } else {
-                    stdout.write(StdoutMessage::from(<&str as Colorize>::green(" ✓\n")));
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::green(" ✓")));
                 }
             }
             AgentEvent::MessageUpdate {
@@ -455,6 +454,7 @@ fn handle_coding_agent_events(
                 // Note: the last thinking delta may not end with '\n'.
                 if *in_thinking {
                     if !cli.no_hints {
+                        stdout.write(StdoutMessage::newline());
                         stdout.write(thinking_divider());
                     }
                     *in_thinking = false;
