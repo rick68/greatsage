@@ -39,7 +39,7 @@ keywords = []
 license = "MIT OR Apache-2.0"
 name = "greatsage"
 repository = "https://github.com/rick68/greatsage"
-version = "0.0.4"
+version = "0.0.5"
 
 [profile.dev.package.backtrace]
 opt-level = 3
