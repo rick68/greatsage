@@ -4,6 +4,7 @@ bevy = { version = "0.18.1", default-features = false, features = [
     "std",
 ] }
 bevy-tokio-tasks = "0.18.0"
+bevy_brp_extras = { version = "0.19.0", optional = true }
 bevy_ratatui = "0.11.1"
 clap = { version = "4.6.1", features = ["derive", "env"] }
 clap-help = "1.5.0"
@@ -22,14 +23,27 @@ tokio = { version = "1.52.3", features = ["macros", "rt"] }
 tokio-util = "0.7.18"
 unicode-width = "0.2.2"
 url = { version = "2.5.8", features = ["serde"] }
-yoagent = { version = "0.8.0", features = ["openapi"] }
+yoagent = { version = "0.8.3", features = ["openapi"] }
 
 [features]
 default = []
+dev = [
+    "bevy/bevy_dev_tools",
+    "bevy/track_location",
+]
+dev_native = [
+    "bevy/bevy_remote",
+    "bevy/hotpatching",
+    "dep:bevy_brp_extras",
+    "dev",
+]
 
 [lints.clippy]
 diverging_sub_expression = "allow"
 let_underscore_future = "allow"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(bevy_lint)"] }
 
 [package]
 categories = []
@@ -41,8 +55,30 @@ name = "greatsage"
 repository = "https://github.com/rick68/greatsage"
 version = "0.0.5"
 
-[profile.dev.package.backtrace]
+[package.metadata.bevy_cli.dev]
+features = [ "dev_native" ]
+
+[package.metadata.bevy_cli.release]
+default-features = false
+
+[profile.ci]
+inherits = "dev"
+opt-level = 0
+debug = "line-tables-only"
+codegen-units = 4
+
+[profile.ci.package."*"]
+opt-level = 0
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
 opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 openssl = { version = "0.10.80", features = ["vendored"] }
