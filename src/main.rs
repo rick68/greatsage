@@ -25,7 +25,7 @@ use {
     },
     bevy::{
         DefaultPlugins,
-        app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update},
+        app::{App, AppExit, ScheduleRunnerPlugin, Update},
         ecs::{
             change_detection::Res,
             schedule::{
@@ -72,14 +72,19 @@ fn main() {
 
     let mut app = App::new();
     app.insert_resource::<Cli>(cli.clone()).add_plugins((
-        DefaultPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f32(
-            FRAMES_PER_SECOND.recip(),
-        ))),
+        DefaultPlugins,
+        ScheduleRunnerPlugin::run_loop(Duration::from_secs_f32(FRAMES_PER_SECOND.recip())),
         tokio_plugin,
         config_plugin,
         stdout_plugin,
         agents_plugin,
     ));
+
+    #[cfg(feature = "dev_native")]
+    {
+        app.add_plugins(bevy::remote::RemotePlugin::default());
+        app.add_plugins(bevy_brp_extras::BrpExtrasPlugin);
+    }
 
     if io::stdin().is_terminal() {
         app.add_plugins(stdin_plugin);
