@@ -328,6 +328,16 @@ impl Config {
             vec![]
         }
     }
+
+    /// `[session]` retention keys in `.greatsage.toml`:
+    /// - `max_turns` — max `TurnSummary` entities per session before prune (default 200)
+    /// - `max_tool_records` — max `ToolCallRecord` entities per session before prune (default 2000)
+    pub fn session_limits(&self) -> (usize, usize) {
+        (
+            self.get_int("session.max_turns").unwrap_or(200) as usize,
+            self.get_int("session.max_tool_records").unwrap_or(2000) as usize,
+        )
+    }
 }
 
 fn setup(mut commands: Commands, cli: Res<Cli>) {

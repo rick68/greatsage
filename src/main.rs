@@ -26,8 +26,7 @@ use {
         tokio::tokio_plugin,
     },
     bevy::{
-        DefaultPlugins,
-        app::{App, AppExit, ScheduleRunnerPlugin, Update},
+        app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update, },
         ecs::{
             change_detection::Res,
             schedule::{
@@ -45,6 +44,24 @@ use {
 };
 
 const FRAMES_PER_SECOND: f32 = 30.0;
+
+fn schedule_runner() -> ScheduleRunnerPlugin {
+    ScheduleRunnerPlugin::run_loop(Duration::from_secs_f32(FRAMES_PER_SECOND.recip()))
+}
+
+/// `dev_native` pulls render/window plugins via `bevy_brp_extras`; the CLI stays
+/// headless and only needs a ticking schedule for ECS + BRP.
+fn default_plugins() -> bevy::app::PluginGroupBuilder {
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "dev_native")] {
+            use bevy::{MinimalPlugins, state::app::StatesPlugin};
+            MinimalPlugins.set(schedule_runner()).add(StatesPlugin)
+        } else {
+            use bevy::{MinimalPlugins, state::app::StatesPlugin};
+            MinimalPlugins.set(schedule_runner()).add(StatesPlugin)
+        }
+    }
+}
 
 fn main() {
     let _ = dotenvy::dotenv();
@@ -74,8 +91,7 @@ fn main() {
 
     let mut app = App::new();
     app.insert_resource::<Cli>(cli.clone()).add_plugins((
-        DefaultPlugins,
-        ScheduleRunnerPlugin::run_loop(Duration::from_secs_f32(FRAMES_PER_SECOND.recip())),
+        default_plugins(),
         tokio_plugin,
         config_plugin,
         stdout_plugin,
@@ -85,11 +101,17 @@ fn main() {
 
     #[cfg(feature = "dev_native")]
     {
-        app.add_plugins(bevy::remote::RemotePlugin::default());
-        app.add_plugins(bevy_brp_extras::BrpExtrasPlugin);
+        use bevy::remote::{RemotePlugin, http::RemoteHttpPlugin};
+        let port = std::env::var("BRP_EXTRAS_PORT")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(15702);
+        app.add_plugins(RemotePlugin::default())
+            .add_plugins(RemoteHttpPlugin::default().with_port(port));
     }
 
-    if io::stdin().is_terminal() {
+    let prompt_mode = prompt_arg.is_some();
+    if !prompt_mode && io::stdin().is_terminal() {
         app.add_plugins(stdin_plugin);
     }
 
@@ -117,6 +139,6 @@ fn main() {
     }
 
     if let AppExit::Error(code) = app.run() {
-        () = std::process::exit(code.get() as i32);
+        std::process::exit(code.get() as i32);
     }
 }

@@ -382,7 +382,7 @@ fn spawn_agent_task(
         }
 
         tokio_runtime.spawn_background_task(move |mut ctx| async move {
-            let mut rx = coding_agent.lock().await.prompt(prompt.clone()).await;
+            let mut rx = coding_agent.lock().await.prompt(prompt).await;
 
             while let Some(event) = rx.recv().await {
                 () = ctx
