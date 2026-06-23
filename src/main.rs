@@ -8,6 +8,7 @@ mod cli;
 mod config;
 mod providers;
 mod repl;
+mod session;
 mod stdin;
 mod stdout;
 mod tokio;
@@ -19,6 +20,7 @@ use {
         cli::Cli,
         config::config_plugin,
         repl::repl_plugin,
+        session::session_plugin,
         stdin::stdin_plugin,
         stdout::stdout_plugin,
         tokio::tokio_plugin,
@@ -77,6 +79,7 @@ fn main() {
         tokio_plugin,
         config_plugin,
         stdout_plugin,
+        session_plugin,
         agents_plugin,
     ));
 

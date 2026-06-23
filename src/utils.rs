@@ -4,3 +4,12 @@ pub(crate) fn truncate(s: &str, max: usize) -> &str {
         None => s,
     }
 }
+
+pub(crate) fn now_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}

@@ -1,6 +1,7 @@
 mod coding;
-pub use coding::{
-    CodingAgent, CodingAgentPromptChannel, CodingAgentTask, SYSTEM_PROMPT, coding_agent_plugin,
+pub(crate) use coding::{
+    CodingAgent, CodingAgentEvent, CodingAgentPromptChannel, CodingAgentTask, SYSTEM_PROMPT,
+    coding_agent_plugin, install_coding_agent,
 };
 
 use {

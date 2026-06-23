@@ -30,3 +30,9 @@ impl From<&Provider> for config::ValueKind {
         config::ValueKind::String(provider.to_string())
     }
 }
+
+impl Into<String> for Provider {
+    fn into(self) -> String {
+        self.to_string()
+    }
+}

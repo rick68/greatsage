@@ -5,6 +5,10 @@ use {
         config::{Config, McpConfig},
         providers::Provider,
         repl::prompt_symbol,
+        session::{
+            AgentId, FocusedSession, SessionId, SessionManager, SessionRuntimeStatus,
+            spawn_session_root, sync_session_meta, teardown_session,
+        },
         stdout::StdoutMessage,
         tokio::AppCancelToken,
         utils::truncate,
@@ -22,7 +26,6 @@ use {
             system::Commands,
             world::World,
         },
-        prelude::{Deref, DerefMut},
         state::{
             app::AppExtStates,
             condition::in_state,
@@ -35,6 +38,7 @@ use {
     std::{
         env, fs,
         io::{self, IsTerminal},
+        ops::{Deref, DerefMut},
         sync::Arc,
     },
     tokio::sync::Mutex,
@@ -53,10 +57,41 @@ Use tools proactively: read files to understand context, run commands to verify 
 After making changes, run tests or verify the result when appropriate.
 "#;
 
-#[derive(Clone, Deref, DerefMut, Resource)]
-pub struct CodingAgent(Arc<Mutex<Agent>>);
+#[derive(Clone, Resource)]
+pub struct CodingAgent {
+    inner: Arc<Mutex<Agent>>,
+    agent_id: AgentId,
+    session_id: SessionId,
+}
+
+impl Deref for CodingAgent {
+    type Target = Arc<Mutex<Agent>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for CodingAgent {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
 
 impl CodingAgent {
+    #[allow(dead_code)]
+    pub fn agent_id(&self) -> AgentId {
+        self.agent_id
+    }
+
+    pub fn session_id(&self) -> SessionId {
+        self.session_id
+    }
+
+    fn bind_session(&mut self, session_id: SessionId) {
+        self.session_id = session_id;
+    }
+
     pub async fn new_with_agent_config(agent_config: &AgentConfig) -> Self {
         let AgentConfig {
             model,
@@ -162,8 +197,34 @@ impl CodingAgent {
             }
         }
 
-        CodingAgent(Arc::new(Mutex::new(agent)))
+        let inner = Arc::new(Mutex::new(agent));
+        let agent_id = AgentId::of(&inner);
+
+        Self {
+            inner,
+            agent_id,
+            session_id: SessionId::default(),
+        }
     }
+}
+
+/// Insert a new agent, allocate its session, and tear down any prior agent session.
+pub(crate) fn install_coding_agent(
+    world: &mut World,
+    agent: CodingAgent,
+    model: impl Into<String>,
+    provider: impl Into<String>,
+) {
+    if let Some(old) = world.remove_resource::<CodingAgent>() {
+        teardown_session(world, old.session_id());
+    }
+
+    let mut agent = agent;
+    let (session_id, _) = spawn_session_root(world);
+    agent.bind_session(session_id);
+    sync_session_meta(world, session_id, model, provider);
+    world.resource_mut::<FocusedSession>().set(session_id);
+    world.insert_resource(agent);
 }
 
 #[derive(Clone, Resource)]
@@ -208,12 +269,14 @@ fn setup(
 ) {
     let config = config.clone();
     let agent_config = AgentConfig::from(&config);
+    let model = agent_config.model.clone();
+    let provider = agent_config.provider.to_string();
 
     tokio_runtime.spawn_background_task(move |mut ctx| async move {
         let agent_config = AgentConfig::from(&config);
         let coding_agent = CodingAgent::new_with_agent_config(&agent_config).await;
         ctx.run_on_main_thread(move |ctx| {
-            ctx.world.insert_resource::<CodingAgent>(coding_agent);
+            install_coding_agent(ctx.world, coding_agent, model, provider);
         })
         .await;
     });
@@ -284,13 +347,25 @@ pub struct CodingAgentTask {
 /// `CodingAgentEvent` uses the Message system because it carries a continuous stream
 /// of yoagent events (text/thinking/tool deltas + final usage) from the LLM agent
 /// into Bevy systems. This is the correct choice for this use case.
-#[derive(Debug, Deref, DerefMut, Message)]
-pub struct CodingAgentEvent(AgentEvent);
+#[derive(Debug, Message)]
+pub struct CodingAgentEvent {
+    pub session_id: SessionId,
+    pub event: AgentEvent,
+}
+
+impl std::ops::Deref for CodingAgentEvent {
+    type Target = AgentEvent;
+
+    fn deref(&self) -> &Self::Target {
+        &self.event
+    }
+}
 
 fn spawn_agent_task(
     coding_agent: Option<ResMut<CodingAgent>>,
     channel: Res<CodingAgentPromptChannel>,
     tokio_runtime: ResMut<TokioTasksRuntime>,
+    session_manager: Res<SessionManager>,
     mut commands: Commands,
     mut next_state: ResMut<NextState<CodingAgentState>>,
 ) {
@@ -298,22 +373,39 @@ fn spawn_agent_task(
         && let Ok(prompt) = channel.receiver.try_recv()
     {
         let coding_agent = coding_agent.clone();
+        let session_id = coding_agent.session_id();
+
+        if let Some(root) = session_manager.root_entity(session_id) {
+            commands
+                .entity(root)
+                .insert(SessionRuntimeStatus::processing());
+        }
 
         tokio_runtime.spawn_background_task(move |mut ctx| async move {
             let mut rx = coding_agent.lock().await.prompt(prompt.clone()).await;
 
             while let Some(event) = rx.recv().await {
                 () = ctx
-                    .run_on_main_thread(|ctx| {
+                    .run_on_main_thread(move |ctx| {
                         ctx.world
-                            .write_message::<CodingAgentEvent>(CodingAgentEvent(event));
+                            .write_message::<CodingAgentEvent>(CodingAgentEvent {
+                                session_id,
+                                event,
+                            });
                     })
                     .await;
             }
 
-            ctx.run_on_main_thread(|ctx| {
+            ctx.run_on_main_thread(move |ctx| {
                 let world: &mut World = ctx.world;
                 world.remove_resource::<CodingAgentTask>();
+
+                if let Some(root) = world.resource::<SessionManager>().root_entity(session_id)
+                    && let Ok(mut entity) = world.get_entity_mut(root)
+                    && let Some(mut status) = entity.get_mut::<SessionRuntimeStatus>()
+                {
+                    status.set_idle();
+                }
 
                 world
                     .get_resource_mut::<NextState<CodingAgentState>>()
@@ -323,8 +415,8 @@ fn spawn_agent_task(
             .await;
         });
 
-        commands.init_resource::<CodingAgentTask>();
-        next_state.set(CodingAgentState::Processing);
+        () = commands.init_resource::<CodingAgentTask>();
+        () = next_state.set(CodingAgentState::Processing);
     }
 }
 
@@ -387,7 +479,8 @@ fn handle_coding_agent_events(
     mut stdout: MessageWriter<StdoutMessage>,
     cli: Res<Cli>,
 ) {
-    for CodingAgentEvent(event) in messages.read() {
+    for msg in messages.read() {
+        let event = &msg.event;
         let CodingAgentTask {
             last_usage,
             in_text,
@@ -545,8 +638,7 @@ fn handle_coding_agent_events(
                     }
                 }
             }
-            _ => {}
-                    // Note:
+            _ => {} // Note:
                     // - All streaming output uses Bevy Message (not Event).
                     // - Thinking output respects `no_hints` and uses `Colorize` + `StdoutMessage`.
                     // - `thinking_shown` prevents duplicate thinking between deltas and final Content::Thinking.

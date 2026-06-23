@@ -1,6 +1,9 @@
 use {
     crate::{
-        agents::{AgentConfig, CodingAgent, CodingAgentPromptChannel, CodingAgentTask},
+        agents::{
+            AgentConfig, CodingAgent, CodingAgentPromptChannel, CodingAgentTask,
+            install_coding_agent,
+        },
         cli::Cli,
         config::Config,
         stdin::StdinKeyMessage,
@@ -191,11 +194,18 @@ fn read_stdin_stream(
                         }
                         "/clear" => {
                             let agent_config = agent_config.clone();
+                            let model = agent_config.model.clone();
+                            let provider = agent_config.provider.to_string();
                             tokio_runtime.spawn_background_task(|mut ctx| async move {
                                 let coding_agent =
                                     CodingAgent::new_with_agent_config(&agent_config).await;
                                 ctx.run_on_main_thread(|ctx| {
-                                    ctx.world.insert_resource(coding_agent);
+                                    () = install_coding_agent(
+                                        ctx.world,
+                                        coding_agent,
+                                        model,
+                                        provider,
+                                    );
                                 })
                                 .await;
                             });
@@ -213,8 +223,13 @@ fn read_stdin_stream(
                             tokio_runtime.spawn_background_task(|mut ctx| async move {
                                 let coding_agent =
                                     CodingAgent::new_with_agent_config(&agent_config).await;
-                                ctx.run_on_main_thread(|ctx| {
-                                    ctx.world.insert_resource(coding_agent);
+                                ctx.run_on_main_thread(move |ctx| {
+                                    () = install_coding_agent(
+                                        ctx.world,
+                                        coding_agent,
+                                        agent_config.model,
+                                        agent_config.provider,
+                                    );
                                 })
                                 .await;
                             });
@@ -224,11 +239,11 @@ fn read_stdin_stream(
                     stdout.write(StdoutMessage::newline());
                     stdout.write(StdoutMessage::from(prompt_symbol()));
                 } else {
-                    prompt_channel.send_prompt(content.clone());
+                    () = prompt_channel.send_prompt(content.clone());
                     stdout.write(StdoutMessage::newline());
                 }
                 *cursor = 0;
-                content.clear();
+                () = content.clear();
             }
             _ => (),
         }
