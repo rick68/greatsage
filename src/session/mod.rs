@@ -1,6 +1,11 @@
 mod components;
 pub(crate) use components::{AgentId, SessionId, SessionRuntimeStatus};
 
+#[cfg(feature = "dev_native")]
+mod brp;
+#[cfg(feature = "dev_native")]
+pub use brp::register_session_brp_methods;
+
 mod content;
 
 mod lifecycle;

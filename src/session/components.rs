@@ -135,6 +135,11 @@ impl SessionRuntimeStatus {
         }
     }
 
+    #[cfg_attr(not(feature = "dev_native"), allow(dead_code))]
+    pub(crate) fn runtime_state(&self) -> AgentRuntimeState {
+        self.state
+    }
+
     pub(crate) fn set_processing(&mut self) {
         self.state = AgentRuntimeState::Processing;
     }

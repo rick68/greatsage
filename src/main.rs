@@ -106,8 +106,10 @@ fn main() {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(15702);
-        app.add_plugins(RemotePlugin::default())
-            .add_plugins(RemoteHttpPlugin::default().with_port(port));
+        app.add_plugins(session::register_session_brp_methods(
+            RemotePlugin::default(),
+        ))
+        .add_plugins(RemoteHttpPlugin::default().with_port(port));
     }
 
     let prompt_mode = prompt_arg.is_some();
