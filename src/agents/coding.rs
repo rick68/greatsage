@@ -420,14 +420,42 @@ fn spawn_agent_task(
     }
 }
 
-fn usage_info(Usage { input, output, .. }: &Usage) -> String {
-    if *input > 0 || *output > 0 {
-        format!("\n\n  tokens: {input} in / {output} out\n")
-            .dimmed()
-            .to_string()
-    } else {
-        String::new()
+/// Provider-reported `Usage.input` is uncached prompt tokens only; cache hits live in
+/// `cache_read` / `cache_write`. Show total input so REPL hints match billed context size.
+fn format_usage_line(usage: &Usage) -> Option<String> {
+    let Usage {
+        input,
+        output,
+        cache_read,
+        cache_write,
+        ..
+    } = usage;
+    let total_in = input.saturating_add(*cache_read).saturating_add(*cache_write);
+    if total_in == 0 && *output == 0 {
+        return None;
     }
+
+    let mut line = format!("tokens: {total_in} in / {output} out");
+    if *cache_read > 0 || *cache_write > 0 {
+        let mut parts = Vec::new();
+        if *input > 0 {
+            parts.push(format!("{input} new"));
+        }
+        if *cache_read > 0 {
+            parts.push(format!("{cache_read} cache read"));
+        }
+        if *cache_write > 0 {
+            parts.push(format!("{cache_write} cache write"));
+        }
+        line.push_str(&format!(" ({})", parts.join(", ")));
+    }
+    Some(line)
+}
+
+fn usage_info(usage: &Usage) -> String {
+    format_usage_line(usage)
+        .map(|line| format!("\n\n  {line}\n").dimmed().to_string())
+        .unwrap_or_default()
 }
 
 /// Dimmed full-width header for the start of a thinking block.
@@ -656,6 +684,50 @@ fn shutdown_coding_agent(
         {
             cancel.cancel();
         }
+    }
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::format_usage_line;
+    use yoagent::types::Usage;
+
+    #[test]
+    fn usage_line_sums_cache_into_total_input() {
+        let line = format_usage_line(&Usage {
+            input: 68,
+            output: 38,
+            cache_read: 2800,
+            cache_write: 0,
+            total_tokens: 0,
+        })
+        .expect("usage line");
+        assert_eq!(line, "tokens: 2868 in / 38 out (68 new, 2800 cache read)");
+    }
+
+    #[test]
+    fn usage_line_omits_breakdown_without_cache() {
+        let line = format_usage_line(&Usage {
+            input: 2789,
+            output: 29,
+            cache_read: 0,
+            cache_write: 0,
+            total_tokens: 0,
+        })
+        .expect("usage line");
+        assert_eq!(line, "tokens: 2789 in / 29 out");
+    }
+
+    #[test]
+    fn usage_line_empty_when_all_zero() {
+        assert!(format_usage_line(&Usage {
+            input: 0,
+            output: 0,
+            cache_read: 0,
+            cache_write: 0,
+            total_tokens: 0,
+        })
+        .is_none());
     }
 }
 
