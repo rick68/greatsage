@@ -258,7 +258,7 @@ fn prompt_api_key(
     existing: &ExistingSetup,
     provider_changed: bool,
 ) -> Result<Option<(Option<String>, bool)>, SetupError> {
-    ()  = print_step(2, "Enter your API key");
+    () = print_step(2, "Enter your API key");
     let env_var = provider_env_var(provider).unwrap_or("API_KEY");
     let existing_key = resolve_existing_api_key(provider, existing, provider_changed);
 

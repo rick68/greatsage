@@ -301,10 +301,7 @@ impl Config {
             crate::env_load::resolve_credential_value_with_paired_env(value, paired_ref)
         };
 
-        let api_key = self
-            .get_string("api_key")
-            .ok()
-            .and_then(resolve);
+        let api_key = self.get_string("api_key").ok().and_then(resolve);
         match provider {
             Some(Provider::Anthropic) => self.get_string("anthropic_api_key").ok(),
             Some(Provider::Cerebras) => self.get_string("cerebras_api_key").ok(),

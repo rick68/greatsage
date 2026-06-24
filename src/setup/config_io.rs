@@ -52,9 +52,8 @@ fn load_existing_from_path(path: &Path) -> ExistingSetup {
 
     let paired_env = crate::config_paths::paired_env_path(path);
     let paired_ref = paired_env.is_file().then_some(paired_env.as_path());
-    let resolve = |raw: String| {
-        crate::env_load::resolve_credential_value_with_paired_env(&raw, paired_ref)
-    };
+    let resolve =
+        |raw: String| crate::env_load::resolve_credential_value_with_paired_env(&raw, paired_ref);
 
     let model = toml_string(doc.get("model")).and_then(resolve);
     let base_url = toml_string(doc.get("base_url")).and_then(resolve);

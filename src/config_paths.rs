@@ -81,10 +81,10 @@ pub fn repo_env_path(cwd: &Path) -> PathBuf {
 
 /// Outermost existing file found walking up from `start` (includes `start`).
 fn find_existing_file_upward(
-    start: &Path,
+    start: impl AsRef<Path>,
     path_at: impl Fn(&Path) -> PathBuf,
 ) -> Option<PathBuf> {
-    let mut dir = start.to_path_buf();
+    let mut dir = start.as_ref().to_path_buf();
     let mut found = None;
     loop {
         let candidate = path_at(&dir);
@@ -105,14 +105,14 @@ pub fn env_file_search_paths_low_to_high(cwd: &Path, home: &Path) -> Vec<PathBuf
     let mut paths = Vec::new();
     let user = user_env_path(home);
     if user.is_file() {
-        paths.push(user);
+        () = paths.push(user);
     }
     if let Some(project) = find_existing_file_upward(cwd, project_env_path) {
-        paths.push(project);
+        () = paths.push(project);
     }
     if let Some(repo) = find_existing_file_upward(cwd, repo_env_path) {
         if !paths.contains(&repo) {
-            paths.push(repo);
+            () = paths.push(repo);
         }
     }
     paths

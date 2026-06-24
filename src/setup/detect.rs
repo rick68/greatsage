@@ -4,7 +4,11 @@ use {
         env_load::credential_value_is_set_with_paired_env,
         providers::{PROVIDER_SPECS, Provider},
     },
-    std::{env, fs, path::{Path, PathBuf}, str::FromStr},
+    std::{
+        env, fs,
+        path::{Path, PathBuf},
+        str::FromStr,
+    },
     toml_edit::DocumentMut,
 };
 

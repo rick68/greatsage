@@ -8,12 +8,13 @@
 //! `load_layered_env()` merges these into the process environment before CLI parse.
 //! Paired `.env` beside `config.toml` is also used as fallback for `env!VAR` resolution.
 
-use std::fmt::Display;
 use {
     crate::config_paths::env_file_search_paths_low_to_high,
     std::{
         collections::{HashMap, HashSet},
-        env, fs, io,
+        env,
+        fmt::Display,
+        fs, io,
         path::Path,
     },
 };
@@ -71,11 +72,6 @@ pub fn env_reference_name(value: &str) -> Option<&str> {
     Some(name)
 }
 
-/// Resolve a TOML credential: shell env first, then paired `.env`, literals pass through.
-pub fn resolve_credential_value(value: impl AsRef<str>) -> Option<String> {
-    resolve_credential_value_with_paired_env(value, None)
-}
-
 /// Resolve a TOML credential with an optional paired `.env` for `env!VAR` lookups.
 pub fn resolve_credential_value_with_paired_env(
     value: impl AsRef<str>,
@@ -98,11 +94,6 @@ pub fn resolve_credential_value_with_paired_env(
     }
     let trimmed = value.as_ref().trim();
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
-}
-
-/// Whether a TOML credential field counts as configured (literal or resolvable `env!` reference).
-pub fn credential_value_is_set(value: impl AsRef<str>) -> bool {
-    credential_value_is_set_with_paired_env(value, None)
 }
 
 pub fn credential_value_is_set_with_paired_env(
