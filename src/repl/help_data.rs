@@ -36,6 +36,43 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
                  Switches to the named model for subsequent requests without clearing \
                  conversation history. Example: /model claude-opus-4-7",
     },
+    ReplCommand {
+        name: "/provider",
+        summary: "Show or switch AI provider",
+        detail: "Usage: /provider [name]\n\n\
+                 Without arguments, shows the current provider.\n\
+                 With a provider name (e.g. /provider anthropic), switches provider, \
+                 resets model to that provider's default, and preserves conversation messages.",
+    },
+    ReplCommand {
+        name: "/retry",
+        summary: "Re-send the last user prompt",
+        detail: "Re-sends the most recent non-slash REPL input to the agent.\n\
+                 Does nothing if no prior prompt was sent in this session.",
+    },
+    ReplCommand {
+        name: "/save",
+        summary: "Save conversation to JSON",
+        detail: "Usage: /save [path]\n\n\
+                 Saves yoagent messages to a JSON file.\n\
+                 Default path: greatsage-session.json in the current directory.",
+    },
+    ReplCommand {
+        name: "/load",
+        summary: "Load conversation from JSON",
+        detail: "Usage: /load [path]\n\n\
+                 Restores yoagent messages from a JSON file.\n\
+                 Default path: greatsage-session.json in the current directory.",
+    },
+    ReplCommand {
+        name: "/compact",
+        summary: "Compact conversation to save context",
+        detail: "Usage: /compact [N|all|--preview]\n\n\
+                 Reduces message context using yoagent compaction.\n\
+                 /compact --preview shows stats without changing messages.\n\
+                 /compact N keeps the last N messages at full fidelity (min 2).\n\
+                 /compact all keeps the last 2 messages.",
+    },
 ];
 
 pub fn repl_command_lines() -> String {

@@ -212,6 +212,32 @@ impl CodingAgent {
     }
 }
 
+/// Build a replacement agent with the same yoagent messages as `existing`.
+pub async fn prepare_coding_agent_preserving_messages(
+    existing: &CodingAgent,
+    agent_config: &AgentConfig,
+) -> Result<(CodingAgent, String), String> {
+    let saved = existing
+        .lock()
+        .await
+        .save_messages()
+        .map_err(|e| format!("failed to save messages: {e}"))?;
+
+    let model = agent_config.model.clone();
+    let provider_name = agent_config.provider.to_string();
+    let coding_agent = CodingAgent::new_with_agent_config(agent_config).await;
+    coding_agent
+        .lock()
+        .await
+        .restore_messages(&saved)
+        .map_err(|e| format!("failed to restore messages: {e}"))?;
+
+    let message = format!(
+        "Switched to provider {provider_name} with model {model} (conversation preserved)."
+    );
+    Ok((coding_agent, message))
+}
+
 /// Insert a new agent, allocate its session, and tear down any prior agent session.
 pub(crate) fn install_coding_agent(
     world: &mut World,
