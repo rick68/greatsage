@@ -1,5 +1,5 @@
 use {
-    crate::{config::McpConfig, providers::Provider},
+    crate::{config::McpConfig, providers::Provider, repl::cli_repl_commands_section},
     bevy::ecs::resource::Resource,
     clap::{ArgAction, CommandFactory, Parser, Subcommand},
     clap_help::Printer,
@@ -87,15 +87,8 @@ impl Cli {
         );
 
         () = printer.template_keys_mut().push("repl-commands");
-        () = printer.set_template(
-            "repl-commands",
-            r#"
-**Commands (in REPL):**
-  /quit, /exit     Exit the agent
-  /clear           Clear conversation history
-  /model <name>    Switch model mid-session
-"#,
-        );
+        let repl_commands = cli_repl_commands_section();
+        () = printer.set_template("repl-commands", &repl_commands);
 
         () = printer.template_keys_mut().push("environment");
         () = printer.set_template(
