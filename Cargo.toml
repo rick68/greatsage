@@ -59,7 +59,7 @@ keywords = []
 license = "MIT OR Apache-2.0"
 name = "greatsage"
 repository = "https://github.com/rick68/greatsage"
-version = "0.0.5"
+version = "0.0.6"
 
 [package.metadata.bevy_cli.dev]
 features = [ "dev_native" ]
