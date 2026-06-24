@@ -6,9 +6,12 @@
 mod agents;
 mod cli;
 mod config;
+mod config_paths;
+mod env_load;
 mod providers;
 mod repl;
 mod session;
+mod setup;
 mod stdin;
 mod stdout;
 mod tokio;
@@ -17,10 +20,11 @@ mod utils;
 use {
     crate::{
         agents::{CodingAgentPromptChannel, CodingAgentTask, agents_plugin},
-        cli::Cli,
+        cli::{Cli, Command},
         config::config_plugin,
         repl::repl_plugin,
         session::session_plugin,
+        setup::{offer_setup, run_wizard},
         stdin::stdin_plugin,
         stdout::stdout_plugin,
         tokio::tokio_plugin,
@@ -64,9 +68,54 @@ fn default_plugins() -> bevy::app::PluginGroupBuilder {
 }
 
 fn main() {
-    let _ = dotenvy::dotenv();
+    env_load::load_layered_env();
 
     let mut cli = Cli::parse_and_check_help();
+
+    if matches!(cli.command, Some(Command::Setup)) {
+        match run_wizard() {
+            Ok(()) => return,
+            Err(err) => {
+                let failed = err.is_failure();
+                () = err.report();
+                if failed {
+                    std::process::exit(1);
+                }
+                return;
+            }
+        }
+    } else {
+        let interactive_repl =
+            cli.prompt.is_none() && cli.prompt_file.is_none() && io::stdin().is_terminal();
+
+        if interactive_repl && setup::needs_setup() {
+            let run_now = match offer_setup() {
+                Ok(run_now) => run_now,
+                Err(err) => {
+                    let failed = err.is_failure();
+                    () = err.report();
+                    if failed {
+                        std::process::exit(1);
+                    }
+                    return;
+                }
+            };
+
+            if run_now {
+                match run_wizard() {
+                    Ok(()) => env_load::load_layered_env(),
+                    Err(err) => {
+                        let failed = err.is_failure();
+                        () = err.report();
+                        if failed {
+                            std::process::exit(1);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+    }
 
     if let Some(file_path) = &cli.prompt_file
         && let Ok(buf) = fs::read_to_string(file_path)
@@ -84,10 +133,19 @@ fn main() {
     let mut prompt_arg = cli.prompt.clone();
 
     if !io::stdin().is_terminal() && prompt_arg.is_none() {
-        let mut buf: String = String::new();
-        let _: usize = io::stdin().lock().read_to_string(&mut buf).unwrap();
-        prompt_arg = Some(String::from(buf.trim_end_matches('\n')));
+        let mut buf = String::new();
+        if io::stdin().lock().read_to_string(&mut buf).is_ok() {
+            let trimmed = buf.trim();
+            if !trimmed.is_empty() {
+                prompt_arg = Some(trimmed.to_owned());
+            }
+        }
     }
+
+    let one_shot = prompt_arg
+        .as_ref()
+        .is_some_and(|prompt| !prompt.trim().is_empty());
+    let interactive_repl = !one_shot && io::stdin().is_terminal();
 
     let mut app = App::new();
     app.insert_resource::<Cli>(cli.clone()).add_plugins((
@@ -112,12 +170,7 @@ fn main() {
         .add_plugins(RemoteHttpPlugin::default().with_port(port));
     }
 
-    let prompt_mode = prompt_arg.is_some();
-    if !prompt_mode && io::stdin().is_terminal() {
-        app.add_plugins(stdin_plugin);
-    }
-
-    if let Some(prompt) = prompt_arg {
+    if let Some(prompt) = prompt_arg.filter(|prompt| !prompt.trim().is_empty()) {
         app.add_systems(
             Update,
             (
@@ -136,8 +189,18 @@ fn main() {
                 )),
             ),
         );
+    } else if interactive_repl {
+        app.add_plugins((stdin_plugin, repl_plugin));
+    } else if cfg!(feature = "dev_native") {
+        if !cli.no_hints {
+            eprintln!(
+                "greatsage: headless dev mode (stdin is not a TTY). \
+                 Send prompts via BRP session.send_prompt, or run `cargo run --features dev_native` in a terminal for REPL."
+            );
+        }
     } else {
-        app.add_plugins(repl_plugin);
+        eprintln!("greatsage: stdin is not a terminal; use -p PROMPT or pipe a prompt.");
+        std::process::exit(1);
     }
 
     if let AppExit::Error(code) = app.run() {

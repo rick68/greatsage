@@ -9,9 +9,10 @@ use {
             AgentId, FocusedSession, SessionId, SessionManager, SessionRuntimeStatus,
             spawn_session_root, sync_session_meta, teardown_session,
         },
+        setup,
         stdout::StdoutMessage,
         tokio::AppCancelToken,
-        utils::truncate,
+        utils::{format_usage_line, truncate},
     },
     bevy::{
         app::{App, AppExit, PostUpdate, Startup, Update},
@@ -46,7 +47,10 @@ use {
         agent::Agent,
         provider::{AnthropicProvider, GoogleProvider, ModelConfig, OpenAiCompatProvider},
         tools::default_tools,
-        types::{AgentEvent, AgentMessage, Content, StreamDelta, Usage},
+        types::{
+            AgentEvent, AgentMessage, Content, Message as LlmMessage, StopReason, StreamDelta,
+            Usage,
+        },
     },
 };
 
@@ -314,6 +318,11 @@ fn setup(
                 format!("  cwd: {}\n", cwd.display()).dimmed(),
             ));
         }
+        if setup::needs_setup() {
+            stdout.write(StdoutMessage::from(
+                "  hint: no API key configured — run `greatsage setup`\n".dimmed(),
+            ));
+        }
     }
 
     if cli.prompt.is_none() && !cli.print_system_prompt && io::stdin().is_terminal() {
@@ -420,38 +429,6 @@ fn spawn_agent_task(
     }
 }
 
-/// Provider-reported `Usage.input` is uncached prompt tokens only; cache hits live in
-/// `cache_read` / `cache_write`. Show total input so REPL hints match billed context size.
-fn format_usage_line(usage: &Usage) -> Option<String> {
-    let Usage {
-        input,
-        output,
-        cache_read,
-        cache_write,
-        ..
-    } = usage;
-    let total_in = input.saturating_add(*cache_read).saturating_add(*cache_write);
-    if total_in == 0 && *output == 0 {
-        return None;
-    }
-
-    let mut line = format!("tokens: {total_in} in / {output} out");
-    if *cache_read > 0 || *cache_write > 0 {
-        let mut parts = Vec::new();
-        if *input > 0 {
-            parts.push(format!("{input} new"));
-        }
-        if *cache_read > 0 {
-            parts.push(format!("{cache_read} cache read"));
-        }
-        if *cache_write > 0 {
-            parts.push(format!("{cache_write} cache write"));
-        }
-        line.push_str(&format!(" ({})", parts.join(", ")));
-    }
-    Some(line)
-}
-
 fn usage_info(usage: &Usage) -> String {
     format_usage_line(usage)
         .map(|line| format!("\n\n  {line}\n").dimmed().to_string())
@@ -492,6 +469,51 @@ fn extract_thinking_from_final_content(content: &[Content]) -> Option<String> {
     })
 }
 
+fn assistant_error_line(message: &LlmMessage) -> Option<String> {
+    let LlmMessage::Assistant {
+        stop_reason,
+        error_message,
+        ..
+    } = message
+    else {
+        return None;
+    };
+    match stop_reason {
+        StopReason::Error => {
+            let detail = error_message.as_deref().unwrap_or("unknown provider error");
+            Some(format!("\n  error: {detail}\n").red().to_string())
+        }
+        StopReason::Aborted => Some("\n  error: request aborted\n".red().to_string()),
+        _ => None,
+    }
+}
+
+fn empty_assistant_hint(message: &LlmMessage) -> Option<String> {
+    let LlmMessage::Assistant {
+        content,
+        usage,
+        stop_reason,
+        ..
+    } = message
+    else {
+        return None;
+    };
+    if *stop_reason == StopReason::Error || *stop_reason == StopReason::Aborted {
+        return None;
+    }
+    let has_text = content
+        .iter()
+        .any(|block| matches!(block, Content::Text { text } if !text.trim().is_empty()));
+    if has_text || usage.total_tokens > 0 {
+        return None;
+    }
+    Some(
+        "\n  error: model returned no content (check model id and base_url)\n"
+            .red()
+            .to_string(),
+    )
+}
+
 /// Bevy buffered Message handling (confirmed for this change).
 ///
 /// Since Bevy 0.17, the engine distinguishes:
@@ -518,6 +540,22 @@ fn handle_coding_agent_events(
         } = coding_agent_task.as_mut();
 
         match event {
+            AgentEvent::InputRejected { reason } => {
+                stdout.write(StdoutMessage::from(
+                    format!("\n  error: input rejected: {reason}\n")
+                        .red()
+                        .to_string(),
+                ));
+            }
+            AgentEvent::TurnEnd { message, .. } => {
+                if let AgentMessage::Llm(llm_message) = &message {
+                    if let Some(line) = assistant_error_line(llm_message)
+                        .or_else(|| empty_assistant_hint(llm_message))
+                    {
+                        stdout.write(StdoutMessage::from(line));
+                    }
+                }
+            }
             AgentEvent::ToolExecutionStart {
                 tool_name, args, ..
             } => {
@@ -653,16 +691,26 @@ fn handle_coding_agent_events(
                 }
                 *thinking_shown = false;
 
+                let mut usage_printed = false;
                 for msg in messages.iter().rev() {
-                    if let AgentMessage::Llm(yoagent::types::Message::Assistant { usage, .. }) = msg
-                    {
-                        if cli.no_hints {
-                            stdout.write(StdoutMessage::newline());
-                        } else {
-                            stdout.write(StdoutMessage::from(usage_info(usage)));
+                    let AgentMessage::Llm(llm_message) = msg else {
+                        continue;
+                    };
+                    if !usage_printed {
+                        if let Some(line) = assistant_error_line(llm_message)
+                            .or_else(|| empty_assistant_hint(llm_message))
+                        {
+                            stdout.write(StdoutMessage::from(line));
                         }
-                        *last_usage = usage.clone();
-                        break;
+                        if let LlmMessage::Assistant { usage, .. } = llm_message {
+                            if cli.no_hints {
+                                stdout.write(StdoutMessage::newline());
+                            } else {
+                                stdout.write(StdoutMessage::from(usage_info(usage)));
+                            }
+                            *last_usage = usage.clone();
+                            usage_printed = true;
+                        }
                     }
                 }
             }
@@ -682,52 +730,8 @@ fn shutdown_coding_agent(
         if let Some(cancel) = cancel.take()
             && !cancel.is_cancelled()
         {
-            cancel.cancel();
+            () = cancel.cancel();
         }
-    }
-}
-
-#[cfg(test)]
-mod usage_tests {
-    use super::format_usage_line;
-    use yoagent::types::Usage;
-
-    #[test]
-    fn usage_line_sums_cache_into_total_input() {
-        let line = format_usage_line(&Usage {
-            input: 68,
-            output: 38,
-            cache_read: 2800,
-            cache_write: 0,
-            total_tokens: 0,
-        })
-        .expect("usage line");
-        assert_eq!(line, "tokens: 2868 in / 38 out (68 new, 2800 cache read)");
-    }
-
-    #[test]
-    fn usage_line_omits_breakdown_without_cache() {
-        let line = format_usage_line(&Usage {
-            input: 2789,
-            output: 29,
-            cache_read: 0,
-            cache_write: 0,
-            total_tokens: 0,
-        })
-        .expect("usage line");
-        assert_eq!(line, "tokens: 2789 in / 29 out");
-    }
-
-    #[test]
-    fn usage_line_empty_when_all_zero() {
-        assert!(format_usage_line(&Usage {
-            input: 0,
-            output: 0,
-            cache_read: 0,
-            cache_write: 0,
-            total_tokens: 0,
-        })
-        .is_none());
     }
 }
 

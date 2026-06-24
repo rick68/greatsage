@@ -9,7 +9,7 @@ use {
     serde::{Deserialize, Serialize},
     serde_json::json,
     std::{env, fs, path::PathBuf, str::FromStr},
-    toml_edit::{DocumentMut, Value},
+    toml_edit::{DocumentMut, Item, Value},
     url::Url,
 };
 
@@ -35,30 +35,22 @@ pub struct Config(config::Config);
 impl Config {
     #[inline]
     fn config_file() -> PathBuf {
-        if let Ok(cwd) = env::current_dir()
-            && let Some(project_level_config) = Some(cwd.join(".greatsage.toml"))
-            && fs::exists(&project_level_config).unwrap_or_default()
-        {
-            return project_level_config.canonicalize().unwrap();
-        }
-
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let home = dirs::home_dir().unwrap();
 
-        if let Some(home_directory_config) = Some(home.join(".greatsage.toml"))
-            && fs::exists(&home_directory_config).unwrap_or_default()
-        {
-            return home_directory_config.canonicalize().unwrap();
+        for path in crate::config_paths::config_search_paths(&cwd, &home) {
+            if crate::config_paths::config_file_is_populated(&path) {
+                return path.canonicalize().unwrap_or(path);
+            }
         }
 
-        let user_level_conifg = home.join(".config").join("greatsage").join("config.toml");
-        if !fs::exists(&user_level_conifg).unwrap_or_default()
-            && let Some(parent) = user_level_conifg.parent()
-        {
+        let default = crate::config_paths::user_config_path(&home);
+        if let Some(parent) = default.parent() {
             let _ = fs::create_dir_all(parent);
-            let _ = fs::File::create(&user_level_conifg);
+            let _ = fs::File::create(&default);
         }
 
-        user_level_conifg.canonicalize().unwrap()
+        default.canonicalize().unwrap_or(default)
     }
 
     fn get_builder() -> config::ConfigBuilder<DefaultState> {
@@ -139,6 +131,14 @@ impl From<&Cli> for Config {
                 .set_override("api_key", api_key.clone())
                 .unwrap_or(config_builder);
             current_provider = Some(&Provider::Custom);
+        }
+        if let Ok(api_key) = dotenvy::var("API_KEY")
+            && !api_key.trim().is_empty()
+        {
+            config_builder = config_builder
+                .clone()
+                .set_override("api_key", api_key)
+                .unwrap_or(config_builder);
         }
         if let Ok(anthropic_api_key) = dotenvy::var("ANTHROPIC_API_KEY") {
             config_builder = config_builder
@@ -237,8 +237,15 @@ impl From<&Cli> for Config {
 }
 
 impl Config {
+    fn resolve_config_field(&self, key: &str) -> Option<String> {
+        let raw = self.get_string(key).ok()?;
+        let paired_env = crate::config_paths::paired_env_path(&Self::config_file());
+        let paired_ref = paired_env.is_file().then_some(paired_env.as_path());
+        crate::env_load::resolve_credential_value_with_paired_env(raw, paired_ref)
+    }
+
     pub fn get_model(&self) -> Option<String> {
-        self.get_string("model").ok()
+        self.resolve_config_field("model")
     }
 
     #[allow(dead_code)]
@@ -246,7 +253,7 @@ impl Config {
         if let Ok(content) = fs::read_to_string(Self::config_file())
             && let Ok(mut doc) = content.parse::<DocumentMut>()
         {
-            doc["model"] = toml_edit::Item::Value(model.into());
+            doc["model"] = Item::Value(model.into());
             let _ = fs::write(Self::config_file(), doc.to_string());
         }
     }
@@ -256,7 +263,7 @@ impl Config {
     }
 
     pub fn get_base_url(&self) -> Option<String> {
-        self.get_string("base_url").ok()
+        self.resolve_config_field("base_url")
     }
 
     #[allow(dead_code)]
@@ -264,7 +271,7 @@ impl Config {
         if let Ok(content) = fs::read_to_string(Self::config_file())
             && let Ok(mut doc) = content.parse::<DocumentMut>()
         {
-            doc["base_url"] = toml_edit::Item::Value(base_url.into());
+            doc["base_url"] = Item::Value(base_url.into());
             let _ = fs::write(Self::config_file(), doc.to_string());
         }
     }
@@ -288,7 +295,16 @@ impl Config {
     }
 
     pub fn get_api_key(&self, provider: Option<Provider>) -> Option<String> {
-        let api_key = self.get_string("api_key").ok();
+        let paired_env = crate::config_paths::paired_env_path(&Self::config_file());
+        let paired_ref = paired_env.is_file().then_some(paired_env.as_path());
+        let resolve = |value: String| {
+            crate::env_load::resolve_credential_value_with_paired_env(value, paired_ref)
+        };
+
+        let api_key = self
+            .get_string("api_key")
+            .ok()
+            .and_then(resolve);
         match provider {
             Some(Provider::Anthropic) => self.get_string("anthropic_api_key").ok(),
             Some(Provider::Cerebras) => self.get_string("cerebras_api_key").ok(),
@@ -304,6 +320,7 @@ impl Config {
             Some(Provider::Custom) | None => api_key.clone(),
         }
         .or(api_key)
+        .and_then(resolve)
     }
 
     #[allow(dead_code)]
@@ -311,7 +328,7 @@ impl Config {
         if let Ok(content) = fs::read_to_string(Self::config_file())
             && let Ok(mut doc) = content.parse::<DocumentMut>()
         {
-            doc["api_key"] = toml_edit::Item::Value(api_key.into());
+            doc["api_key"] = Item::Value(api_key.into());
             let _ = fs::write(Self::config_file(), doc.to_string());
         }
     }
@@ -329,7 +346,7 @@ impl Config {
         }
     }
 
-    /// `[session]` retention keys in `.greatsage.toml`:
+    /// `[session]` retention keys in config.toml:
     /// - `max_turns` — max `TurnSummary` entities per session before prune (default 200)
     /// - `max_tool_records` — max `ToolCallRecord` entities per session before prune (default 2000)
     pub fn session_limits(&self) -> (usize, usize) {

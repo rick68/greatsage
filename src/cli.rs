@@ -1,11 +1,17 @@
 use {
     crate::{config::McpConfig, providers::Provider},
     bevy::ecs::resource::Resource,
-    clap::{ArgAction, CommandFactory, Parser},
+    clap::{ArgAction, CommandFactory, Parser, Subcommand},
     clap_help::Printer,
     std::path::PathBuf,
     url::Url,
 };
+
+#[derive(Clone, Debug, Subcommand)]
+pub enum Command {
+    /// Interactive configuration wizard
+    Setup,
+}
 
 #[derive(Clone, Debug, Parser, Resource)]
 #[command(
@@ -15,16 +21,13 @@ use {
     disable_help_flag = true,
 )]
 pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Command>,
     /// Prompt file to execute
     #[arg(index = 1)]
     pub prompt_file: Option<PathBuf>,
     /// Model to use
-    #[arg(
-        long,
-        value_name = "name",
-        default_value = "claude-opus-4-7",
-        env = "MODEL"
-    )]
+    #[arg(long, value_name = "name", env = "MODEL")]
     pub model: Option<String>,
     /// Provider to use
     #[arg(long, value_name = "name", env = "PROVIDER")]
@@ -69,10 +72,22 @@ impl Cli {
         let command = Cli::command().bin_name("greatsage");
         let mut printer = Printer::new(command);
 
-        printer.set_template("usage", "Usage: `greatsage [PROMPT_FILE] [options]`");
+        () = printer.set_template(
+            "usage",
+            "Usage: `greatsage [COMMAND] [PROMPT_FILE] [options]`",
+        );
 
-        printer.template_keys_mut().push("repl-commands");
-        printer.set_template(
+        () = printer.template_keys_mut().push("subcommands");
+        () = printer.set_template(
+            "subcommands",
+            r#"
+**Subcommands:**
+  setup    Interactive configuration wizard
+"#,
+        );
+
+        () = printer.template_keys_mut().push("repl-commands");
+        () = printer.set_template(
             "repl-commands",
             r#"
 **Commands (in REPL):**
@@ -82,8 +97,8 @@ impl Cli {
 "#,
         );
 
-        printer.template_keys_mut().push("environment");
-        printer.set_template(
+        () = printer.template_keys_mut().push("environment");
+        () = printer.set_template(
             "environment",
             r#"
 **Environment:**
@@ -104,22 +119,31 @@ impl Cli {
   BASE_URL            Custom base URL (mainly used with `--provider` custom)
 
 **Config files (searched in order, first found wins):**
-  .greatsage.toml                  Project-level config (current directory)
-  ~/.greatsage.toml                Home directory config
+  .greatsage/config.toml           Project-level config (current directory)
   ~/.config/greatsage/config.toml  User-level config (XDG)
+
+**API keys in config.toml use `env!VAR` references:**
+  anthropic_api_key = "env!ANTHROPIC_API_KEY"
+
+**Environment files (merged low → high at startup; shell env wins):**
+  ~/.config/greatsage/.env
+  .greatsage/.env            (walk-up from cwd)
+  ./.env                     (walk-up from cwd)
+
+  Paired `.env` beside `config.toml` also resolves `env!VAR` when not already in the shell.
 "#,
         );
 
         let skin = printer.skin_mut();
         skin.table_border_chars = termimad::ROUNDED_TABLE_BORDER_CHARS;
 
-        printer.print_help();
+        () = printer.print_help();
     }
 
     pub fn parse_and_check_help() -> Self {
         let cli = Self::parse();
         if cli.help {
-            Self::print_help();
+            () = Self::print_help();
             std::process::exit(0);
         }
         cli

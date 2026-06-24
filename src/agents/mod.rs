@@ -38,8 +38,15 @@ pub struct AgentConfig {
 
 impl From<&Config> for AgentConfig {
     fn from(config: &Config) -> Self {
-        let model = config.get_model().unwrap_or_default();
         let provider = config.get_provider();
+        let model = config
+            .get_model()
+            .filter(|model| !model.trim().is_empty())
+            .unwrap_or_else(|| {
+                provider
+                    .map(|provider| provider.default_model().to_owned())
+                    .unwrap_or_else(|| "claude-fable-5".to_owned())
+            });
         let base_url = config.get_base_url().unwrap_or_default();
         let skills = SkillSet::load(config.get_skills().as_slice()).expect("Failed to load skills");
         let system_prompt = config.get_system_prompt();
