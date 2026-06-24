@@ -1,3 +1,6 @@
+[dev-dependencies]
+temp_env_vars = "0.2.1"
+
 [dependencies]
 bevy = { version = "0.18.1", default-features = false, features = [
     "bevy_state",
@@ -14,11 +17,13 @@ config = "0.15.23"
 crossbeam-channel = "0.5.15"
 dirs = "6.0.0"
 dotenvy = "0.15.7"
+inquire = "0.7.5"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 shell-words = "1.1.1"
 strum = { version = "0.28.0", features = ["derive"] }
 termimad = "0.34.1"
+thiserror = "2.0.17"
 toml_edit = "0.25.11"
 tokio = { version = "1.52.3", features = ["macros", "rt"] }
 tokio-util = "0.7.18"
