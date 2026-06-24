@@ -747,10 +747,12 @@ pub fn coding_agent_plugin(app: &mut App) {
             Update,
             (
                 spawn_agent_task.run_if(
-                    in_state(CodingAgentState::Idle).and(not(resource_exists::<CodingAgentTask>)),
+                    in_state(CodingAgentState::Idle)
+                        .and_then(not(resource_exists::<CodingAgentTask>)),
                 ),
                 handle_coding_agent_events.run_if(
-                    in_state(CodingAgentState::Processing).and(resource_exists::<CodingAgentTask>),
+                    in_state(CodingAgentState::Processing)
+                        .and_then(resource_exists::<CodingAgentTask>),
                 ),
             ),
         )

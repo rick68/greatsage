@@ -110,6 +110,6 @@ pub fn session_runtime_status(In(params): In<Option<Value>>, world: &mut World) 
 
 pub fn register_session_brp_methods(plugin: RemotePlugin) -> RemotePlugin {
     plugin
-        .with_method("session.send_prompt", session_send_prompt)
-        .with_method("session.runtime_status", session_runtime_status)
+        .with_method_main("session.send_prompt", session_send_prompt)
+        .with_method_main("session.runtime_status", session_runtime_status)
 }
