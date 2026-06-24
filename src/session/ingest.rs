@@ -113,15 +113,67 @@ fn next_seq(root: Entity, session_seq: &mut Query<&mut SessionSeq>) -> u64 {
         .unwrap_or(0)
 }
 
-fn turn_summary_from_usage(seq: u64, usage: &Usage) -> TurnSummary {
+fn min_nonzero_source_timestamp(blocks: &[IndexedContent]) -> Option<u64> {
+    blocks
+        .iter()
+        .map(|block| block.provenance.source_timestamp_ms())
+        .filter(|timestamp_ms| *timestamp_ms != 0)
+        .min()
+}
+
+fn resolve_turn_started_at_ms(
+    ingest_state: &mut SessionIngestState,
+    projected_blocks: &[IndexedContent],
+    ended_at_ms: u64,
+) -> u64 {
+    ingest_state
+        .take_current_turn_started_at_ms()
+        .or_else(|| min_nonzero_source_timestamp(projected_blocks))
+        .unwrap_or(ended_at_ms)
+}
+
+fn turn_summary_from_usage(
+    seq: u64,
+    usage: &Usage,
+    started_at_ms: u64,
+    ended_at_ms: u64,
+) -> TurnSummary {
     TurnSummary {
         seq,
         input_tokens: usage.input,
         output_tokens: usage.output,
         cache_read_tokens: usage.cache_read,
         cache_write_tokens: usage.cache_write,
-        ended_at_ms: now_ms(),
+        started_at_ms,
+        ended_at_ms,
     }
+}
+
+fn collect_turn_projection_blocks(
+    ingest_state: &SessionIngestState,
+    user_content: &[IndexedContent],
+    message: Option<&AgentMessage>,
+    streamed_assistant_text: &str,
+    tool_results: &[Message],
+) -> Vec<IndexedContent> {
+    let mut blocks = Vec::new();
+    () = blocks.extend_from_slice(user_content);
+    () = blocks.extend(assistant_blocks_for_projection(
+        message,
+        streamed_assistant_text,
+    ));
+    for message in tool_results {
+        let Message::ToolResult { tool_call_id, .. } = message else {
+            continue;
+        };
+        if ingest_state.turn_tool_result_already_projected(tool_call_id)
+            || ingest_state.tool_entity(tool_call_id).is_none()
+        {
+            continue;
+        }
+        () = blocks.extend(indexed_content_from_turn_tool_result(message));
+    }
+    blocks
 }
 
 fn provenance_kind(provenance: &ContentProvenance) -> &'static str {
@@ -150,11 +202,13 @@ fn provenance_is_error(provenance: &ContentProvenance) -> Option<bool> {
 
 fn content_block_from_indexed(
     seq: u64,
+    turn_seq: u64,
     recorded_at_ms: u64,
     indexed: &IndexedContent,
 ) -> ContentBlock {
     ContentBlock {
         seq,
+        turn_seq,
         block_index: indexed.block_index,
         recorded_at_ms,
         source_timestamp_ms: indexed.provenance.source_timestamp_ms(),
@@ -175,6 +229,7 @@ fn spawn_indexed_blocks(
     root: Entity,
     session_seq: &mut Query<&mut SessionSeq>,
     blocks: &[IndexedContent],
+    turn_seq: u64,
 ) {
     let recorded_at_ms = now_ms();
     for indexed in blocks {
@@ -183,7 +238,7 @@ fn spawn_indexed_blocks(
             session_id,
             ChildOf(parent),
             ContentBlockEntity,
-            content_block_from_indexed(seq, recorded_at_ms, indexed),
+            content_block_from_indexed(seq, turn_seq, recorded_at_ms, indexed),
         ));
     }
 }
@@ -197,10 +252,27 @@ fn project_turn_content(
     user_content: &[IndexedContent],
     message: Option<&AgentMessage>,
     streamed_assistant_text: &str,
+    turn_seq: u64,
 ) {
-    spawn_indexed_blocks(commands, session_id, turn, root, session_seq, user_content);
+    () = spawn_indexed_blocks(
+        commands,
+        session_id,
+        turn,
+        root,
+        session_seq,
+        user_content,
+        turn_seq,
+    );
     let assistant = assistant_blocks_for_projection(message, streamed_assistant_text);
-    spawn_indexed_blocks(commands, session_id, turn, root, session_seq, &assistant);
+    () = spawn_indexed_blocks(
+        commands,
+        session_id,
+        turn,
+        root,
+        session_seq,
+        &assistant,
+        turn_seq,
+    );
 }
 
 fn project_turn_tool_results(
@@ -210,6 +282,7 @@ fn project_turn_tool_results(
     root: Entity,
     session_seq: &mut Query<&mut SessionSeq>,
     tool_results: &[Message],
+    turn_seq: u64,
 ) {
     for message in tool_results {
         let Message::ToolResult { tool_call_id, .. } = message else {
@@ -222,15 +295,16 @@ fn project_turn_tool_results(
             continue;
         };
         let blocks = indexed_content_from_turn_tool_result(message);
-        spawn_indexed_blocks(
+        () = spawn_indexed_blocks(
             commands,
             session_id,
             tool_entity,
             root,
             session_seq,
             &blocks,
+            turn_seq,
         );
-        ingest_state.mark_turn_tool_result_projected(tool_call_id);
+        () = ingest_state.mark_turn_tool_result_projected(tool_call_id);
     }
 }
 
@@ -268,17 +342,28 @@ pub(crate) fn ingest_agent_events(
                 if !ingest_state.turn_recorded()
                     && let Some(usage) = usage_from_agent_end(messages)
                 {
-                    let seq = next_seq(root, &mut session_seq);
+                    let seq = ingest_state
+                        .take_current_turn_seq()
+                        .unwrap_or_else(|| next_seq(root, &mut session_seq));
                     let user_content = ingest_state.take_user_content_for_turn();
                     let streamed_assistant_text = ingest_state.take_pending_assistant_text();
                     let message = assistant_message_from_agent_end(messages);
+                    let projection_blocks = collect_turn_projection_blocks(
+                        &ingest_state,
+                        &user_content,
+                        message,
+                        &streamed_assistant_text,
+                        &[],
+                    );
+                    let ended_at_ms = now_ms();
+                    let started_at_ms = resolve_turn_started_at_ms(
+                        &mut ingest_state,
+                        &projection_blocks,
+                        ended_at_ms,
+                    );
+                    let summary = turn_summary_from_usage(seq, usage, started_at_ms, ended_at_ms);
                     let turn = commands
-                        .spawn((
-                            session_id,
-                            ChildOf(root),
-                            TurnEntity,
-                            turn_summary_from_usage(seq, usage),
-                        ))
+                        .spawn((session_id, ChildOf(root), TurnEntity, summary))
                         .id();
                     project_turn_content(
                         &mut commands,
@@ -289,6 +374,7 @@ pub(crate) fn ingest_agent_events(
                         &user_content,
                         message,
                         &streamed_assistant_text,
+                        seq,
                     );
                     () = ingest_state.set_current_turn(Some(turn));
                     () = ingest_state.set_turn_recorded(true);
@@ -296,8 +382,11 @@ pub(crate) fn ingest_agent_events(
                 () = ingest_state.clear_turn();
             }
             AgentEvent::TurnStart => {
+                let seq = next_seq(root, &mut session_seq);
                 let turn = commands.spawn((session_id, ChildOf(root), TurnEntity)).id();
                 () = ingest_state.set_current_turn(Some(turn));
+                () = ingest_state.set_current_turn_started_at_ms(now_ms());
+                () = ingest_state.set_current_turn_seq(seq);
             }
             AgentEvent::MessageEnd { message } => {
                 let blocks = indexed_content_from_user_message(message);
@@ -312,10 +401,25 @@ pub(crate) fn ingest_agent_events(
                 tool_results,
             } => {
                 if let Some(usage) = usage_from_message(message) {
-                    let seq = next_seq(root, &mut session_seq);
+                    let seq = ingest_state
+                        .take_current_turn_seq()
+                        .unwrap_or_else(|| next_seq(root, &mut session_seq));
                     let user_content = ingest_state.take_user_content_for_turn();
                     let streamed_assistant_text = ingest_state.take_pending_assistant_text();
-                    let summary = turn_summary_from_usage(seq, usage);
+                    let projection_blocks = collect_turn_projection_blocks(
+                        &ingest_state,
+                        &user_content,
+                        Some(message),
+                        &streamed_assistant_text,
+                        tool_results,
+                    );
+                    let ended_at_ms = now_ms();
+                    let started_at_ms = resolve_turn_started_at_ms(
+                        &mut ingest_state,
+                        &projection_blocks,
+                        ended_at_ms,
+                    );
+                    let summary = turn_summary_from_usage(seq, usage, started_at_ms, ended_at_ms);
                     let turn = if let Some(turn) = ingest_state.take_current_turn() {
                         commands.entity(turn).insert(summary);
                         turn
@@ -324,7 +428,7 @@ pub(crate) fn ingest_agent_events(
                             .spawn((session_id, ChildOf(root), TurnEntity, summary))
                             .id()
                     };
-                    project_turn_content(
+                    () = project_turn_content(
                         &mut commands,
                         session_id,
                         turn,
@@ -333,14 +437,16 @@ pub(crate) fn ingest_agent_events(
                         &user_content,
                         Some(message),
                         &streamed_assistant_text,
+                        seq,
                     );
-                    project_turn_tool_results(
+                    () = project_turn_tool_results(
                         &mut commands,
                         &mut ingest_state,
                         session_id,
                         root,
                         &mut session_seq,
                         tool_results,
+                        seq,
                     );
                     () = ingest_state.set_turn_recorded(true);
                 }
@@ -370,6 +476,7 @@ pub(crate) fn ingest_agent_events(
                     ))
                     .id();
                 let argument = indexed_content_from_tool_start(tool_call_id, tool_name, args);
+                let turn_seq = ingest_state.current_turn_seq().unwrap_or(0);
                 () = spawn_indexed_blocks(
                     &mut commands,
                     session_id,
@@ -377,6 +484,7 @@ pub(crate) fn ingest_agent_events(
                     root,
                     &mut session_seq,
                     slice::from_ref(&argument),
+                    turn_seq,
                 );
                 () = ingest_state.track_tool(tool_call_id.clone(), entity);
             }

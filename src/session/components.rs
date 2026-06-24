@@ -148,6 +148,10 @@ impl SessionRuntimeStatus {
 #[derive(Component, Debug, Default)]
 pub(crate) struct SessionIngestState {
     current_turn: Option<Entity>,
+    /// Ingest timestamp captured at `TurnStart` for the active turn.
+    current_turn_started_at_ms: Option<u64>,
+    /// `TurnSummary.seq` reserved at `TurnStart` for mid-turn `ContentBlock.turn_seq`.
+    current_turn_seq: Option<u64>,
     turn_recorded: bool,
     tool_entities: HashMap<String, Entity>,
     pending_user_content: Vec<IndexedContent>,
@@ -190,11 +194,35 @@ impl SessionIngestState {
     pub(crate) fn clear_turn(&mut self) {
         self.current_turn = None;
         () = self.tool_entities.clear();
+        self.current_turn_started_at_ms = None;
+        self.current_turn_seq = None;
     }
 
     pub(crate) fn finish_turn(&mut self) {
         self.current_turn = None;
         () = self.tool_entities.clear();
+        self.current_turn_started_at_ms = None;
+        self.current_turn_seq = None;
+    }
+
+    pub(crate) fn set_current_turn_started_at_ms(&mut self, started_at_ms: u64) {
+        self.current_turn_started_at_ms = Some(started_at_ms);
+    }
+
+    pub(crate) fn take_current_turn_started_at_ms(&mut self) -> Option<u64> {
+        self.current_turn_started_at_ms.take()
+    }
+
+    pub(crate) fn set_current_turn_seq(&mut self, seq: u64) {
+        self.current_turn_seq = Some(seq);
+    }
+
+    pub(crate) fn current_turn_seq(&self) -> Option<u64> {
+        self.current_turn_seq
+    }
+
+    pub(crate) fn take_current_turn_seq(&mut self) -> Option<u64> {
+        self.current_turn_seq.take()
     }
 
     pub(crate) fn reset_invocation(&mut self) {
@@ -243,6 +271,7 @@ impl SessionIngestState {
 #[cfg_attr(feature = "dev_native", derive(Reflect), reflect(Component))]
 pub(crate) struct ContentBlock {
     pub(crate) seq: u64,
+    pub(crate) turn_seq: u64,
     pub(crate) block_index: u32,
     pub(crate) recorded_at_ms: u64,
     pub(crate) source_timestamp_ms: u64,
@@ -269,6 +298,7 @@ pub(crate) struct TurnSummary {
     pub(crate) output_tokens: u64,
     pub(crate) cache_read_tokens: u64,
     pub(crate) cache_write_tokens: u64,
+    pub(crate) started_at_ms: u64,
     pub(crate) ended_at_ms: u64,
 }
 

@@ -26,7 +26,7 @@ use {
         tokio::tokio_plugin,
     },
     bevy::{
-        app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update, },
+        app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update},
         ecs::{
             change_detection::Res,
             schedule::{
