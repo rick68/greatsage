@@ -1,5 +1,8 @@
 use {
-    crate::{Cli, agents::SYSTEM_PROMPT, providers::Provider},
+    crate::{
+        Cli, agents::SYSTEM_PROMPT, env_load::resolve_credential_value_with_paired_env,
+        providers::Provider,
+    },
     bevy::{
         app::{App, PreStartup},
         ecs::{change_detection::Res, resource::Resource, system::Commands},
@@ -241,7 +244,7 @@ impl Config {
         let raw = self.get_string(key).ok()?;
         let paired_env = crate::config_paths::paired_env_path(&Self::config_file());
         let paired_ref = paired_env.is_file().then_some(paired_env.as_path());
-        crate::env_load::resolve_credential_value_with_paired_env(raw, paired_ref)
+        resolve_credential_value_with_paired_env(&raw, paired_ref)
     }
 
     pub fn get_model(&self) -> Option<String> {
@@ -298,7 +301,7 @@ impl Config {
         let paired_env = crate::config_paths::paired_env_path(&Self::config_file());
         let paired_ref = paired_env.is_file().then_some(paired_env.as_path());
         let resolve = |value: String| {
-            crate::env_load::resolve_credential_value_with_paired_env(value, paired_ref)
+            crate::env_load::resolve_credential_value_with_paired_env(&value, paired_ref)
         };
 
         let api_key = self.get_string("api_key").ok().and_then(resolve);

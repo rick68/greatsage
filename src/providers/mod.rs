@@ -141,6 +141,24 @@ pub fn provider_spec(provider: Provider) -> &'static ProviderSpec {
         .unwrap_or_else(|| panic!("missing ProviderSpec for {provider}"))
 }
 
+/// Lowercase provider ids from [`PROVIDER_SPECS`], sorted with `custom` last (yoyo-style `/provider` show).
+pub fn available_provider_names() -> Vec<String> {
+    let mut names: Vec<String> = PROVIDER_SPECS
+        .iter()
+        .map(|spec| spec.provider.to_string())
+        .collect();
+    names.sort();
+    if let Some(pos) = names.iter().position(|name| name == "custom") {
+        let custom = names.remove(pos);
+        names.push(custom);
+    }
+    names
+}
+
+pub fn available_providers_line() -> String {
+    available_provider_names().join(", ")
+}
+
 /// Per-provider metadata: wizard label, env var, config key, and default models.
 #[derive(Clone, Copy, Debug)]
 pub struct ProviderSpec {
@@ -181,11 +199,5 @@ impl Provider {
 impl From<&Provider> for config::ValueKind {
     fn from(provider: &Provider) -> Self {
         config::ValueKind::String(provider.to_string())
-    }
-}
-
-impl Into<String> for Provider {
-    fn into(self) -> String {
-        self.to_string()
     }
 }

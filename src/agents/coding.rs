@@ -216,6 +216,7 @@ impl CodingAgent {
 pub async fn prepare_coding_agent_preserving_messages(
     existing: &CodingAgent,
     agent_config: &AgentConfig,
+    success_message: String,
 ) -> Result<(CodingAgent, String), String> {
     let saved = existing
         .lock()
@@ -223,8 +224,6 @@ pub async fn prepare_coding_agent_preserving_messages(
         .save_messages()
         .map_err(|e| format!("failed to save messages: {e}"))?;
 
-    let model = agent_config.model.clone();
-    let provider_name = agent_config.provider.to_string();
     let coding_agent = CodingAgent::new_with_agent_config(agent_config).await;
     coding_agent
         .lock()
@@ -232,29 +231,26 @@ pub async fn prepare_coding_agent_preserving_messages(
         .restore_messages(&saved)
         .map_err(|e| format!("failed to restore messages: {e}"))?;
 
-    let message = format!(
-        "Switched to provider {provider_name} with model {model} (conversation preserved)."
-    );
-    Ok((coding_agent, message))
+    Ok((coding_agent, success_message))
 }
 
 /// Insert a new agent, allocate its session, and tear down any prior agent session.
 pub(crate) fn install_coding_agent(
     world: &mut World,
     agent: CodingAgent,
-    model: impl Into<String>,
-    provider: impl Into<String>,
+    model: String,
+    provider: String,
 ) {
     if let Some(old) = world.remove_resource::<CodingAgent>() {
-        teardown_session(world, old.session_id());
+        () = teardown_session(world, old.session_id());
     }
 
     let mut agent = agent;
     let (session_id, _) = spawn_session_root(world);
-    agent.bind_session(session_id);
-    sync_session_meta(world, session_id, model, provider);
-    world.resource_mut::<FocusedSession>().set(session_id);
-    world.insert_resource(agent);
+    () = agent.bind_session(session_id);
+    () = sync_session_meta(world, session_id, model, provider);
+    () = world.resource_mut::<FocusedSession>().set(session_id);
+    () = world.insert_resource(agent);
 }
 
 #[derive(Clone, Resource)]
@@ -306,7 +302,7 @@ fn setup(
         let agent_config = AgentConfig::from(&config);
         let coding_agent = CodingAgent::new_with_agent_config(&agent_config).await;
         ctx.run_on_main_thread(move |ctx| {
-            install_coding_agent(ctx.world, coding_agent, model, provider);
+            () = install_coding_agent(ctx.world, coding_agent, model, provider);
         })
         .await;
     });

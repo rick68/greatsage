@@ -1,5 +1,5 @@
 use {
-    crate::{config::McpConfig, providers::Provider, repl::cli_repl_commands_section},
+    crate::{config::McpConfig, providers::Provider, repl::help_data::cli_repl_commands_section},
     bevy::ecs::resource::Resource,
     clap::{ArgAction, CommandFactory, Parser, Subcommand},
     clap_help::Printer,

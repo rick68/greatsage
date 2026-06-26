@@ -59,21 +59,21 @@ pub(crate) fn indexed_content_from_assistant_message(
 }
 
 pub(crate) fn indexed_content_from_tool_start(
-    tool_call_id: impl AsRef<str>,
-    tool_name: impl AsRef<str>,
+    tool_call_id: String,
+    tool_name: String,
     args: &serde_json::Value,
 ) -> IndexedContent {
     IndexedContent {
         block_index: 0,
         content: Content::ToolCall {
-            id: tool_call_id.as_ref().to_string(),
-            name: tool_name.as_ref().to_string(),
+            id: tool_call_id.clone(),
+            name: tool_name.clone(),
             arguments: args.clone(),
             provider_metadata: None,
         },
         provenance: ContentProvenance::ToolExecutionStart {
-            tool_call_id: tool_call_id.as_ref().to_string(),
-            tool_name: tool_name.as_ref().to_string(),
+            tool_call_id,
+            tool_name,
         },
     }
 }

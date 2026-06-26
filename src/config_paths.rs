@@ -38,7 +38,7 @@ pub fn find_populated_project_config(start: &Path) -> Option<PathBuf> {
 pub fn config_search_paths(cwd: &Path, home: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(project) = find_populated_project_config(cwd) {
-        paths.push(project);
+        () = paths.push(project);
     }
     () = paths.push(user_config_path(home));
     paths
@@ -80,11 +80,8 @@ pub fn repo_env_path(cwd: &Path) -> PathBuf {
 }
 
 /// Outermost existing file found walking up from `start` (includes `start`).
-fn find_existing_file_upward(
-    start: impl AsRef<Path>,
-    path_at: impl Fn(&Path) -> PathBuf,
-) -> Option<PathBuf> {
-    let mut dir = start.as_ref().to_path_buf();
+fn find_existing_file_upward(start: &Path, path_at: impl Fn(&Path) -> PathBuf) -> Option<PathBuf> {
+    let mut dir = start.to_path_buf();
     let mut found = None;
     loop {
         let candidate = path_at(&dir);

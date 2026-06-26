@@ -124,10 +124,10 @@ fn apply_api_key_to_env(provider: Provider, api_key: Option<&str>) {
     }
 }
 
-fn provider_from_label(label: impl AsRef<str>) -> Provider {
+fn provider_from_label(label: &str) -> Provider {
     PROVIDER_SPECS
         .iter()
-        .find(|spec| spec.wizard_label == label.as_ref())
+        .find(|spec| spec.wizard_label == label)
         .expect("label comes from PROVIDER_SPECS choices")
         .provider
 }
@@ -173,12 +173,9 @@ fn model_step_after_api_key(skipped_api_key: bool) -> WizardStep {
     }
 }
 
-fn print_export_hint(provider: Provider, key: impl AsRef<str>) {
+fn print_export_hint(provider: Provider, key: &str) {
     let var = provider_env_var(provider).unwrap_or("API_KEY");
-    println!(
-        "\nTo persist the API key in your shell, run:\n  export {var}=\"{}\"",
-        key.as_ref()
-    );
+    println!("\nTo persist the API key in your shell, run:\n  export {var}=\"{key}\"");
 }
 
 fn print_completion(

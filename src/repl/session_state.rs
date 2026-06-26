@@ -1,6 +1,9 @@
+//! Per-REPL-session state (e.g. last user prompt for `/retry`).
+
 use bevy::ecs::resource::Resource;
 
-#[derive(Resource, Default)]
-pub struct ReplSessionState {
+#[derive(Default, Resource)]
+pub(super) struct ReplSessionState {
     pub last_user_prompt: Option<String>,
+    pub pending_clear_confirm: bool,
 }

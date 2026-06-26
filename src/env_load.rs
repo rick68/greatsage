@@ -12,9 +12,7 @@ use {
     crate::config_paths::env_file_search_paths_low_to_high,
     std::{
         collections::{HashMap, HashSet},
-        env,
-        fmt::Display,
-        fs, io,
+        env, fs, io,
         path::Path,
     },
 };
@@ -74,7 +72,7 @@ pub fn env_reference_name(value: &str) -> Option<&str> {
 
 /// Resolve a TOML credential with an optional paired `.env` for `env!VAR` lookups.
 pub fn resolve_credential_value_with_paired_env(
-    value: impl AsRef<str>,
+    value: &str,
     paired_env: Option<&Path>,
 ) -> Option<String> {
     if let Some(name) = env_reference_name(value.as_ref()) {
@@ -92,39 +90,32 @@ pub fn resolve_credential_value_with_paired_env(
         }
         return None;
     }
-    let trimmed = value.as_ref().trim();
+    let trimmed = value.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
-pub fn credential_value_is_set_with_paired_env(
-    value: impl AsRef<str>,
-    paired_env: Option<&Path>,
-) -> bool {
+pub fn credential_value_is_set_with_paired_env(value: &str, paired_env: Option<&Path>) -> bool {
     resolve_credential_value_with_paired_env(value, paired_env).is_some()
 }
 
-fn format_env_assignment(
-    key: impl AsRef<str> + Display,
-    value: impl AsRef<str> + Display,
-) -> String {
-    let needs_quotes = value.as_ref().is_empty()
+fn format_env_assignment(key: &str, value: &str) -> String {
+    let needs_quotes = value.is_empty()
         || value
-            .as_ref()
             .chars()
             .any(|ch| ch.is_whitespace() || matches!(ch, '#' | '"' | '\'' | '\\' | '$' | '='));
     if needs_quotes {
-        let escaped = value.as_ref().replace('\\', "\\\\").replace('"', "\\\"");
+        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
         format!("{key}=\"{escaped}\"")
     } else {
         format!("{key}={value}")
     }
 }
 
-fn restrict_env_permissions(_path: impl AsRef<Path>) -> io::Result<()> {
+fn restrict_env_permissions(path: &Path) -> io::Result<()> {
     cfg_if::cfg_if! {
         if #[cfg(unix)] {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(_path.as_ref(), fs::Permissions::from_mode(0o600))
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600))
         } else {
             Ok(())
         }
@@ -142,16 +133,12 @@ fn env_line_key(line: &str) -> Option<&str> {
 }
 
 /// Insert or update one `KEY=value` entry in a `.env` file.
-pub fn upsert_env_file(
-    path: impl AsRef<Path> + Clone + Copy,
-    key: impl AsRef<str>,
-    value: impl AsRef<str>,
-) -> io::Result<()> {
-    if let Some(parent) = path.as_ref().parent() {
+pub fn upsert_env_file(path: &Path, key: &str, value: &str) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
         () = fs::create_dir_all(parent)?;
     }
 
-    let mut lines: Vec<String> = if path.as_ref().is_file() {
+    let mut lines: Vec<String> = if path.is_file() {
         fs::read_to_string(path)?
             .lines()
             .map(String::from)
@@ -160,10 +147,10 @@ pub fn upsert_env_file(
         Vec::new()
     };
 
-    let assignment = format_env_assignment(key.as_ref(), value.as_ref());
+    let assignment = format_env_assignment(key, value);
     let mut found = false;
     for line in &mut lines {
-        if env_line_key(line) == Some(key.as_ref()) {
+        if env_line_key(line) == Some(key) {
             *line = assignment.clone();
             found = true;
             break;
@@ -178,5 +165,5 @@ pub fn upsert_env_file(
         () = content.push('\n');
     }
     () = fs::write(path, content)?;
-    restrict_env_permissions(path)
+    restrict_env_permissions(path.as_ref())
 }

@@ -1,0 +1,197 @@
+//! Session slash commands: /provider, /model, /save, /load, /compact, /retry.
+//!
+//! Async yoagent backends live in [`super::session_ops`].
+//!
+//! File entry last; each function directly above its callers. Local callees sit
+//! immediately above their caller in source appearance order; reuse earlier defs.
+
+use {
+    super::{
+        dispatch::{AgentOp, AgentOpInvocation, DispatchResult, ReplDispatchCtx},
+        help_data::push_usage_and_body_parts,
+        model_cmd::{ModelAction, model_info_lines, model_list_lines, parse_model_args},
+        route::CommandRoute,
+        session_ops::resolve_session_path,
+        session_state::ReplSessionState,
+    },
+    crate::{
+        agents::AgentConfig,
+        config::Config,
+        providers::{Provider, available_providers_line},
+    },
+    std::str::FromStr,
+};
+
+fn reinstall_preserve_messages(
+    agent_config: &AgentConfig,
+    success_message: String,
+) -> DispatchResult {
+    DispatchResult::AgentOp(AgentOpInvocation {
+        preamble: Vec::new(),
+        op: AgentOp::ReinstallPreserveMessages {
+            config: agent_config.clone(),
+            success_message,
+        },
+    })
+}
+
+fn show_provider(agent_config: &AgentConfig) -> DispatchResult {
+    DispatchResult::Handled {
+        output: vec![
+            format!("current provider: {}", agent_config.provider),
+            String::from("usage: /provider <name>"),
+            format!("available: {}", available_providers_line()),
+        ],
+        detail: Vec::new(),
+        redraw_prompt: true,
+        reinstall: None,
+    }
+}
+
+fn show_model(agent_config: &AgentConfig) -> DispatchResult {
+    DispatchResult::Handled {
+        output: vec![
+            format!("Current model: {}", agent_config.model),
+            String::from("usage: /model <name> | list | info"),
+        ],
+        detail: Vec::new(),
+        redraw_prompt: true,
+        reinstall: None,
+    }
+}
+
+fn retry(session: &ReplSessionState) -> DispatchResult {
+    match &session.last_user_prompt {
+        Some(prompt) => DispatchResult::ResendPrompt {
+            prompt: prompt.clone(),
+            hint: String::from("(retrying last input)"),
+        },
+        None => DispatchResult::Handled {
+            output: vec![String::from("(nothing to retry — no previous input)")],
+            detail: Vec::new(),
+            redraw_prompt: true,
+            reinstall: None,
+        },
+    }
+}
+
+fn save(args: &str) -> DispatchResult {
+    let path = resolve_session_path(if args.is_empty() { None } else { Some(args) });
+    DispatchResult::AgentOp(AgentOpInvocation {
+        preamble: Vec::new(),
+        op: AgentOp::Save { path },
+    })
+}
+
+fn load(args: &str) -> DispatchResult {
+    let path = resolve_session_path(if args.is_empty() { None } else { Some(args) });
+    DispatchResult::AgentOp(AgentOpInvocation {
+        preamble: Vec::new(),
+        op: AgentOp::Load { path },
+    })
+}
+
+fn compact(args: &str) -> DispatchResult {
+    if !args.trim().is_empty() {
+        return DispatchResult::Handled {
+            output: vec![format!("Invalid compact argument: {}", args.trim())],
+            detail: Vec::new(),
+            redraw_prompt: true,
+            reinstall: None,
+        };
+    }
+    DispatchResult::AgentOp(AgentOpInvocation {
+        preamble: Vec::new(),
+        op: AgentOp::Compact,
+    })
+}
+
+fn switch_provider(name: &str, agent_config: &mut AgentConfig, config: &Config) -> DispatchResult {
+    let new_provider = match Provider::from_str(&name.to_lowercase()) {
+        Ok(p) => p,
+        Err(_) => {
+            let (usage, detail) = push_usage_and_body_parts("/provider");
+            return DispatchResult::Handled {
+                output: vec![
+                    format!("Unknown provider: {name}"),
+                    usage,
+                    String::from("Try /help /provider for details."),
+                ],
+                detail,
+                redraw_prompt: true,
+                reinstall: None,
+            };
+        }
+    };
+
+    agent_config.provider = new_provider;
+    agent_config.model = new_provider.default_model().to_string();
+    agent_config.api_key = config.get_api_key(Some(new_provider)).unwrap_or_default();
+    let success_message = format!(
+        "Switched to provider {new_provider} with model {} (conversation preserved).",
+        agent_config.model
+    );
+
+    reinstall_preserve_messages(agent_config, success_message)
+}
+
+fn switch_model(model_name: String, agent_config: &mut AgentConfig) -> DispatchResult {
+    agent_config.model = model_name;
+    let success_message = format!(
+        "Switched to model {} (conversation preserved).",
+        agent_config.model
+    );
+    reinstall_preserve_messages(agent_config, success_message)
+}
+
+fn provider(args: &str, ctx: &mut ReplDispatchCtx<'_>) -> DispatchResult {
+    if args.is_empty() {
+        show_provider(ctx.agent_config)
+    } else {
+        switch_provider(args, ctx.agent_config, ctx.config)
+    }
+}
+
+fn model(args: &str, ctx: &mut ReplDispatchCtx<'_>) -> DispatchResult {
+    match parse_model_args(args) {
+        ModelAction::Show => show_model(ctx.agent_config),
+        ModelAction::ListAll => DispatchResult::Handled {
+            output: model_list_lines(ctx.agent_config, ""),
+            detail: Vec::new(),
+            redraw_prompt: true,
+            reinstall: None,
+        },
+        ModelAction::ListProvider { provider } => DispatchResult::Handled {
+            output: model_list_lines(ctx.agent_config, &provider),
+            detail: Vec::new(),
+            redraw_prompt: true,
+            reinstall: None,
+        },
+        ModelAction::Info { model } => {
+            let name = model.as_deref().unwrap_or(&ctx.agent_config.model);
+            DispatchResult::Handled {
+                output: model_info_lines(name, ctx.agent_config),
+                detail: Vec::new(),
+                redraw_prompt: true,
+                reinstall: None,
+            }
+        }
+        ModelAction::Switch { model } => switch_model(model, ctx.agent_config),
+    }
+}
+
+pub(super) fn dispatch(
+    route: CommandRoute,
+    args: &str,
+    ctx: &mut ReplDispatchCtx<'_>,
+) -> DispatchResult {
+    match route {
+        CommandRoute::Provider => provider(args, ctx),
+        CommandRoute::Model => model(args, ctx),
+        CommandRoute::Save => save(args),
+        CommandRoute::Load => load(args),
+        CommandRoute::Compact => compact(args),
+        CommandRoute::Retry => retry(ctx.session),
+        _ => DispatchResult::Unknown,
+    }
+}

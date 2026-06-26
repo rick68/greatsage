@@ -46,8 +46,8 @@ pub(crate) fn teardown_session(world: &mut World, session_id: SessionId) {
 pub(crate) fn sync_session_meta(
     world: &mut World,
     session_id: SessionId,
-    model: impl Into<String>,
-    provider: impl Into<String>,
+    model: String,
+    provider: String,
 ) {
     let Some(root) = world.resource::<SessionManager>().root_entity(session_id) else {
         return;
@@ -60,7 +60,7 @@ pub(crate) fn sync_session_meta(
         session_id,
         started_at_ms: now_ms(),
         cwd,
-        model: model.into(),
-        provider: provider.into(),
+        model,
+        provider,
     });
 }

@@ -1,171 +1,103 @@
+//! Slash-command router and shared dispatch types.
+//!
+//! Per-domain handlers live in flat `commands_*.rs` modules; wire new commands in
+//! [`route`] and the matching domain `dispatch` function.
+//!
+//! File entry last; each function directly above its callers. Local callees sit
+//! immediately above their caller in source appearance order; reuse earlier defs.
+
 use {
     super::{
-        agent_session::resolve_session_path,
-        compact_parse::{parse_compact_arg, CompactArg},
-        help_data::{format_help_detail, help_text},
+        commands_help, commands_lifecycle, commands_session,
+        route::{CommandRoute, route_command},
         session_state::ReplSessionState,
     },
-    crate::{
-        agents::AgentConfig,
-        config::Config,
-        providers::Provider,
-    },
-    std::{path::PathBuf, str::FromStr},
+    crate::{agents::AgentConfig, config::Config},
+    std::path::PathBuf,
 };
 
-pub enum AgentOp {
-    Save { path: PathBuf },
-    Load { path: PathBuf },
-    Compact { arg: CompactArg },
-    ReinstallPreserveMessages(AgentConfig),
+/// Shared inputs for slash-command handlers (grows without touching Bevy systems).
+pub(super) struct ReplDispatchCtx<'a> {
+    pub agent_config: &'a mut AgentConfig,
+    pub session: &'a ReplSessionState,
+    pub config: &'a Config,
+    /// `(message_count, token_count)` for `/clear` confirmation; `None` when agent unavailable.
+    pub clear_stats: Option<(usize, u64)>,
 }
 
-pub enum DispatchResult {
+pub(super) enum AgentOp {
+    Save {
+        path: PathBuf,
+    },
+    Load {
+        path: PathBuf,
+    },
+    Compact,
+    ReinstallPreserveMessages {
+        config: AgentConfig,
+        success_message: String,
+    },
+}
+
+pub(super) struct AgentOpInvocation {
+    pub op: AgentOp,
+    pub preamble: Vec<String>,
+}
+
+pub(super) enum DispatchResult {
     Exit,
     Handled {
         output: Vec<String>,
+        /// Explanatory lines printed flush-left (no two-space REPL indent).
+        detail: Vec<String>,
         redraw_prompt: bool,
         reinstall: Option<AgentConfig>,
     },
-    ResendPrompt(String),
-    AgentOp(AgentOp),
+    ResendPrompt {
+        prompt: String,
+        hint: String,
+    },
+    AgentOp(AgentOpInvocation),
+    /// `/clear` needs y/n before reinstalling the agent.
+    AwaitClearConfirm {
+        prompt: String,
+    },
     Unknown,
 }
 
-pub fn dispatch_slash_command(
+pub(super) fn command_name_and_args(line: &str) -> (&str, &str) {
+    let trimmed = line.trim();
+    match trimmed.split_once(char::is_whitespace) {
+        Some((cmd, args)) => (cmd, args.trim()),
+        None => (trimmed, ""),
+    }
+}
+
+pub(super) fn unknown_command_message() -> &'static str {
+    "Unknown command. Try /help."
+}
+
+pub(super) fn dispatch_slash_command(
     line: &str,
     agent_config: &mut AgentConfig,
     session: &ReplSessionState,
     config: &Config,
+    clear_stats: Option<(usize, u64)>,
 ) -> DispatchResult {
-    let trimmed = line.trim();
-    match trimmed {
-        "/exit" | "/quit" => DispatchResult::Exit,
-        "/clear" => DispatchResult::Handled {
-            output: Vec::new(),
-            redraw_prompt: true,
-            reinstall: Some(agent_config.clone()),
-        },
-        "/retry" => handle_retry(session),
-        "/provider" => show_provider(agent_config),
-        s if s.starts_with("/provider ") => handle_provider(s, agent_config, config),
-        s if s.starts_with("/model ") => handle_model(s, agent_config),
-        "/save" => DispatchResult::AgentOp(AgentOp::Save {
-            path: resolve_session_path(None),
-        }),
-        s if s.starts_with("/save ") => {
-            let path = s.trim_start_matches("/save ").trim();
-            DispatchResult::AgentOp(AgentOp::Save {
-                path: resolve_session_path(Some(path)),
-            })
-        }
-        "/load" => DispatchResult::AgentOp(AgentOp::Load {
-            path: resolve_session_path(None),
-        }),
-        s if s.starts_with("/load ") => {
-            let path = s.trim_start_matches("/load ").trim();
-            DispatchResult::AgentOp(AgentOp::Load {
-                path: resolve_session_path(Some(path)),
-            })
-        }
-        "/compact" => DispatchResult::AgentOp(AgentOp::Compact {
-            arg: CompactArg::Default,
-        }),
-        s if s.starts_with("/compact ") => {
-            let arg_str = s.trim_start_matches("/compact ").trim();
-            DispatchResult::AgentOp(AgentOp::Compact {
-                arg: parse_compact_arg(arg_str),
-            })
-        }
-        "/help" => DispatchResult::Handled {
-            output: vec![help_text()],
-            redraw_prompt: true,
-            reinstall: None,
-        },
-        s if s.starts_with("/help ") => {
-            let arg = s.trim_start_matches("/help ").trim();
-            let output = if arg.is_empty() {
-                help_text()
-            } else {
-                format_help_detail(arg)
-            };
-            DispatchResult::Handled {
-                output: vec![output],
-                redraw_prompt: true,
-                reinstall: None,
-            }
-        }
-        _ => DispatchResult::Unknown,
-    }
-}
-
-fn show_provider(agent_config: &AgentConfig) -> DispatchResult {
-    DispatchResult::Handled {
-        output: vec![format!("Current provider: {}", agent_config.provider)],
-        redraw_prompt: true,
-        reinstall: None,
-    }
-}
-
-fn handle_provider(
-    line: &str,
-    agent_config: &mut AgentConfig,
-    config: &Config,
-) -> DispatchResult {
-    let name = line.trim_start_matches("/provider ").trim();
-    if name.is_empty() {
-        return show_provider(agent_config);
-    }
-
-    let new_provider = match Provider::from_str(name) {
-        Ok(p) => p,
-        Err(_) => {
-            return DispatchResult::Handled {
-                output: vec![format!("Unknown provider: {name}. Try /help /provider.")],
-                redraw_prompt: true,
-                reinstall: None,
-            };
-        }
+    let (cmd, args) = command_name_and_args(line);
+    let route = route_command(cmd);
+    let mut ctx = ReplDispatchCtx {
+        agent_config,
+        session,
+        config,
+        clear_stats,
     };
 
-    agent_config.provider = new_provider;
-    agent_config.model = new_provider.default_model().to_string();
-    agent_config.api_key = config
-        .get_api_key(Some(new_provider))
-        .unwrap_or_default();
-
-    DispatchResult::AgentOp(AgentOp::ReinstallPreserveMessages(agent_config.clone()))
-}
-
-fn handle_retry(session: &ReplSessionState) -> DispatchResult {
-    match &session.last_user_prompt {
-        Some(prompt) => DispatchResult::ResendPrompt(prompt.clone()),
-        None => DispatchResult::Handled {
-            output: vec!["No previous prompt to retry.".to_string()],
-            redraw_prompt: true,
-            reinstall: None,
-        },
+    match route {
+        CommandRoute::Help => commands_help::help(args),
+        route if route.is_lifecycle() => commands_lifecycle::dispatch(route, &mut ctx),
+        route if route.is_session() => commands_session::dispatch(route, args, &mut ctx),
+        CommandRoute::UnknownSlash | CommandRoute::NotSlash => DispatchResult::Unknown,
+        _ => DispatchResult::Unknown,
     }
-}
-
-fn handle_model(line: &str, agent_config: &mut AgentConfig) -> DispatchResult {
-    let new_model = line.trim_start_matches("/model ").trim();
-    if new_model.is_empty() {
-        return DispatchResult::Handled {
-            output: Vec::new(),
-            redraw_prompt: false,
-            reinstall: None,
-        };
-    }
-
-    agent_config.model = String::from(new_model);
-    DispatchResult::Handled {
-        output: Vec::new(),
-        redraw_prompt: true,
-        reinstall: Some(agent_config.clone()),
-    }
-}
-
-pub fn unknown_command_message() -> &'static str {
-    "Unknown command. Try /help."
 }

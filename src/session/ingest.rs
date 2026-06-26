@@ -49,11 +49,8 @@ fn assistant_blocks_for_projection(
     blocks
 }
 
-fn tool_summary(
-    tool_name: impl AsRef<str> + ToOwned<Owned = String>,
-    args: &serde_json::Value,
-) -> String {
-    match tool_name.as_ref() {
+fn tool_summary(tool_name: &str, args: &serde_json::Value) -> String {
+    match tool_name {
         "bash" => {
             let cmd = args
                 .get("command")
@@ -81,7 +78,7 @@ fn tool_summary(
             let pat = args.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
             format!("search '{}'", truncate(pat, 60))
         }
-        _ => tool_name.to_owned(),
+        _ => String::from(tool_name),
     }
 }
 
@@ -467,7 +464,7 @@ pub(crate) fn ingest_agent_events(
                             seq,
                             tool_call_id: tool_call_id.clone(),
                             tool_name: tool_name.clone(),
-                            summary: tool_summary(tool_name.to_owned(), args),
+                            summary: tool_summary(&tool_name, args),
                             started_at_ms: now_ms(),
                             ended_at_ms: None,
                             is_error: false,
@@ -475,7 +472,8 @@ pub(crate) fn ingest_agent_events(
                         ActiveToolCall,
                     ))
                     .id();
-                let argument = indexed_content_from_tool_start(tool_call_id, tool_name, args);
+                let argument =
+                    indexed_content_from_tool_start(tool_call_id.clone(), tool_name.clone(), args);
                 let turn_seq = ingest_state.current_turn_seq().unwrap_or(0);
                 () = spawn_indexed_blocks(
                     &mut commands,
