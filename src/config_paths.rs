@@ -1,6 +1,6 @@
 use {
     std::{
-        fs,
+        env, fs,
         path::{Path, PathBuf},
     },
     toml_edit::DocumentMut,
@@ -9,15 +9,39 @@ use {
 pub const PROJECT_DIR: &str = ".greatsage";
 pub const CONFIG_FILENAME: &str = "config.toml";
 pub const ENV_FILENAME: &str = ".env";
+const APP_CONFIG_SUBDIR: &str = "greatsage";
+
+/// Config base directory (`~/.config` on typical Linux; honors `XDG_CONFIG_HOME` when set).
+pub fn xdg_config_dir() -> PathBuf {
+    env::var_os("XDG_CONFIG_HOME")
+        .filter(|path| Path::new(path).is_absolute())
+        .map(PathBuf::from)
+        .or_else(dirs::config_dir)
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".config")
+        })
+}
+
+/// User-level greatsage directory (`~/.config/greatsage` display; see `xdg_config_dir()`).
+pub fn user_config_dir() -> PathBuf {
+    xdg_config_dir().join(APP_CONFIG_SUBDIR)
+}
+
+/// User config: `~/.config/greatsage/config.toml` (via `xdg_config_dir()`)
+pub fn user_config_path() -> PathBuf {
+    user_config_dir().join(CONFIG_FILENAME)
+}
+
+/// REPL prompt input history (readline-style ↑↓ recall).
+pub fn repl_history_path() -> PathBuf {
+    user_config_dir().join("history")
+}
 
 /// Project config: `.greatsage/config.toml`
 pub fn project_config_path(cwd: &Path) -> PathBuf {
     cwd.join(PROJECT_DIR).join(CONFIG_FILENAME)
-}
-
-/// User XDG config: `~/.config/greatsage/config.toml`
-pub fn user_config_path(home: &Path) -> PathBuf {
-    home.join(".config").join("greatsage").join(CONFIG_FILENAME)
 }
 
 /// Nearest populated `.greatsage/config.toml` walking up from `start` (includes `start`).
@@ -35,12 +59,12 @@ pub fn find_populated_project_config(start: &Path) -> Option<PathBuf> {
 }
 
 /// Config search order (first populated file wins): project (walk-up) → user.
-pub fn config_search_paths(cwd: &Path, home: &Path) -> Vec<PathBuf> {
+pub fn config_search_paths(cwd: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(project) = find_populated_project_config(cwd) {
         () = paths.push(project);
     }
-    () = paths.push(user_config_path(home));
+    () = paths.push(user_config_path());
     paths
 }
 
@@ -64,9 +88,9 @@ pub fn config_file_is_populated(path: &Path) -> bool {
         .is_some_and(|doc| !doc.as_table().is_empty())
 }
 
-/// User XDG env: `~/.config/greatsage/.env`
-pub fn user_env_path(home: &Path) -> PathBuf {
-    home.join(".config").join("greatsage").join(ENV_FILENAME)
+/// User env: `~/.config/greatsage/.env` (via `xdg_config_dir()`)
+pub fn user_env_path() -> PathBuf {
+    user_config_dir().join(ENV_FILENAME)
 }
 
 /// Project env: `.greatsage/.env`
@@ -98,9 +122,9 @@ fn find_existing_file_upward(start: &Path, path_at: impl Fn(&Path) -> PathBuf) -
 ///
 /// Order: `~/.config/greatsage/.env` → `.greatsage/.env` (walk-up) → `./.env` (walk-up).
 /// Shell environment set before startup is never overwritten.
-pub fn env_file_search_paths_low_to_high(cwd: &Path, home: &Path) -> Vec<PathBuf> {
+pub fn env_file_search_paths_low_to_high(cwd: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    let user = user_env_path(home);
+    let user = user_env_path();
     if user.is_file() {
         () = paths.push(user);
     }

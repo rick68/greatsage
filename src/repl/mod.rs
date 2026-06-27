@@ -12,6 +12,7 @@ mod completion;
 mod cost;
 mod dispatch;
 pub(crate) mod help_data;
+mod history;
 mod model_cmd;
 mod model_id;
 mod native_pricing;
@@ -40,7 +41,7 @@ use {
         ecs::{
             change_detection::{Res, ResMut},
             message::{MessageReader, MessageWriter},
-            schedule::{IntoScheduleConfigs, common_conditions::resource_removed},
+            schedule::IntoScheduleConfigs,
             system::{Commands, Local},
         },
     },
@@ -54,14 +55,16 @@ use {
         AgentOp, AgentOpInvocation, DispatchResult, command_name_and_args, dispatch_slash_command,
         unknown_command_message,
     },
+    history::{DEFAULT_MAX_ENTRIES, ReplInputHistory, persist_repl_history},
     output::ReplOutputChannel,
     route::{CommandRoute, route_command},
     session_ops::{agent_message_stats_blocking, compact_agent, load_messages, save_messages},
     session_state::ReplSessionState,
     tab::{ReplTabLocals, TabListConfirm, accept_tab_candidate_list, handle_tab_completion},
     terminal::{
-        redraw_input_line, sync_inline_hint, write_quit_farewell_if_enabled,
-        write_repl_handled_output, write_repl_response, write_repl_response_lines,
+        erase_ahead_echo, redraw_input_line, replace_input_line_in_place, sync_inline_hint,
+        write_quit_farewell_if_enabled, write_repl_handled_output, write_repl_response,
+        write_repl_response_lines,
     },
     unicode_width::UnicodeWidthChar,
 };
@@ -87,6 +90,7 @@ fn ctrl_c(
     mut stdin_key_message: MessageReader<StdinKeyMessage>,
     mut exit: MessageWriter<AppExit>,
     mut stdout: MessageWriter<StdoutMessage>,
+    mut history: ResMut<ReplInputHistory>,
     cli: Res<Cli>,
 ) {
     for StdinKeyMessage(KeyEvent {
@@ -94,6 +98,7 @@ fn ctrl_c(
     }) in stdin_key_message.read()
     {
         if *code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL) {
+            () = persist_repl_history(history.as_mut(), &crate::config_paths::repl_history_path());
             () = commands.remove_resource::<CodingAgentTask>();
             () = write_quit_farewell_if_enabled(&mut stdout, cli.as_ref());
             exit.write_default();
@@ -107,7 +112,7 @@ fn drain_repl_output(
 ) -> bool {
     let mut drained = false;
     while let Ok(line) = channel.receiver.try_recv() {
-        write_repl_response(stdout, &line);
+        () = write_repl_response(stdout, &line);
         drained = true;
     }
     drained
@@ -115,6 +120,10 @@ fn drain_repl_output(
 
 pub fn prompt_symbol() -> String {
     <&str as Colorize>::bold("\n> ").green().to_string()
+}
+
+pub(crate) fn prompt_symbol_inline() -> String {
+    <&str as Colorize>::bold("> ").green().to_string()
 }
 
 fn spawn_agent_reinstall(tokio_runtime: &mut TokioTasksRuntime, agent_config: AgentConfig) {
@@ -188,6 +197,12 @@ struct ReplInputLocals {
     content: String,
     tab: ReplTabLocals,
     hint_width: usize,
+    /// Previous frame had an in-flight [`CodingAgentTask`] (prompt streaming).
+    was_agent_busy: bool,
+    /// Display columns of type-ahead text echoed inline after streaming output.
+    ahead_echo_width: usize,
+    /// Formal `> ` prompt line is active (idle editing / post-run restore).
+    on_prompt_line: bool,
 }
 
 impl ReplInputLocals {
@@ -195,11 +210,25 @@ impl ReplInputLocals {
         self.cursor = 0;
         () = self.content.clear();
         self.hint_width = 0;
+        self.ahead_echo_width = 0;
+        self.on_prompt_line = false;
     }
 
     fn clear_line(&mut self) {
         self.cursor = 0;
         () = self.content.clear();
+        self.ahead_echo_width = 0;
+        self.on_prompt_line = false;
+    }
+
+    fn text_display_width(text: &str) -> usize {
+        text.chars()
+            .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
+            .sum()
+    }
+
+    fn char_display_width(c: char) -> usize {
+        UnicodeWidthChar::width(c).unwrap_or(0)
     }
 
     fn clear_tab_state(&mut self) {
@@ -234,7 +263,7 @@ impl ReplInputLocals {
         confirm: TabListConfirm,
         agent_config: &AgentConfig,
     ) {
-        accept_tab_candidate_list(
+        () = accept_tab_candidate_list(
             stdout,
             confirm,
             &self.content,
@@ -251,7 +280,7 @@ impl ReplInputLocals {
         stdout: &mut MessageWriter<StdoutMessage>,
         agent_config: &AgentConfig,
     ) {
-        handle_tab_completion(
+        () = handle_tab_completion(
             &mut self.content,
             &mut self.cursor,
             stdout,
@@ -262,7 +291,7 @@ impl ReplInputLocals {
     }
 
     fn sync_hint(&mut self, stdout: &mut MessageWriter<StdoutMessage>, agent_config: &AgentConfig) {
-        sync_inline_hint(
+        () = sync_inline_hint(
             stdout,
             &self.content,
             self.cursor,
@@ -270,6 +299,223 @@ impl ReplInputLocals {
             &mut self.hint_width,
         );
     }
+
+    fn apply_history_line(
+        &mut self,
+        line: String,
+        stdout: &mut MessageWriter<StdoutMessage>,
+        agent_config: &AgentConfig,
+    ) {
+        () = self.clear_tab_state();
+        self.content = line;
+        self.cursor = self.content.chars().count();
+        self.on_prompt_line = true;
+        () = replace_input_line_in_place(
+            stdout,
+            &self.content,
+            self.cursor,
+            agent_config,
+            &mut self.hint_width,
+        );
+    }
+
+    fn replace_input_on_line(
+        &mut self,
+        stdout: &mut MessageWriter<StdoutMessage>,
+        agent_config: &AgentConfig,
+    ) {
+        () = replace_input_line_in_place(
+            stdout,
+            &self.content,
+            self.cursor,
+            agent_config,
+            &mut self.hint_width,
+        );
+    }
+
+    /// Echo one character inline at the current output position (agent busy, append at end).
+    fn echo_ahead_char(&mut self, stdout: &mut MessageWriter<StdoutMessage>, c: char) {
+        if self.cursor != self.content.chars().count() {
+            self.sync_ahead_echo_full(stdout);
+            return;
+        }
+        let mut buf = [0_u8; 4];
+        let bytes = c.encode_utf8(&mut buf);
+        stdout.write(StdoutMessage::from(bytes));
+        self.ahead_echo_width += Self::char_display_width(c);
+    }
+
+    /// Rewrite inline type-ahead after history recall or mid-line edit during agent run.
+    fn sync_ahead_echo_full(&mut self, stdout: &mut MessageWriter<StdoutMessage>) {
+        if self.ahead_echo_width > 0 {
+            () = erase_ahead_echo(stdout, self.ahead_echo_width);
+            self.ahead_echo_width = 0;
+        }
+        if self.content.is_empty() {
+            return;
+        }
+        stdout.write(StdoutMessage::from(self.content.as_str()));
+        self.ahead_echo_width = Self::text_display_width(&self.content);
+    }
+
+    fn erase_ahead_char(&mut self, stdout: &mut MessageWriter<StdoutMessage>, width: usize) {
+        if width == 0 {
+            return;
+        }
+        () = erase_ahead_echo(stdout, width);
+        self.ahead_echo_width = self.ahead_echo_width.saturating_sub(width);
+    }
+
+    fn apply_history_silent(&mut self, line: String) {
+        () = self.clear_tab_state();
+        self.hint_width = 0;
+        self.content = line;
+        self.cursor = self.content.chars().count();
+    }
+
+    fn clear_ahead_echo(&mut self, stdout: &mut MessageWriter<StdoutMessage>) {
+        if self.ahead_echo_width > 0 {
+            () = erase_ahead_echo(stdout, self.ahead_echo_width);
+            self.ahead_echo_width = 0;
+        }
+    }
+
+    fn insert_char_buffered(&mut self, c: char) {
+        () = self.clear_tab_state();
+        if self.cursor == self.content.chars().count() {
+            () = self.content.push(c);
+            self.cursor += 1;
+        } else if let Some((byte_idx, _)) = self.content.char_indices().nth(self.cursor) {
+            () = self.content.insert(byte_idx, c);
+            self.cursor += 1;
+        }
+    }
+
+    fn backspace_buffered(&mut self) {
+        () = self.clear_tab_state();
+        let cursor_pos = self.cursor;
+        if cursor_pos != 0
+            && let Some((byte_idx, _)) = self.content.char_indices().nth(cursor_pos - 1)
+        {
+            self.content.remove(byte_idx);
+            self.cursor = cursor_pos - 1;
+        }
+    }
+
+    fn move_left_buffered(&mut self) {
+        self.clear_tab_state();
+        self.hint_width = 0;
+        let cursor_pos = self.cursor;
+        if cursor_pos != 0 {
+            self.cursor = cursor_pos - 1;
+        }
+    }
+
+    fn move_right_buffered(&mut self) {
+        () = self.clear_tab_state();
+        if self.cursor < self.content.chars().count() {
+            self.cursor += 1;
+        }
+    }
+}
+
+fn restore_prompt_with_input(
+    stdout: &mut MessageWriter<StdoutMessage>,
+    input: &mut ReplInputLocals,
+    agent_config: &AgentConfig,
+) {
+    if input.ahead_echo_width > 0 {
+        input.ahead_echo_width = 0;
+    }
+    stdout.write(StdoutMessage::from(prompt_symbol()));
+    if input.content.is_empty() {
+        input.hint_width = 0;
+        input.on_prompt_line = false;
+    } else {
+        input.on_prompt_line = true;
+        stdout.write(StdoutMessage::from(input.content.as_str()));
+        () = input.sync_hint(stdout, agent_config);
+    }
+}
+
+fn handle_agent_busy_key(
+    code: KeyCode,
+    kind: KeyEventKind,
+    modifiers: KeyModifiers,
+    input: &mut ReplInputLocals,
+    history: &mut ReplInputHistory,
+    stdout: &mut MessageWriter<StdoutMessage>,
+) -> bool {
+    if !matches!(kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+        return false;
+    }
+    match code {
+        KeyCode::Up => {
+            if let Some(line) = history.recall_up(&input.content) {
+                () = input.clear_ahead_echo(stdout);
+                () = input.apply_history_silent(line);
+            }
+        }
+        KeyCode::Down => {
+            if let Some(line) = history.recall_down() {
+                () = input.clear_ahead_echo(stdout);
+                () = input.apply_history_silent(line);
+            }
+        }
+        KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+            if history.is_recalling() {
+                () = history.cancel_recall();
+            }
+            let at_end = input.cursor == input.content.chars().count();
+            input.insert_char_buffered(c);
+            if at_end && input.cursor == input.content.chars().count() {
+                () = input.echo_ahead_char(stdout, c);
+            } else {
+                () = input.sync_ahead_echo_full(stdout);
+            }
+        }
+        KeyCode::Backspace => {
+            if history.is_recalling() {
+                () = history.cancel_recall();
+            }
+            let at_end = input.cursor == input.content.chars().count();
+            let removed_width = if at_end && input.cursor > 0 {
+                input
+                    .content
+                    .chars()
+                    .nth(input.cursor - 1)
+                    .map(ReplInputLocals::char_display_width)
+            } else {
+                None
+            };
+            input.backspace_buffered();
+            if let Some(width) = removed_width {
+                () = input.erase_ahead_char(stdout, width);
+            } else if !input.content.is_empty() {
+                () = input.sync_ahead_echo_full(stdout);
+            } else {
+                () = input.sync_ahead_echo_full(stdout);
+            }
+        }
+        KeyCode::Left => {
+            if history.is_recalling() {
+                () = history.cancel_recall();
+            }
+            () = input.move_left_buffered();
+        }
+        KeyCode::Right => {
+            if history.is_recalling() {
+                () = history.cancel_recall();
+            }
+            () = input.move_right_buffered();
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn history_keys_allowed(session_state: &ReplSessionState, input: &ReplInputLocals) -> bool {
+    !session_state.pending_clear_confirm && input.tab.list_confirm.is_none()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -286,11 +532,25 @@ fn read_stdin_stream(
     output_channel: Res<ReplOutputChannel>,
     coding_agent: Option<Res<CodingAgent>>,
     mut tokio_runtime: ResMut<TokioTasksRuntime>,
+    mut history: ResMut<ReplInputHistory>,
+    agent_task: Option<Res<CodingAgentTask>>,
     cli: Res<Cli>,
 ) {
+    let agent_busy = agent_task.is_some();
+    if input.was_agent_busy && !agent_busy {
+        () = restore_prompt_with_input(&mut stdout, &mut input, agent_config.as_ref());
+    }
+    input.was_agent_busy = agent_busy;
+
     if drain_repl_output(&output_channel, &mut stdout) {
         stdout.write(StdoutMessage::from(prompt_symbol()));
-        () = input.reset_line();
+        if input.content.is_empty() {
+            () = input.reset_line();
+        } else {
+            input.cursor = input.content.chars().count();
+            input.on_prompt_line = true;
+            () = input.replace_input_on_line(&mut stdout, agent_config.as_ref());
+        }
     }
 
     for StdinKeyMessage(KeyEvent {
@@ -300,6 +560,19 @@ fn read_stdin_stream(
         ..
     }) in stdin_key_messages.read()
     {
+        if agent_task.is_some()
+            && handle_agent_busy_key(
+                *code,
+                *kind,
+                *modifiers,
+                &mut input,
+                &mut history,
+                &mut stdout,
+            )
+        {
+            continue;
+        }
+
         if session_state.pending_clear_confirm {
             match (*code, *kind) {
                 (KeyCode::Tab, KeyEventKind::Press)
@@ -359,15 +632,35 @@ fn read_stdin_stream(
         }
 
         match *code {
+            KeyCode::Up
+                if *kind == KeyEventKind::Press && history_keys_allowed(&session_state, &input) =>
+            {
+                if let Some(line) = history.recall_up(&input.content) {
+                    () = input.apply_history_line(line, &mut stdout, agent_config.as_ref());
+                }
+            }
+            KeyCode::Down
+                if *kind == KeyEventKind::Press && history_keys_allowed(&session_state, &input) =>
+            {
+                if let Some(line) = history.recall_down() {
+                    () = input.apply_history_line(line, &mut stdout, agent_config.as_ref());
+                }
+            }
             KeyCode::Tab
                 if *kind == KeyEventKind::Press && !modifiers.contains(KeyModifiers::CONTROL) =>
             {
+                if history.is_recalling() {
+                    () = history.cancel_recall();
+                }
                 () = input.handle_tab(&mut stdout, agent_config.as_ref());
             }
             KeyCode::Char(c)
                 if (*kind == KeyEventKind::Press || *kind == KeyEventKind::Repeat)
                     && !modifiers.contains(KeyModifiers::CONTROL) =>
             {
+                if history.is_recalling() {
+                    () = history.cancel_recall();
+                }
                 () = input.clear_tab_state();
                 let mut buf = [0_u8; 4];
                 let bytes = c.encode_utf8(&mut buf);
@@ -397,6 +690,9 @@ fn read_stdin_stream(
                 }
             }
             KeyCode::Backspace => {
+                if history.is_recalling() {
+                    () = history.cancel_recall();
+                }
                 () = input.clear_tab_state();
                 () = input.clear_inline_hint(&mut stdout);
                 let cursor_pos = input.cursor;
@@ -424,6 +720,9 @@ fn read_stdin_stream(
                 }
             }
             KeyCode::Left => {
+                if history.is_recalling() {
+                    () = history.cancel_recall();
+                }
                 input.clear_tab_state();
                 input.clear_inline_hint(&mut stdout);
                 let cursor_pos = input.cursor;
@@ -438,6 +737,9 @@ fn read_stdin_stream(
                 }
             }
             KeyCode::Right => {
+                if history.is_recalling() {
+                    () = history.cancel_recall();
+                }
                 () = input.clear_tab_state();
                 let cursor_pos = input.cursor;
                 if cursor_pos != input.content.len()
@@ -454,6 +756,7 @@ fn read_stdin_stream(
             KeyCode::Enter if !input.content.is_empty() => {
                 () = input.clear_tab_state();
                 () = input.clear_inline_hint(&mut stdout);
+                () = history.push_submitted(&input.content);
                 if input.content.trim_start().starts_with('/') {
                     let line = input.content.trim_start();
                     let clear_stats = match route_command(command_name_and_args(line).0) {
@@ -470,8 +773,12 @@ fn read_stdin_stream(
                         clear_stats,
                     ) {
                         DispatchResult::Exit => {
-                            write_quit_farewell_if_enabled(&mut stdout, cli.as_ref());
-                            commands.remove_resource::<CodingAgentTask>();
+                            () = persist_repl_history(
+                                history.as_mut(),
+                                &crate::config_paths::repl_history_path(),
+                            );
+                            () = write_quit_farewell_if_enabled(&mut stdout, cli.as_ref());
+                            () = commands.remove_resource::<CodingAgentTask>();
                             exit.write_default();
                             return;
                         }
@@ -537,28 +844,25 @@ fn read_stdin_stream(
     }
 }
 
-fn show_prompt_symbol(mut stdout: MessageWriter<StdoutMessage>) {
-    stdout.write(StdoutMessage::from(prompt_symbol()));
-}
-
-fn shutdown_repl(mut messages: MessageReader<AppExit>) {
+fn shutdown_repl(mut messages: MessageReader<AppExit>, mut history: ResMut<ReplInputHistory>) {
     for _message in messages.read() {
+        () = persist_repl_history(history.as_mut(), &crate::config_paths::repl_history_path());
         let _ = crossterm::terminal::disable_raw_mode();
     }
 }
 
 pub(crate) fn repl_plugin(app: &mut App) {
-    app.init_resource::<ReplSessionState>()
-        .init_resource::<ReplOutputChannel>()
-        .add_systems(Startup, setup)
-        .add_systems(
-            PreUpdate,
-            print_system_prompt.run_if(|cli: Res<Cli>| cli.print_system_prompt),
-        )
-        .add_systems(Update, (ctrl_c, read_stdin_stream).chain())
-        .add_systems(
-            Update,
-            show_prompt_symbol.run_if(resource_removed::<CodingAgentTask>),
-        )
-        .add_systems(PostUpdate, shutdown_repl);
+    app.insert_resource(ReplInputHistory::load(
+        &crate::config_paths::repl_history_path(),
+        DEFAULT_MAX_ENTRIES,
+    ))
+    .init_resource::<ReplSessionState>()
+    .init_resource::<ReplOutputChannel>()
+    .add_systems(Startup, setup)
+    .add_systems(
+        PreUpdate,
+        print_system_prompt.run_if(|cli: Res<Cli>| cli.print_system_prompt),
+    )
+    .add_systems(Update, (ctrl_c, read_stdin_stream).chain())
+    .add_systems(PostUpdate, shutdown_repl);
 }

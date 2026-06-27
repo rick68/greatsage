@@ -46,7 +46,7 @@ fn style_model_info_value(value: &str) -> String {
 fn style_model_info_line(line: &str) -> String {
     const INDENT: &str = "  ";
     if line.is_empty() {
-        return INDENT.to_string();
+        return String::from(INDENT);
     }
     if is_model_info_title(line) {
         return format!("{INDENT}{}", line.bright_white());
@@ -232,5 +232,31 @@ pub(super) fn redraw_input_line(
 ) {
     stdout.write(StdoutMessage::from(super::prompt_symbol()));
     stdout.write(StdoutMessage::from(content));
+    () = sync_inline_hint(stdout, content, cursor, agent_config, hint_width);
+}
+
+/// Erase type-ahead characters echoed inline at the output cursor (backspace over display width).
+pub(super) fn erase_ahead_echo(stdout: &mut MessageWriter<StdoutMessage>, display_width: usize) {
+    for _ in 0..display_width {
+        stdout.write(StdoutMessage::from("\x08 \x08"));
+    }
+}
+
+/// Replace the current prompt line without a leading newline (history ↑↓, idle prompt refresh).
+pub(super) fn replace_input_line_in_place(
+    stdout: &mut MessageWriter<StdoutMessage>,
+    content: &str,
+    cursor: usize,
+    agent_config: &AgentConfig,
+    hint_width: &mut usize,
+) {
+    if *hint_width > 0 {
+        stdout.write(StdoutMessage::clear_line_from_cursor_to_end());
+        *hint_width = 0;
+    }
+    let prompt = super::prompt_symbol_inline();
+    stdout.write(StdoutMessage::from("\r"));
+    stdout.write(StdoutMessage::from(format!("{prompt}{content}")));
+    stdout.write(StdoutMessage::clear_line_from_cursor_to_end());
     () = sync_inline_hint(stdout, content, cursor, agent_config, hint_width);
 }

@@ -31,8 +31,7 @@ pub fn load_existing_setup() -> ExistingSetup {
 
 fn existing_config_path() -> Option<PathBuf> {
     let cwd = env::current_dir().ok()?;
-    let home = dirs::home_dir()?;
-    crate::config_paths::config_search_paths(&cwd, &home)
+    crate::config_paths::config_search_paths(&cwd)
         .into_iter()
         .find(|path| crate::config_paths::config_file_is_populated(path))
 }
@@ -118,9 +117,7 @@ pub fn wizard_project_config_path() -> io::Result<PathBuf> {
 }
 
 pub fn wizard_user_config_path() -> io::Result<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home directory not found"))?;
-    Ok(user_config_path(&home))
+    Ok(user_config_path())
 }
 
 fn credential_env_reference(provider: Provider) -> String {
@@ -192,10 +189,7 @@ pub fn write_config(location: SaveLocation, config: &WizardConfig) -> io::Result
             save_wizard_config(&path, config)?;
             result.config = Some(path);
             if should_persist_env(config) {
-                let home = dirs::home_dir().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::NotFound, "home directory not found")
-                })?;
-                let env_path = user_env_path(&home);
+                let env_path = user_env_path();
                 let env_var = provider_env_var(config.provider).unwrap_or("API_KEY");
                 upsert_env_file(
                     &env_path,

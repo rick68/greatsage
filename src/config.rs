@@ -39,15 +39,14 @@ impl Config {
     #[inline]
     fn config_file() -> PathBuf {
         let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let home = dirs::home_dir().unwrap();
 
-        for path in crate::config_paths::config_search_paths(&cwd, &home) {
+        for path in crate::config_paths::config_search_paths(&cwd) {
             if crate::config_paths::config_file_is_populated(&path) {
                 return path.canonicalize().unwrap_or(path);
             }
         }
 
-        let default = crate::config_paths::user_config_path(&home);
+        let default = crate::config_paths::user_config_path();
         if let Some(parent) = default.parent() {
             let _ = fs::create_dir_all(parent);
             let _ = fs::File::create(&default);

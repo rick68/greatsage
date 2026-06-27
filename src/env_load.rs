@@ -33,10 +33,9 @@ pub fn parse_env_file(path: &Path) -> HashMap<String, String> {
 pub fn load_layered_env() {
     let frozen: HashSet<String> = env::vars().map(|(key, _)| key).collect();
     let cwd = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let home = dirs::home_dir().unwrap_or_default();
 
     let mut merged = HashMap::new();
-    for path in env_file_search_paths_low_to_high(&cwd, &home) {
+    for path in env_file_search_paths_low_to_high(&cwd) {
         for (key, value) in parse_env_file(&path) {
             merged.insert(key, value);
         }
