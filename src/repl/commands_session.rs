@@ -19,10 +19,44 @@ use {
     crate::{
         agents::AgentConfig,
         config::Config,
-        providers::{Provider, available_providers_line},
+        providers::{PROVIDER_SPECS, Provider, available_providers_line},
     },
     std::str::FromStr,
 };
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum ProviderAction {
+    Show,
+    List,
+    Switch(String),
+}
+
+fn parse_provider_args(args: &str) -> ProviderAction {
+    let trimmed = args.trim();
+    if trimmed.is_empty() {
+        ProviderAction::Show
+    } else if trimmed == "list" {
+        ProviderAction::List
+    } else {
+        ProviderAction::Switch(trimmed.to_string())
+    }
+}
+
+fn provider_list_lines(agent_config: &AgentConfig) -> Vec<String> {
+    let mut lines = vec![format!("Providers (active: {})", agent_config.provider)];
+    for spec in PROVIDER_SPECS {
+        let name = spec.provider.to_string();
+        let marker = if spec.provider == agent_config.provider {
+            '▸'
+        } else {
+            ' '
+        };
+        () = lines.push(format!("{marker} {name}"));
+    }
+    () = lines.push(String::new());
+    () = lines.push("Use: /provider <name> to switch".to_string());
+    lines
+}
 
 fn reinstall_preserve_messages(
     agent_config: &AgentConfig,
@@ -41,7 +75,7 @@ fn show_provider(agent_config: &AgentConfig) -> DispatchResult {
     DispatchResult::Handled {
         output: vec![
             format!("current provider: {}", agent_config.provider),
-            String::from("usage: /provider <name>"),
+            String::from("usage: /provider <name> | list"),
             format!("available: {}", available_providers_line()),
         ],
         detail: Vec::new(),
@@ -168,10 +202,15 @@ fn switch_model(model_name: String, agent_config: &mut AgentConfig) -> DispatchR
 }
 
 fn provider(args: &str, ctx: &mut ReplDispatchCtx<'_>) -> DispatchResult {
-    if args.is_empty() {
-        show_provider(ctx.agent_config)
-    } else {
-        switch_provider(args, ctx.agent_config, ctx.config)
+    match parse_provider_args(args) {
+        ProviderAction::Show => show_provider(ctx.agent_config),
+        ProviderAction::List => DispatchResult::Handled {
+            output: provider_list_lines(ctx.agent_config),
+            detail: Vec::new(),
+            redraw_prompt: true,
+            reinstall: None,
+        },
+        ProviderAction::Switch(name) => switch_provider(&name, ctx.agent_config, ctx.config),
     }
 }
 

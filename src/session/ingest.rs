@@ -10,14 +10,14 @@ use {
             indexed_content_from_streamed_assistant, indexed_content_from_tool_start,
             indexed_content_from_turn_tool_result, indexed_content_from_user_message,
         },
-        resources::SessionManager,
+        resources::{SessionLifetimeUsage, SessionManager},
     },
     crate::{
         agents::CodingAgentEvent,
         utils::{now_ms, truncate},
     },
     bevy::ecs::{
-        change_detection::Res,
+        change_detection::{Res, ResMut},
         entity::Entity,
         hierarchy::ChildOf,
         message::MessageReader,
@@ -127,6 +127,10 @@ fn resolve_turn_started_at_ms(
         .take_current_turn_started_at_ms()
         .or_else(|| min_nonzero_source_timestamp(projected_blocks))
         .unwrap_or(ended_at_ms)
+}
+
+fn record_session_usage(lifetime: &mut SessionLifetimeUsage, usage: &Usage) {
+    lifetime.merge(usage);
 }
 
 fn turn_summary_from_usage(
@@ -309,6 +313,7 @@ pub(crate) fn ingest_agent_events(
     mut messages: MessageReader<CodingAgentEvent>,
     mut commands: Commands,
     session_manager: Res<SessionManager>,
+    mut lifetime_usage: ResMut<SessionLifetimeUsage>,
     mut session_roots: Query<(
         Entity,
         &SessionId,
@@ -359,6 +364,7 @@ pub(crate) fn ingest_agent_events(
                         ended_at_ms,
                     );
                     let summary = turn_summary_from_usage(seq, usage, started_at_ms, ended_at_ms);
+                    record_session_usage(&mut lifetime_usage, usage);
                     let turn = commands
                         .spawn((session_id, ChildOf(root), TurnEntity, summary))
                         .id();
@@ -417,6 +423,7 @@ pub(crate) fn ingest_agent_events(
                         ended_at_ms,
                     );
                     let summary = turn_summary_from_usage(seq, usage, started_at_ms, ended_at_ms);
+                    record_session_usage(&mut lifetime_usage, usage);
                     let turn = if let Some(turn) = ingest_state.take_current_turn() {
                         commands.entity(turn).insert(summary);
                         turn

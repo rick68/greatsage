@@ -19,6 +19,9 @@ pub(super) enum CommandRoute {
     Load,
     Compact,
     Retry,
+    Status,
+    Tokens,
+    Cost,
     UnknownSlash,
     NotSlash,
 }
@@ -37,6 +40,10 @@ impl CommandRoute {
             Self::Quit | Self::Exit | Self::Clear | Self::ClearForce
         )
     }
+
+    pub(super) const fn is_info(self) -> bool {
+        matches!(self, Self::Status | Self::Tokens | Self::Cost)
+    }
 }
 
 pub(super) fn route_command(cmd: &str) -> CommandRoute {
@@ -54,6 +61,9 @@ pub(super) fn route_command(cmd: &str) -> CommandRoute {
         // AI
         "/model" => CommandRoute::Model,
         "/provider" => CommandRoute::Provider,
+        "/status" => CommandRoute::Status,
+        "/tokens" => CommandRoute::Tokens,
+        "/cost" => CommandRoute::Cost,
         // otherwise
         _ if cmd.starts_with('/') => CommandRoute::UnknownSlash,
         _ => CommandRoute::NotSlash,

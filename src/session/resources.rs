@@ -4,7 +4,24 @@ use {
         ecs::{entity::Entity, resource::Resource},
         platform::collections::HashMap,
     },
+    yoagent::types::Usage,
 };
+
+/// Cumulative API token usage for the REPL process lifetime.
+///
+/// Survives `/clear` and agent reinstall; `/tokens` session totals read this plus
+/// the active session's projected turns.
+#[derive(Debug, Default, Resource)]
+pub(crate) struct SessionLifetimeUsage(pub(crate) Usage);
+
+impl SessionLifetimeUsage {
+    pub(crate) fn merge(&mut self, delta: &Usage) {
+        self.0.input = self.0.input.saturating_add(delta.input);
+        self.0.output = self.0.output.saturating_add(delta.output);
+        self.0.cache_read = self.0.cache_read.saturating_add(delta.cache_read);
+        self.0.cache_write = self.0.cache_write.saturating_add(delta.cache_write);
+    }
+}
 
 #[derive(Debug, Default, Resource)]
 pub(crate) struct SessionManager {

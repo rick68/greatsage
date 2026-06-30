@@ -66,6 +66,8 @@ pub struct CodingAgent {
     inner: Arc<Mutex<Agent>>,
     agent_id: AgentId,
     session_id: SessionId,
+    /// From yoagent `ModelConfig.context_window` at install — used by `/tokens` max line.
+    context_window: u32,
 }
 
 impl Deref for CodingAgent {
@@ -92,6 +94,10 @@ impl CodingAgent {
         self.session_id
     }
 
+    pub fn context_window(&self) -> u32 {
+        self.context_window
+    }
+
     fn bind_session(&mut self, session_id: SessionId) {
         self.session_id = session_id;
     }
@@ -99,8 +105,6 @@ impl CodingAgent {
     pub async fn new_with_agent_config(agent_config: &AgentConfig) -> Self {
         let AgentConfig {
             model,
-            provider,
-            base_url,
             skills,
             system_prompt,
             api_key,
@@ -108,55 +112,21 @@ impl CodingAgent {
             ..
         } = agent_config;
 
-        let (agent, model_config) = match provider {
-            Provider::Anthropic => (
-                Agent::new(AnthropicProvider),
-                ModelConfig::anthropic(model, model),
-            ),
-            Provider::Cerebras => (
-                Agent::new(OpenAiCompatProvider),
-                ModelConfig::openai(model, model),
-            ),
-            Provider::Custom => (
-                Agent::new(OpenAiCompatProvider),
-                ModelConfig::local(base_url, model),
-            ),
-            Provider::DeepSeek => (
-                Agent::new(OpenAiCompatProvider),
-                ModelConfig::deepseek(model, model),
-            ),
-            Provider::Google => (
-                Agent::new(GoogleProvider),
-                ModelConfig::google(model, model),
-            ),
-            Provider::Groq => (
-                Agent::new(OpenAiCompatProvider),
-                ModelConfig::groq(model, model),
-            ),
-            Provider::MiniMax => (
-                Agent::new(OpenAiCompatProvider),
-                ModelConfig::minimax(model, model),
-            ),
-            Provider::Mistral => (
-                Agent::new(OpenAiCompatProvider),
-                ModelConfig::mistral(model, model),
-            ),
-            Provider::OpenAi => (
-                Agent::new(OpenAiCompatProvider),
-                ModelConfig::openai(model, model),
-            ),
-            Provider::OpenRouter => (
-                Agent::new(OpenAiCompatProvider),
-                ModelConfig::openai(model, model),
-            ),
-            Provider::Xai => (
-                Agent::new(OpenAiCompatProvider),
-                ModelConfig::xai(model, model),
-            ),
-            Provider::Zai => (
-                Agent::new(OpenAiCompatProvider),
-                ModelConfig::zai(model, model),
-            ),
+        let model_config = model_config_for(agent_config);
+        let context_window = model_config.context_window;
+        let agent = match agent_config.provider {
+            Provider::Anthropic => Agent::new(AnthropicProvider),
+            Provider::Cerebras
+            | Provider::DeepSeek
+            | Provider::Groq
+            | Provider::MiniMax
+            | Provider::Mistral
+            | Provider::OpenAi
+            | Provider::OpenRouter
+            | Provider::Xai
+            | Provider::Zai
+            | Provider::Custom => Agent::new(OpenAiCompatProvider),
+            Provider::Google => Agent::new(GoogleProvider),
         };
 
         let mut agent = agent
@@ -208,7 +178,33 @@ impl CodingAgent {
             inner,
             agent_id,
             session_id: SessionId::default(),
+            context_window,
         }
+    }
+}
+
+/// yoagent `ModelConfig` for the active provider — single source for context window at install.
+pub(crate) fn model_config_for(agent_config: &AgentConfig) -> ModelConfig {
+    let AgentConfig {
+        model,
+        provider,
+        base_url,
+        ..
+    } = agent_config;
+
+    match provider {
+        Provider::Anthropic => ModelConfig::anthropic(model, model),
+        Provider::Cerebras => ModelConfig::openai(model, model),
+        Provider::Custom => ModelConfig::local(base_url, model),
+        Provider::DeepSeek => ModelConfig::deepseek(model, model),
+        Provider::Google => ModelConfig::google(model, model),
+        Provider::Groq => ModelConfig::groq(model, model),
+        Provider::MiniMax => ModelConfig::minimax(model, model),
+        Provider::Mistral => ModelConfig::mistral(model, model),
+        Provider::OpenAi => ModelConfig::openai(model, model),
+        Provider::OpenRouter => ModelConfig::openai(model, model),
+        Provider::Xai => ModelConfig::xai(model, model),
+        Provider::Zai => ModelConfig::zai(model, model),
     }
 }
 
@@ -425,6 +421,13 @@ fn spawn_agent_task(
                             });
                     })
                     .await;
+            }
+
+            // yoagent updates `messages()` only after `finish()`; without this,
+            // `/tokens` and other readers see pre-turn state until the next prompt.
+            {
+                let mut agent = coding_agent.lock().await;
+                () = agent.finish().await;
             }
 
             ctx.run_on_main_thread(move |ctx| {

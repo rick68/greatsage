@@ -188,6 +188,45 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
         ),
     },
     ReplCommand {
+        name: "/status",
+        summary: "Show session info",
+        category: ReplCommandCategory::Session,
+        args: "",
+        arg_hint: "",
+        usage: "/status — Show session info",
+        detail: concat!(
+            "Displays current session information including: working directory,\n",
+            "active model, message count, git branch (if in a repo), and \n",
+            "context window usage percentage.\n",
+        ),
+    },
+    ReplCommand {
+        name: "/tokens",
+        summary: "Show token usage and context window",
+        category: ReplCommandCategory::Session,
+        args: "",
+        arg_hint: "",
+        usage: "/tokens — Show token usage and context window",
+        detail: concat!(
+            "Displays current token usage (input/output), the model's context\n",
+            "window size, and how much capacity remains. Helps you decide\n",
+            "when to /compact.\n"
+        ),
+    },
+    ReplCommand {
+        name: "/cost",
+        summary: "Show estimated session cost",
+        category: ReplCommandCategory::Session,
+        args: "",
+        arg_hint: "",
+        usage: "/cost — Show estimated session cost",
+        detail: concat!(
+            "Displays the running cost estimate for this session based on\n",
+            "input/output tokens and the current model's pricing. Supports\n",
+            "cost tracking across multiple providers.\n",
+        ),
+    },
+    ReplCommand {
         name: "/model",
         summary: "Switch, list, or inspect models",
         category: ReplCommandCategory::Ai,
@@ -221,6 +260,8 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
         usage: "/provider <name> —  Switch AI provide",
         detail: concat!(
             "Usage:\n",
+            "  /provider\t\tShow current provider\n",
+            "  /provider list\t\tList providers from the static catalog\n",
             "  /provider <name>\tSwitch to the specified provider\n",
             "\n",
             "Changes the active AI provider and resets the model to that\n",
@@ -229,6 +270,8 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
             "Providers: anthropic, openai, google, deepseek, openrouter, local\n",
             "\n",
             "Examples:\n",
+            "  /provider\n",
+            "  /provider list\n",
             "  /provider openai\n",
             "  /provider google\n",
         ),

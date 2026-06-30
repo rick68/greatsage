@@ -6,6 +6,7 @@
 //! definitions when a callee is already defined above.
 
 mod commands_help;
+mod commands_info;
 mod commands_lifecycle;
 mod commands_session;
 mod completion;
@@ -19,6 +20,7 @@ mod native_pricing;
 mod output;
 mod path_display;
 mod route;
+mod session_dashboard;
 mod session_ops;
 mod session_state;
 mod suggest;
@@ -33,6 +35,9 @@ use {
         },
         cli::Cli,
         config::Config,
+        session::{
+            SessionId, SessionLifetimeUsage, SessionManager, SessionMeta, TurnEntity, TurnSummary,
+        },
         stdin::StdinKeyMessage,
         stdout::StdoutMessage,
         tokio::AppCancelToken,
@@ -42,8 +47,9 @@ use {
         ecs::{
             change_detection::{Res, ResMut},
             message::{MessageReader, MessageWriter},
+            query::With,
             schedule::IntoScheduleConfigs,
-            system::{Commands, Local},
+            system::{Commands, Local, Query, SystemParam},
         },
     },
     bevy_ratatui::crossterm::{
@@ -59,6 +65,7 @@ use {
     history::{DEFAULT_MAX_ENTRIES, ReplInputHistory, persist_repl_history},
     output::ReplOutputChannel,
     route::{CommandRoute, route_command},
+    session_dashboard::{SessionMetaFields, TurnUsageRow, build_snapshot},
     session_ops::{
         agent_message_stats, block_on_session, compact_agent_with_keep, load_messages,
         save_messages,
@@ -522,6 +529,38 @@ fn history_keys_allowed(session_state: &ReplSessionState, input: &ReplInputLocal
     !session_state.pending_clear_confirm && input.tab.list_confirm.is_none()
 }
 
+#[derive(SystemParam)]
+struct ReplEcsDashboard<'w, 's> {
+    turns: Query<'w, 's, (&'static SessionId, &'static TurnSummary), With<TurnEntity>>,
+    session_meta: Query<'w, 's, &'static SessionMeta>,
+    session_manager: Res<'w, SessionManager>,
+    lifetime_usage: Res<'w, SessionLifetimeUsage>,
+}
+
+impl ReplEcsDashboard<'_, '_> {
+    fn turn_rows(&self, session_id: SessionId) -> Vec<TurnUsageRow> {
+        self.turns
+            .iter()
+            .filter(|(sid, _)| **sid == session_id)
+            .map(|(_, summary)| TurnUsageRow {
+                input_tokens: summary.input_tokens,
+                output_tokens: summary.output_tokens,
+                cache_read_tokens: summary.cache_read_tokens,
+                cache_write_tokens: summary.cache_write_tokens,
+            })
+            .collect()
+    }
+
+    fn meta_fields(&self, session_id: SessionId) -> Option<SessionMetaFields> {
+        let root = self.session_manager.root_entity(session_id)?;
+        let meta = self.session_meta.get(root).ok()?;
+        Some(SessionMetaFields {
+            started_at_ms: meta.started_at_ms,
+            cwd: meta.cwd.clone(),
+        })
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn read_stdin_stream(
     mut stdin_key_messages: MessageReader<StdinKeyMessage>,
@@ -539,6 +578,7 @@ fn read_stdin_stream(
     mut history: ResMut<ReplInputHistory>,
     agent_task: Option<Res<CodingAgentTask>>,
     cli: Res<Cli>,
+    ecs_dashboard: ReplEcsDashboard,
 ) {
     let agent_busy = agent_task.is_some();
     if input.was_agent_busy && !agent_busy {
@@ -764,11 +804,31 @@ fn read_stdin_stream(
                 if input.content.trim_start().starts_with('/') {
                     let line = input.content.trim_start();
                     let runtime = tokio_runtime.runtime();
-                    let clear_stats = match route_command(command_name_and_args(line).0) {
+                    let (cmd, _) = command_name_and_args(line);
+                    let route = route_command(cmd);
+                    let clear_stats = match route {
                         CommandRoute::Clear => coding_agent
                             .as_deref()
                             .map(|agent| block_on_session(runtime, agent_message_stats(agent))),
                         _ => None,
+                    };
+                    let dashboard = if route.is_info() {
+                        let session_id = coding_agent
+                            .as_deref()
+                            .map(crate::agents::CodingAgent::session_id)
+                            .unwrap_or_default();
+                        let turn_rows = ecs_dashboard.turn_rows(session_id);
+                        let meta = ecs_dashboard.meta_fields(session_id);
+                        Some(build_snapshot(
+                            &turn_rows,
+                            meta.as_ref(),
+                            &agent_config.model,
+                            coding_agent.as_deref(),
+                            runtime,
+                            &ecs_dashboard.lifetime_usage.0,
+                        ))
+                    } else {
+                        None
                     };
                     match dispatch_slash_command(
                         line,
@@ -778,6 +838,7 @@ fn read_stdin_stream(
                         clear_stats,
                         coding_agent.as_deref(),
                         runtime,
+                        dashboard,
                     ) {
                         DispatchResult::Exit => {
                             () = persist_repl_history(

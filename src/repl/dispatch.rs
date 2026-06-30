@@ -8,8 +8,9 @@
 
 use {
     super::{
-        commands_help, commands_lifecycle, commands_session,
+        commands_help, commands_info, commands_lifecycle, commands_session,
         route::{CommandRoute, route_command},
+        session_dashboard::SessionDashboardSnapshot,
         session_state::ReplSessionState,
         suggest::suggest_command,
     },
@@ -26,6 +27,8 @@ pub(super) struct ReplDispatchCtx<'a> {
     pub clear_stats: Option<(usize, u64)>,
     pub coding_agent: Option<&'a crate::agents::CodingAgent>,
     pub runtime: &'a tokio::runtime::Runtime,
+    /// Precomputed for `/status`, `/tokens`, `/cost` when dispatch runs from the stdin loop.
+    pub dashboard: Option<SessionDashboardSnapshot>,
 }
 
 pub(super) enum AgentOp {
@@ -99,6 +102,7 @@ pub(super) fn dispatch_slash_command(
     clear_stats: Option<(usize, u64)>,
     coding_agent: Option<&crate::agents::CodingAgent>,
     runtime: &tokio::runtime::Runtime,
+    dashboard: Option<SessionDashboardSnapshot>,
 ) -> DispatchResult {
     let (cmd, args) = command_name_and_args(line);
     let route = route_command(cmd);
@@ -109,12 +113,14 @@ pub(super) fn dispatch_slash_command(
         clear_stats,
         coding_agent,
         runtime,
+        dashboard,
     };
 
     match route {
         CommandRoute::Help => commands_help::help(args),
         route if route.is_lifecycle() => commands_lifecycle::dispatch(route, &mut ctx),
         route if route.is_session() => commands_session::dispatch(route, args, &mut ctx),
+        route if route.is_info() => commands_info::dispatch(route, args, &ctx),
         CommandRoute::UnknownSlash | CommandRoute::NotSlash => DispatchResult::Unknown,
         _ => DispatchResult::Unknown,
     }

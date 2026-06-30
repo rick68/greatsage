@@ -20,27 +20,51 @@ fn terminal_columns() -> usize {
 }
 
 fn is_model_info_title(line: &str) -> bool {
+    model_info_title_name(line).is_some()
+}
+
+fn model_info_title_name(line: &str) -> Option<&str> {
     let trimmed = line.trim();
-    trimmed.starts_with("── ") && trimmed.ends_with(" ──")
+    trimmed
+        .strip_prefix("── ")
+        .and_then(|rest| rest.strip_suffix(" ──"))
 }
 
 fn is_model_info_output(output: &[String]) -> bool {
     output.iter().any(|line| is_model_info_title(line))
 }
 
+fn is_tokens_output(output: &[String]) -> bool {
+    output.first().is_some_and(|line| line == "Active context:")
+}
+
+fn is_model_info_separator(line: &str) -> bool {
+    let trimmed = line.trim();
+    !trimmed.is_empty() && trimmed.chars().all(|c| c == '─')
+}
+
+fn is_tokens_context_warning(line: &str) -> bool {
+    line.contains('⚠') && line.contains("Context is getting full")
+}
+
+fn style_tokens_line(line: &str) -> String {
+    if is_tokens_context_warning(line) {
+        return format!("  {line}").yellow().to_string();
+    }
+    style_repl_output_line(line)
+}
+
 fn style_model_info_value(value: &str) -> String {
     const CHECK: char = '✓';
+    if value.trim() == "unknown" {
+        return value.yellow().to_string();
+    }
     if let Some(pos) = value.find(CHECK) {
         let before = &value[..pos];
         let after = &value[pos + CHECK.len_utf8()..];
-        return format!(
-            "{}{}{}",
-            before.white(),
-            CHECK.to_string().green(),
-            after.white()
-        );
+        return format!("{before}{}{after}", CHECK.to_string().green());
     }
-    value.white().to_string()
+    value.to_string()
 }
 
 fn style_model_info_line(line: &str) -> String {
@@ -48,8 +72,11 @@ fn style_model_info_line(line: &str) -> String {
     if line.is_empty() {
         return String::from(INDENT);
     }
-    if is_model_info_title(line) {
-        return format!("{INDENT}{}", line.bright_white());
+    if is_model_info_separator(line) {
+        return format!("{INDENT}{}", line.trim().dimmed());
+    }
+    if model_info_title_name(line).is_some() {
+        return format!("{INDENT}{}", line.trim().bold());
     }
     if let Some((label, value)) = line.split_once(':') {
         return format!(
@@ -113,9 +140,12 @@ pub(super) fn write_repl_handled_output(
     detail: &[String],
 ) {
     let model_info = is_model_info_output(output);
+    let tokens_output = is_tokens_output(output);
     for line in output {
         let styled = if model_info {
             style_model_info_line(line)
+        } else if tokens_output {
+            style_tokens_line(line)
         } else {
             style_repl_output_line(line)
         };
