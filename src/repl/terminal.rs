@@ -155,9 +155,8 @@ pub(super) fn write_repl_handled_output(
         if !output.is_empty() {
             stdout.write(StdoutMessage::newline());
         }
-        let last = detail.len() - 1;
-        for (i, line) in detail.iter().enumerate() {
-            () = write_repl_detail_line(stdout, line, i < last);
+        for line in detail {
+            () = write_repl_detail_line(stdout, line, true);
         }
     }
 }
