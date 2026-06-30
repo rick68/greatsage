@@ -120,13 +120,18 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
         name: "/compact",
         summary: "Compact conversation to save context",
         category: ReplCommandCategory::Session,
-        args: "",
+        args: "[N|all|--preview]",
         arg_hint: "",
-        usage: "/compact — Compact conversation to save context space",
+        usage: "/compact [N|all|--preview] — Compact conversation to save context space",
         detail: concat!(
-            "Asks the AI to summarize the conversation so far into a shorter\n",
-            "representation, freeing up context window space. Useful when\n",
-            "approaching token limits on long sessions.\n"
+            "Usage:\n",
+            "  /compact\t\tDefault compaction\n",
+            "  /compact N\t\tKeep the last N messages at full fidelity\n",
+            "  /compact all\t\tAggressive compaction (keep_recent = 2)\n",
+            "  /compact --preview\tDry-run: show estimated before/after counts\n",
+            "\n",
+            "Summarizes older conversation into a shorter representation,\n",
+            "freeing context window space on long sessions.\n"
         ),
     },
     ReplCommand {

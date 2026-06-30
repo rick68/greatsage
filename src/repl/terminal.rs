@@ -76,6 +76,24 @@ pub(super) fn write_repl_response(stdout: &mut MessageWriter<StdoutMessage>, tex
     }
 }
 
+pub(super) fn write_unknown_slash_feedback(
+    stdout: &mut MessageWriter<StdoutMessage>,
+    typed: &str,
+    suggestion: Option<&str>,
+) {
+    stdout.write(StdoutMessage::from(
+        format!("  unknown command: {typed}\n").red(),
+    ));
+    if let Some(suggestion) = suggestion {
+        stdout.write(StdoutMessage::from(
+            format!("  did you mean {suggestion}?\n").yellow(),
+        ));
+    }
+    stdout.write(StdoutMessage::from(
+        format!("  type /help for available commands\n").dimmed(),
+    ));
+}
+
 pub(super) fn write_repl_detail_line(
     stdout: &mut MessageWriter<StdoutMessage>,
     line: &str,

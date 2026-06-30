@@ -11,6 +11,7 @@ use {
         commands_help, commands_lifecycle, commands_session,
         route::{CommandRoute, route_command},
         session_state::ReplSessionState,
+        suggest::suggest_command,
     },
     crate::{agents::AgentConfig, config::Config},
     std::path::PathBuf,
@@ -23,6 +24,8 @@ pub(super) struct ReplDispatchCtx<'a> {
     pub config: &'a Config,
     /// `(message_count, token_count)` for `/clear` confirmation; `None` when agent unavailable.
     pub clear_stats: Option<(usize, u64)>,
+    pub coding_agent: Option<&'a crate::agents::CodingAgent>,
+    pub runtime: &'a tokio::runtime::Runtime,
 }
 
 pub(super) enum AgentOp {
@@ -32,7 +35,9 @@ pub(super) enum AgentOp {
     Load {
         path: PathBuf,
     },
-    Compact,
+    Compact {
+        keep_recent: Option<usize>,
+    },
     ReinstallPreserveMessages {
         config: AgentConfig,
         success_message: String,
@@ -73,8 +78,17 @@ pub(super) fn command_name_and_args(line: &str) -> (&str, &str) {
     }
 }
 
-pub(super) fn unknown_command_message() -> &'static str {
-    "Unknown command. Try /help."
+pub(super) struct UnknownSlashFeedback {
+    pub typed: String,
+    pub suggestion: Option<&'static str>,
+}
+
+pub(super) fn build_unknown_slash_feedback(line: &str) -> UnknownSlashFeedback {
+    let typed = line.split_whitespace().next().unwrap_or(line).to_string();
+    UnknownSlashFeedback {
+        suggestion: suggest_command(line),
+        typed,
+    }
 }
 
 pub(super) fn dispatch_slash_command(
@@ -83,6 +97,8 @@ pub(super) fn dispatch_slash_command(
     session: &ReplSessionState,
     config: &Config,
     clear_stats: Option<(usize, u64)>,
+    coding_agent: Option<&crate::agents::CodingAgent>,
+    runtime: &tokio::runtime::Runtime,
 ) -> DispatchResult {
     let (cmd, args) = command_name_and_args(line);
     let route = route_command(cmd);
@@ -91,6 +107,8 @@ pub(super) fn dispatch_slash_command(
         session,
         config,
         clear_stats,
+        coding_agent,
+        runtime,
     };
 
     match route {

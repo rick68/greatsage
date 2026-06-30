@@ -8,10 +8,17 @@ use {
     crate::agents::CodingAgent,
     std::{
         env, fs,
+        future::Future,
         path::{Path, PathBuf},
     },
+    tokio::{runtime::Runtime, task},
     yoagent::context::{ContextConfig, compact_messages, total_tokens},
 };
+
+/// Bridge sync REPL dispatch to async yoagent locks on the app Tokio runtime.
+pub fn block_on_session<T>(runtime: &Runtime, future: impl Future<Output = T>) -> T {
+    runtime.handle().block_on(future)
+}
 
 pub const DEFAULT_SESSION_FILENAME: &str = "greatsage-session.json";
 
@@ -21,27 +28,76 @@ fn default_session_path() -> PathBuf {
         .join(DEFAULT_SESSION_FILENAME)
 }
 
-/// Blocking snapshot of yoagent message stats for `/clear` confirmation.
-pub(super) fn agent_message_stats_blocking(agent: &CodingAgent) -> (usize, u64) {
-    let agent = agent.clone();
-    std::thread::scope(|scope| {
-        scope
-            .spawn(|| {
-                tokio::runtime::Runtime::new()
-                    .expect("clear stats runtime")
-                    .block_on(async {
-                        let guard = agent.lock().await;
-                        let messages = guard.messages();
-                        (messages.len(), total_tokens(messages) as u64)
-                    })
-            })
-            .join()
-            .expect("clear stats thread")
-    })
+/// Snapshot of yoagent message stats for `/clear` confirmation.
+pub(super) async fn agent_message_stats(agent: &CodingAgent) -> (usize, u64) {
+    let guard = agent.lock().await;
+    let messages = guard.messages();
+    (messages.len(), total_tokens(messages) as u64)
 }
 
 fn nothing_to_compact_message(message_count: usize, token_count: u64) -> String {
     format!("(nothing to compact — {message_count} messages, ~{token_count} tokens)")
+}
+
+/// Result of parsing a `/compact` argument (yoyo-aligned).
+#[derive(Debug, PartialEq, Eq)]
+pub enum CompactArg {
+    Default,
+    KeepRecent(usize),
+    Preview,
+    Invalid(String),
+}
+
+pub fn parse_compact_arg(arg: &str) -> CompactArg {
+    let arg = arg.trim();
+    if arg.is_empty() {
+        return CompactArg::Default;
+    }
+    if arg.eq_ignore_ascii_case("all") {
+        return CompactArg::KeepRecent(2);
+    }
+    if arg == "--preview" || arg.eq_ignore_ascii_case("preview") {
+        return CompactArg::Preview;
+    }
+    match arg.parse::<usize>() {
+        Ok(n) => CompactArg::KeepRecent(n.max(2)),
+        Err(_) => CompactArg::Invalid(arg.to_string()),
+    }
+}
+
+fn compact_context_config(keep_recent: Option<usize>) -> ContextConfig {
+    match keep_recent {
+        None => ContextConfig::default(),
+        Some(kr) => ContextConfig {
+            max_context_tokens: 0,
+            system_prompt_tokens: 0,
+            keep_recent: kr,
+            ..ContextConfig::default()
+        },
+    }
+}
+
+fn compact_summary(
+    before_count: usize,
+    before_tokens: u64,
+    after_count: usize,
+    after_tokens: u64,
+) -> String {
+    format!(
+        "Compacted: {before_count} → {after_count} messages, {before_tokens} → {after_tokens} tokens."
+    )
+}
+
+fn preview_lines(
+    before_count: usize,
+    before_tokens: u64,
+    after_count: usize,
+    after_tokens: u64,
+) -> String {
+    let savings = before_tokens.saturating_sub(after_tokens);
+    format!(
+        "Compact preview:\n  Current: {before_count} messages, ~{before_tokens} tokens\n  After:   {after_count} messages, ~{after_tokens} tokens (estimated)\n  Savings: ~{savings} tokens"
+    )
 }
 
 pub(super) fn resolve_session_path(path: Option<&str>) -> PathBuf {
@@ -87,7 +143,10 @@ pub(super) async fn load_messages(agent: &CodingAgent, path: &Path) -> Result<St
     ))
 }
 
-pub(super) async fn compact_agent(agent: &CodingAgent) -> Result<String, String> {
+pub(super) async fn compact_agent_with_keep(
+    agent: &CodingAgent,
+    keep_recent: Option<usize>,
+) -> Result<String, String> {
     let guard = agent.lock().await;
     let messages = guard.messages().to_vec();
     let before_count = messages.len();
@@ -98,7 +157,8 @@ pub(super) async fn compact_agent(agent: &CodingAgent) -> Result<String, String>
         return Ok(nothing_to_compact_message(0, 0));
     }
 
-    let compacted = compact_messages(messages, &ContextConfig::default());
+    let config = compact_context_config(keep_recent);
+    let compacted = compact_messages(messages, &config);
     let after_count = compacted.len();
     let after_tokens = total_tokens(&compacted) as u64;
 
@@ -110,7 +170,31 @@ pub(super) async fn compact_agent(agent: &CodingAgent) -> Result<String, String>
         () = agent.lock().await.replace_messages(compacted);
     }
 
-    Ok(format!(
-        "Compacted: {before_count} → {after_count} messages, {before_tokens} → {after_tokens} tokens."
+    Ok(compact_summary(
+        before_count,
+        before_tokens,
+        after_count,
+        after_tokens,
     ))
+}
+
+/// Dry-run compaction stats without mutating yoagent messages.
+pub(super) async fn preview_compact(agent: &CodingAgent, keep_recent: Option<usize>) -> String {
+    let guard = agent.lock().await;
+    let messages = guard.messages().to_vec();
+    let before_count = messages.len();
+    let before_tokens = total_tokens(&messages) as u64;
+    () = drop(guard);
+
+    if before_count == 0 {
+        return nothing_to_compact_message(0, 0);
+    }
+
+    let config = compact_context_config(keep_recent);
+    let compacted = task::spawn_blocking(move || compact_messages(messages, &config))
+        .await
+        .expect("compact preview worker");
+    let after_count = compacted.len();
+    let after_tokens = total_tokens(&compacted) as u64;
+    preview_lines(before_count, before_tokens, after_count, after_tokens)
 }

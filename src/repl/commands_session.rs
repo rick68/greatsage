@@ -11,7 +11,9 @@ use {
         help_data::push_usage_and_body_parts,
         model_cmd::{ModelAction, model_info_lines, model_list_lines, parse_model_args},
         route::CommandRoute,
-        session_ops::resolve_session_path,
+        session_ops::{
+            CompactArg, block_on_session, parse_compact_arg, preview_compact, resolve_session_path,
+        },
         session_state::ReplSessionState,
     },
     crate::{
@@ -91,19 +93,40 @@ fn load(args: &str) -> DispatchResult {
     })
 }
 
-fn compact(args: &str) -> DispatchResult {
-    if !args.trim().is_empty() {
-        return DispatchResult::Handled {
-            output: vec![format!("Invalid compact argument: {}", args.trim())],
+fn compact(args: &str, ctx: &ReplDispatchCtx<'_>) -> DispatchResult {
+    match parse_compact_arg(args) {
+        CompactArg::Default => DispatchResult::AgentOp(AgentOpInvocation {
+            preamble: Vec::new(),
+            op: AgentOp::Compact { keep_recent: None },
+        }),
+        CompactArg::KeepRecent(n) => DispatchResult::AgentOp(AgentOpInvocation {
+            preamble: Vec::new(),
+            op: AgentOp::Compact {
+                keep_recent: Some(n),
+            },
+        }),
+        CompactArg::Preview => {
+            let output = match ctx.coding_agent {
+                Some(agent) => vec![block_on_session(ctx.runtime, preview_compact(agent, None))],
+                None => vec![String::from("No active agent.")],
+            };
+            DispatchResult::Handled {
+                output,
+                detail: Vec::new(),
+                redraw_prompt: true,
+                reinstall: None,
+            }
+        }
+        CompactArg::Invalid(s) => DispatchResult::Handled {
+            output: vec![
+                format!("invalid argument: \"{s}\" — use a number, \"all\", or \"--preview\""),
+                String::from("usage: /compact [N|all|--preview]"),
+            ],
             detail: Vec::new(),
             redraw_prompt: true,
             reinstall: None,
-        };
+        },
     }
-    DispatchResult::AgentOp(AgentOpInvocation {
-        preamble: Vec::new(),
-        op: AgentOp::Compact,
-    })
 }
 
 fn switch_provider(name: &str, agent_config: &mut AgentConfig, config: &Config) -> DispatchResult {
@@ -190,7 +213,7 @@ pub(super) fn dispatch(
         CommandRoute::Model => model(args, ctx),
         CommandRoute::Save => save(args),
         CommandRoute::Load => load(args),
-        CommandRoute::Compact => compact(args),
+        CommandRoute::Compact => compact(args, ctx),
         CommandRoute::Retry => retry(ctx.session),
         _ => DispatchResult::Unknown,
     }

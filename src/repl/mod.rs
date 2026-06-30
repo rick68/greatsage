@@ -21,6 +21,7 @@ mod path_display;
 mod route;
 mod session_ops;
 mod session_state;
+mod suggest;
 mod tab;
 mod terminal;
 
@@ -52,19 +53,22 @@ use {
     bevy_tokio_tasks::TokioTasksRuntime,
     colored::Colorize,
     dispatch::{
-        AgentOp, AgentOpInvocation, DispatchResult, command_name_and_args, dispatch_slash_command,
-        unknown_command_message,
+        AgentOp, AgentOpInvocation, DispatchResult, build_unknown_slash_feedback,
+        command_name_and_args, dispatch_slash_command,
     },
     history::{DEFAULT_MAX_ENTRIES, ReplInputHistory, persist_repl_history},
     output::ReplOutputChannel,
     route::{CommandRoute, route_command},
-    session_ops::{agent_message_stats_blocking, compact_agent, load_messages, save_messages},
+    session_ops::{
+        agent_message_stats, block_on_session, compact_agent_with_keep, load_messages,
+        save_messages,
+    },
     session_state::ReplSessionState,
     tab::{ReplTabLocals, TabListConfirm, accept_tab_candidate_list, handle_tab_completion},
     terminal::{
         erase_ahead_echo, redraw_input_line, replace_input_line_in_place, sync_inline_hint,
         write_quit_farewell_if_enabled, write_repl_handled_output, write_repl_response,
-        write_repl_response_lines,
+        write_repl_response_lines, write_unknown_slash_feedback,
     },
     unicode_width::UnicodeWidthChar,
 };
@@ -155,8 +159,8 @@ fn spawn_agent_op(
                 Some(agent) => load_messages(&agent, &path).await,
                 None => Err(String::from("No active agent.")),
             },
-            AgentOp::Compact => match coding_agent {
-                Some(agent) => compact_agent(&agent).await,
+            AgentOp::Compact { keep_recent } => match coding_agent {
+                Some(agent) => compact_agent_with_keep(&agent, keep_recent).await,
                 None => Err(String::from("No active agent.")),
             },
             AgentOp::ReinstallPreserveMessages {
@@ -759,10 +763,11 @@ fn read_stdin_stream(
                 () = history.push_submitted(&input.content);
                 if input.content.trim_start().starts_with('/') {
                     let line = input.content.trim_start();
+                    let runtime = tokio_runtime.runtime();
                     let clear_stats = match route_command(command_name_and_args(line).0) {
-                        CommandRoute::Clear => {
-                            coding_agent.as_deref().map(agent_message_stats_blocking)
-                        }
+                        CommandRoute::Clear => coding_agent
+                            .as_deref()
+                            .map(|agent| block_on_session(runtime, agent_message_stats(agent))),
                         _ => None,
                     };
                     match dispatch_slash_command(
@@ -771,6 +776,8 @@ fn read_stdin_stream(
                         session_state.as_ref(),
                         config.as_ref(),
                         clear_stats,
+                        coding_agent.as_deref(),
+                        runtime,
                     ) {
                         DispatchResult::Exit => {
                             () = persist_repl_history(
@@ -827,7 +834,12 @@ fn read_stdin_stream(
                         }
                         DispatchResult::Unknown => {
                             stdout.write(StdoutMessage::newline());
-                            () = write_repl_response(&mut stdout, unknown_command_message());
+                            let feedback = build_unknown_slash_feedback(line);
+                            () = write_unknown_slash_feedback(
+                                &mut stdout,
+                                &feedback.typed,
+                                feedback.suggestion,
+                            );
                             stdout.write(StdoutMessage::from(prompt_symbol()));
                             () = input.clear_line();
                         }
