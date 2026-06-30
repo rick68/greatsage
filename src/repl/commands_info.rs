@@ -10,7 +10,7 @@ use {
         },
         session_ops::block_on_session,
     },
-    crate::utils::format_usage_line,
+    crate::{agents::SYSTEM_PROMPT, utils::format_usage_line},
     std::env,
     yoagent::types::AgentMessage,
 };
@@ -95,7 +95,24 @@ fn tokens(args: &str, ctx: &ReplDispatchCtx<'_>) -> DispatchResult {
     }
 
     let snap = snapshot(ctx);
-    let output = tokens_output_lines(&snap);
+    let provider = ctx.agent_config.provider;
+    let model = ctx.agent_config.model.as_str();
+    let system_prompt = if ctx.agent_config.system_prompt.trim().is_empty() {
+        SYSTEM_PROMPT
+    } else {
+        ctx.agent_config.system_prompt.as_str()
+    };
+
+    let messages: Vec<AgentMessage> = ctx
+        .coding_agent
+        .map(|agent| {
+            block_on_session(ctx.runtime, async {
+                agent.lock().await.messages().to_vec()
+            })
+        })
+        .unwrap_or_default();
+
+    let output = tokens_output_lines(&snap, &messages, system_prompt, provider, model);
 
     DispatchResult::Handled {
         output,

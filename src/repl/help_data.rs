@@ -209,8 +209,9 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
         usage: "/tokens — Show token usage and context window",
         detail: concat!(
             "Displays current token usage (input/output), the model's context\n",
-            "window size, and how much capacity remains. Helps you decide\n",
-            "when to /compact.\n"
+            "window size, remaining-turns estimate, per-category context\n",
+            "breakdown, and tool usage summary. Helps you decide when to\n",
+            "/compact.\n"
         ),
     },
     ReplCommand {

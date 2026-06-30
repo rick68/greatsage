@@ -44,11 +44,34 @@ fn is_model_info_separator(line: &str) -> bool {
 }
 
 fn is_tokens_context_warning(line: &str) -> bool {
-    line.contains('⚠') && line.contains("Context is getting full")
+    (line.contains('⚠') && line.contains("Context is getting full"))
+        || line.contains("Context nearly full")
 }
 
-fn style_tokens_line(line: &str) -> String {
-    if is_tokens_context_warning(line) {
+fn is_tokens_low_remaining(line: &str) -> bool {
+    if !line.contains("remaining") || line.contains("Context nearly full") {
+        return false;
+    }
+    let Some(rest) = line.trim().strip_prefix('~') else {
+        return false;
+    };
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let Ok(count) = digits.parse::<usize>() else {
+        return false;
+    };
+    count <= 3
+}
+
+const TOKENS_SESSION_TOTALS_HEADER: &str = "Session totals (all API calls):";
+
+fn style_tokens_line(line: &str, in_session_totals: bool) -> String {
+    if in_session_totals || line == TOKENS_SESSION_TOTALS_HEADER {
+        return format!("  {line}");
+    }
+    if line.contains("Context nearly full") {
+        return format!("  {line}").red().to_string();
+    }
+    if is_tokens_context_warning(line) || is_tokens_low_remaining(line) {
         return format!("  {line}").yellow().to_string();
     }
     style_repl_output_line(line)
@@ -141,11 +164,15 @@ pub(super) fn write_repl_handled_output(
 ) {
     let model_info = is_model_info_output(output);
     let tokens_output = is_tokens_output(output);
+    let mut in_session_totals = false;
     for line in output {
+        if tokens_output && line == TOKENS_SESSION_TOTALS_HEADER {
+            in_session_totals = true;
+        }
         let styled = if model_info {
             style_model_info_line(line)
         } else if tokens_output {
-            style_tokens_line(line)
+            style_tokens_line(line, in_session_totals)
         } else {
             style_repl_output_line(line)
         };

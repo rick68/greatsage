@@ -3,8 +3,15 @@
 //! ECS `TurnSummary` is primary; yoagent message totals are fallback when no turns exist.
 
 use {
-    super::{model_cmd::model_context_window, session_ops::block_on_session},
-    crate::{agents::CodingAgent, utils::now_ms},
+    super::{
+        cost::{
+            estimate_cost, extract_tool_call_summary, format_cache_stats, format_cost,
+            format_tool_call_summary,
+        },
+        model_cmd::model_context_window,
+        session_ops::block_on_session,
+    },
+    crate::{agents::CodingAgent, providers::Provider, utils::now_ms},
     yoagent::{
         context::{ContextTracker, total_tokens},
         types::{AgentMessage, Content, Message as LlmMessage, Usage},
@@ -231,8 +238,199 @@ pub fn show_context_fill_warning(used: u64, max: Option<u64>) -> bool {
 
 const TOKENS_CONTEXT_WARNING: &str = "⚠ Context is getting full. Consider /clear or /compact.";
 
+/// Breakdown of what's consuming context tokens by category (yoyo `ContextBreakdown`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContextBreakdown {
+    pub system_estimate: usize,
+    pub user_messages: usize,
+    pub assistant_messages: usize,
+    pub tool_calls: usize,
+    pub tool_results: usize,
+    pub thinking: usize,
+    pub total: usize,
+}
+
+/// chars/4 heuristic matching yoyo `estimate_tokens`.
+pub fn estimate_tokens(text: &str) -> usize {
+    if text.is_empty() {
+        0
+    } else {
+        (text.len() / 4).max(1)
+    }
+}
+
+fn content_block_tokens(content: &[Content]) -> usize {
+    content
+        .iter()
+        .map(|block| match block {
+            Content::Text { text } => estimate_tokens(text),
+            Content::Image { data, .. } => {
+                let raw_bytes = data.len() * 3 / 4;
+                (raw_bytes / 750).clamp(85, 16_000)
+            }
+            Content::Thinking { thinking, .. } => estimate_tokens(thinking),
+            Content::ToolCall {
+                name, arguments, ..
+            } => estimate_tokens(name) + estimate_tokens(&arguments.to_string()) + 8,
+        })
+        .sum()
+}
+
+/// Analyze messages to produce a per-category token breakdown.
+pub fn context_breakdown(messages: &[AgentMessage], system_prompt: &str) -> ContextBreakdown {
+    let system_estimate = estimate_tokens(system_prompt);
+
+    let mut user_messages = 0usize;
+    let mut assistant_messages = 0usize;
+    let mut tool_calls = 0usize;
+    let mut tool_results = 0usize;
+    let mut thinking = 0usize;
+
+    for msg in messages {
+        match msg {
+            AgentMessage::Llm(m) => match m {
+                LlmMessage::User { content, .. } => {
+                    user_messages += content_block_tokens(content) + 4;
+                }
+                LlmMessage::Assistant { content, .. } => {
+                    for block in content {
+                        match block {
+                            Content::Text { text } => {
+                                assistant_messages += estimate_tokens(text);
+                            }
+                            Content::Thinking { thinking: t, .. } => {
+                                thinking += estimate_tokens(t);
+                            }
+                            Content::ToolCall {
+                                name, arguments, ..
+                            } => {
+                                tool_calls += estimate_tokens(name)
+                                    + estimate_tokens(&arguments.to_string())
+                                    + 8;
+                            }
+                            Content::Image { data, .. } => {
+                                let raw_bytes = data.len() * 3 / 4;
+                                assistant_messages += (raw_bytes / 750).clamp(85, 16_000);
+                            }
+                        }
+                    }
+                    assistant_messages += 4;
+                }
+                LlmMessage::ToolResult {
+                    content, tool_name, ..
+                } => {
+                    tool_results += content_block_tokens(content) + estimate_tokens(tool_name) + 8;
+                }
+            },
+            AgentMessage::Extension(ext) => {
+                user_messages += estimate_tokens(&ext.data.to_string()) + 4;
+            }
+        }
+    }
+
+    let total =
+        system_estimate + user_messages + assistant_messages + tool_calls + tool_results + thinking;
+
+    ContextBreakdown {
+        system_estimate,
+        user_messages,
+        assistant_messages,
+        tool_calls,
+        tool_results,
+        thinking,
+        total,
+    }
+}
+
+/// Format a context breakdown table with percentages (plain text; terminal dims).
+pub fn format_context_breakdown(breakdown: &ContextBreakdown) -> Vec<String> {
+    let total = breakdown.total.max(1);
+    let categories: &[(&str, usize)] = &[
+        ("system prompt", breakdown.system_estimate),
+        ("user messages", breakdown.user_messages),
+        ("assistant", breakdown.assistant_messages),
+        ("tool calls", breakdown.tool_calls),
+        ("tool results", breakdown.tool_results),
+        ("thinking", breakdown.thinking),
+    ];
+    let mut lines = vec!["Context breakdown:".to_string()];
+    for &(label, value) in categories {
+        if value == 0 {
+            continue;
+        }
+        let pct = (value as f64 / total as f64) * 100.0;
+        let tok_str = format_token_amount(value as u64);
+        lines.push(format!(
+            "    {label:<16} {tok_str:>7} tokens  ({pct:.0}%)"
+        ));
+    }
+    () =lines.push(format!("    {}", "─".repeat(38)));
+    () = lines.push(format!(
+        "    {:<16} {:>7} tokens",
+        "total",
+        format_token_amount(total as u64),
+    ));
+
+    let tool_pct = (breakdown.tool_results as f64 / total as f64) * 100.0;
+    if tool_pct > 50.0 {
+        lines.push(format!(
+            "  💡 Tool results are {tool_pct:.0}% of context — consider /compact."
+        ));
+    }
+
+    lines
+}
+
+/// Estimate how many more turns fit before hitting the context limit.
+pub fn estimate_remaining_turns(messages: &[AgentMessage], max_context: u64) -> Option<(usize, f64)> {
+    if max_context == 0 {
+        return None;
+    }
+
+    let turn_count = messages
+        .iter()
+        .filter(|msg| matches!(msg, AgentMessage::Llm(LlmMessage::Assistant { .. })))
+        .count();
+
+    if turn_count < 2 {
+        return None;
+    }
+
+    let context_used = total_tokens(messages) as u64;
+    if context_used == 0 {
+        return None;
+    }
+
+    let avg_per_turn = context_used as f64 / turn_count as f64;
+    let remaining_capacity = max_context.saturating_sub(context_used);
+    let remaining_turns = (remaining_capacity as f64 / avg_per_turn).floor() as usize;
+
+    Some((remaining_turns, avg_per_turn))
+}
+
+/// Plain-text remaining-turns line (terminal applies yellow/red).
+pub fn format_remaining_turns(remaining: usize, avg_per_turn: f64) -> String {
+    let avg_str = format_token_amount(avg_per_turn as u64);
+    if remaining == 0 {
+        format!("⚠ Context nearly full (~{avg_str}/turn avg)")
+    } else if remaining <= 3 {
+        format!(
+            "~{remaining} {} remaining (~{avg_str}/turn avg)",
+            if remaining == 1 { "turn" } else { "turns" }
+        )
+    } else {
+        format!("~{remaining} turns remaining (~{avg_str}/turn avg)")
+    }
+}
+
 /// yoyo-shaped `/tokens` output lines.
-pub fn tokens_output_lines(snap: &SessionDashboardSnapshot) -> Vec<String> {
+pub fn tokens_output_lines(
+    snap: &SessionDashboardSnapshot,
+    messages: &[AgentMessage],
+    system_prompt: &str,
+    provider: Provider,
+    model: &str,
+) -> Vec<String> {
     let current_line = match snap.context_max {
         Some(max) => format!(
             "  current:     {} / {} tokens",
@@ -254,14 +452,35 @@ pub fn tokens_output_lines(snap: &SessionDashboardSnapshot) -> Vec<String> {
             format_context_bar(snap.context_used, snap.context_max)
         ),
     ];
+
+    if let Some(max) = snap.context_max.filter(|max| *max > 0)
+        && let Some((remaining, avg)) = estimate_remaining_turns(messages, max)
+    {
+        () = lines.push(format!("  {}", format_remaining_turns(remaining, avg)));
+    }
+
+    if !messages.is_empty() {
+        let breakdown = context_breakdown(messages, system_prompt);
+        () = lines.push(String::new());
+        () = lines.extend(format_context_breakdown(&breakdown));
+    }
+
+    let tool_summary = extract_tool_call_summary(messages);
+    let tool_table = format_tool_call_summary(&tool_summary);
+    if !tool_table.is_empty() {
+        () = lines.push(String::new());
+        () = lines.extend(tool_table.lines().map(str::to_owned));
+    }
+
     if snap.show_compaction_note {
-        lines.push(format!("  {TOKENS_COMPACTED_NOTE}"));
+        () = lines.push(format!("  {TOKENS_COMPACTED_NOTE}"));
     }
     if show_context_fill_warning(snap.context_used, snap.context_max) {
-        lines.push(format!("  {TOKENS_CONTEXT_WARNING}"));
+        () = lines.push(format!("  {TOKENS_CONTEXT_WARNING}"));
     }
-    lines.push(String::new());
-    lines.extend([
+
+    () = lines.push(String::new());
+    () = lines.extend([
         "Session totals (all API calls):".to_string(),
         format!(
             "  input:       {} tokens",
@@ -280,6 +499,14 @@ pub fn tokens_output_lines(snap: &SessionDashboardSnapshot) -> Vec<String> {
             format_token_amount(snap.usage.cache_write)
         ),
     ]);
+
+    if let Some(cache_line) = format_cache_stats(&snap.usage) {
+        () = lines.push(format!("  {cache_line}"));
+    }
+    if let Some(cost) = estimate_cost(&snap.usage, provider, model) {
+        () = lines.push(format!("  est. cost:   {}", format_cost(cost)));
+    }
+
     lines
 }
 
