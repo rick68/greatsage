@@ -22,7 +22,6 @@ fn read_nonempty_file(path: &Path) -> Option<String> {
     }
 }
 
-#[allow(dead_code)] // reserved for future `/context` display command
 pub fn list_project_context_files(cwd: &Path) -> Vec<(String, usize)> {
     PROJECT_CONTEXT_FILES
         .iter()

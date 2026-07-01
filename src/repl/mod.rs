@@ -8,8 +8,10 @@
 mod commands_help;
 mod commands_info;
 mod commands_lifecycle;
+mod commands_project;
 mod commands_session;
 mod completion;
+mod context_display;
 mod cost;
 mod dispatch;
 pub(crate) mod help_data;

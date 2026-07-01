@@ -64,6 +64,96 @@ fn is_tokens_low_remaining(line: &str) -> bool {
 
 const TOKENS_SESSION_TOTALS_HEADER: &str = "Session totals (all API calls):";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ContextOutputMode {
+    List,
+    System,
+    Files,
+}
+
+fn context_output_mode(output: &[String]) -> Option<ContextOutputMode> {
+    let first = output.first()?;
+    if first == "Project context files:" || first == "No project context files found." {
+        Some(ContextOutputMode::List)
+    } else if first == "System prompt sections:" || first == "System prompt is empty." {
+        Some(ContextOutputMode::System)
+    } else if first == "Files in this conversation:" || first == "(no files referenced yet)" {
+        Some(ContextOutputMode::Files)
+    } else {
+        None
+    }
+}
+
+fn is_context_file_entry(line: &str) -> bool {
+    line.contains('(') && (line.ends_with(" line)") || line.ends_with(" lines)"))
+}
+
+fn style_context_section_header(line: &str) -> String {
+    const INDENT: &str = "  ";
+    if let Some(idx) = line.find("  (") {
+        let header = &line[..idx];
+        let meta = &line[idx..];
+        return format!("{INDENT}{}{}", header.bold(), meta.dimmed());
+    }
+    format!("{INDENT}{}", line.bold())
+}
+
+fn style_context_list_line(line: &str) -> String {
+    const INDENT2: &str = "  ";
+    const INDENT4: &str = "    ";
+    if line.is_empty() {
+        return String::from(INDENT2);
+    }
+    if is_context_file_entry(line) {
+        return format!("{INDENT4}{}", line.dimmed());
+    }
+    format!("{INDENT2}{}", line.dimmed())
+}
+
+fn style_context_system_line(line: &str) -> String {
+    const INDENT2: &str = "  ";
+    const INDENT4: &str = "    ";
+    if line.is_empty() {
+        return String::new();
+    }
+    if line == "System prompt sections:" {
+        return format!("{INDENT2}{}", line.bold());
+    }
+    if line == "System prompt is empty." {
+        return format!("{INDENT2}{}", line.dimmed());
+    }
+    if line.starts_with("Total:") {
+        return format!("{INDENT2}{}", line.dimmed());
+    }
+    if line == "..." {
+        return format!("{INDENT4}{}", line.dimmed());
+    }
+    if line.starts_with("# ") || line.starts_with("## ") {
+        return style_context_section_header(line);
+    }
+    format!("{INDENT4}{}", line.dimmed())
+}
+
+fn style_context_files_line(line: &str) -> String {
+    const INDENT2: &str = "  ";
+    const INDENT4: &str = "    ";
+    if line.is_empty() {
+        return String::new();
+    }
+    if line == "Files in this conversation:" || line == "(no files referenced yet)" {
+        return format!("{INDENT2}{}", line.dimmed());
+    }
+    format!("{INDENT4}{}", line.dimmed())
+}
+
+fn style_context_line(line: &str, mode: ContextOutputMode) -> String {
+    match mode {
+        ContextOutputMode::List => style_context_list_line(line),
+        ContextOutputMode::System => style_context_system_line(line),
+        ContextOutputMode::Files => style_context_files_line(line),
+    }
+}
+
 fn style_tokens_line(line: &str, in_session_totals: bool) -> String {
     if in_session_totals || line == TOKENS_SESSION_TOTALS_HEADER {
         return format!("  {line}");
@@ -164,6 +254,7 @@ pub(super) fn write_repl_handled_output(
 ) {
     let model_info = is_model_info_output(output);
     let tokens_output = is_tokens_output(output);
+    let context_mode = context_output_mode(output);
     let mut in_session_totals = false;
     for line in output {
         if tokens_output && line == TOKENS_SESSION_TOTALS_HEADER {
@@ -173,6 +264,8 @@ pub(super) fn write_repl_handled_output(
             style_model_info_line(line)
         } else if tokens_output {
             style_tokens_line(line, in_session_totals)
+        } else if let Some(mode) = context_mode {
+            style_context_line(line, mode)
         } else {
             style_repl_output_line(line)
         };

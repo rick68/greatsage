@@ -172,6 +172,17 @@ fn complete_model_subcommands(prefix: &str) -> Vec<String> {
         .collect()
 }
 
+const CONTEXT_SUBCOMMANDS: &[&str] = &["system", "files"];
+
+fn complete_context_subcommands(prefix: &str) -> Vec<String> {
+    let lower = prefix.to_lowercase();
+    CONTEXT_SUBCOMMANDS
+        .iter()
+        .filter(|sub| sub.starts_with(&lower))
+        .map(|sub| (*sub).to_string())
+        .collect()
+}
+
 fn complete_model_line_args(line: &str, prefix: &str, agent_config: &AgentConfig) -> Vec<String> {
     let (_, args) = command_name_and_args(line);
     let sub = args.trim();
@@ -416,6 +427,7 @@ fn complete_args(
             }
         }
         "/help" => complete_commands(prefix),
+        "/context" => complete_context_subcommands(prefix),
         _ => Vec::new(),
     }
 }
