@@ -62,13 +62,13 @@ fn parse_from_separator_line(line: &str) -> Option<String> {
     if inner.is_empty() {
         None
     } else {
-        Some(inner.to_string())
+        Some(String::from(inner))
     }
 }
 
 fn parse_markdown_sections_text(text: &str) -> Vec<PromptSection> {
     let mut sections = Vec::new();
-    let mut current_name = "(preamble)".to_string();
+    let mut current_name = String::from("(preamble)");
     let mut current_level = 0usize;
     let mut current_lines: Vec<String> = Vec::new();
 
@@ -83,7 +83,7 @@ fn parse_markdown_sections_text(text: &str) -> Vec<PromptSection> {
                 lines: lines.clone(),
             });
         }
-        lines.clear();
+        () = lines.clear();
     };
 
     for line in text.lines() {
@@ -94,7 +94,7 @@ fn parse_markdown_sections_text(text: &str) -> Vec<PromptSection> {
                 &mut current_lines,
                 &mut sections,
             );
-            current_name = rest.trim().to_string();
+            current_name = String::from(rest.trim());
             current_level = 1;
         } else if let Some(rest) = line.strip_prefix("## ") {
             flush(
@@ -103,10 +103,10 @@ fn parse_markdown_sections_text(text: &str) -> Vec<PromptSection> {
                 &mut current_lines,
                 &mut sections,
             );
-            current_name = rest.trim().to_string();
+            current_name = String::from(rest.trim());
             current_level = 2;
         } else {
-            current_lines.push(line.to_string());
+            () = current_lines.push(String::from(line));
         }
     }
     flush(
@@ -141,7 +141,7 @@ pub fn parse_prompt_sections(prompt: &str) -> Vec<PromptSection> {
                 }),
                 None => sections.extend(parse_markdown_sections_text(&text)),
             }
-            lines.clear();
+            () = lines.clear();
         };
 
     for line in prompt.lines() {
@@ -149,10 +149,10 @@ pub fn parse_prompt_sections(prompt: &str) -> Vec<PromptSection> {
             flush_chunk(&mut lines, pending_name.take(), &mut sections);
             pending_name = Some(path);
         } else {
-            lines.push(line.to_string());
+            () = lines.push(String::from(line));
         }
     }
-    flush_chunk(&mut lines, pending_name.take(), &mut sections);
+    () = flush_chunk(&mut lines, pending_name.take(), &mut sections);
     sections
 }
 
@@ -185,7 +185,7 @@ fn extract_context_files(messages: &[AgentMessage]) -> BTreeMap<FileAction, BTre
             if path.is_empty() {
                 continue;
             }
-            result.entry(action).or_default().insert(path.to_string());
+            result.entry(action).or_default().insert(String::from(path));
         }
     }
 
@@ -195,10 +195,10 @@ fn extract_context_files(messages: &[AgentMessage]) -> BTreeMap<FileAction, BTre
 fn truncate_preview(line: &str, max_chars: usize) -> String {
     let trimmed = line.trim();
     if trimmed.chars().count() <= max_chars {
-        trimmed.to_string()
+        String::from(trimmed)
     } else {
         let mut out: String = trimmed.chars().take(max_chars.saturating_sub(1)).collect();
-        out.push('…');
+        () = out.push('…');
         out
     }
 }
@@ -207,25 +207,34 @@ fn pluralize_lines(count: usize) -> &'static str {
     if count == 1 { "line" } else { "lines" }
 }
 
-pub fn context_list_lines(cwd: &Path, system_prompt: &str) -> Vec<String> {
-    let files = list_project_context_files(cwd);
-    if files.is_empty() {
+pub fn context_list_lines(cwd: &Path, system_prompt: &str, bare: bool) -> Vec<String> {
+    if bare {
         return vec![
-            "No project context files found.".to_string(),
-            "Create GREATSAGE.md to give greatsage project context.".to_string(),
-            "Also supports: .greatsage/instructions.md, AGENTS.md, CLAUDE.md, YOYO.md, .cursorrules, .github/copilot-instructions.md".to_string(),
+            String::from("Project context disabled (--bare)."),
+            String::from("Project instruction files and memories are not loaded into the agent."),
         ];
     }
 
-    let mut lines = vec!["Project context files:".to_string()];
+    let files = list_project_context_files(cwd);
+    if files.is_empty() {
+        return vec![
+            String::from("No project context files found."),
+            String::from("Create GREATSAGE.md to give greatsage project context."),
+            String::from(
+                "Also supports: .greatsage/instructions.md, AGENTS.md, CLAUDE.md, YOYO.md, .cursorrules, .github/copilot-instructions.md",
+            ),
+        ];
+    }
+
+    let mut lines = vec![String::from("Project context files:")];
     for (name, line_count) in &files {
-        lines.push(format!(
+        () = lines.push(format!(
             "{name} ({line_count} {})",
             pluralize_lines(*line_count)
         ));
     }
     if let Some(hint) = reinstall_hint(system_prompt, cwd) {
-        lines.push(hint);
+        () = lines.push(hint);
     }
     lines
 }
@@ -252,10 +261,9 @@ fn reinstall_hint(system_prompt: &str, cwd: &Path) -> Option<String> {
     }
 
     if stale {
-        Some(
-            "hint: disk has project files not in the installed prompt — reinstall agent to pick up changes"
-                .to_string(),
-        )
+        Some(String::from(
+            "hint: disk has project files not in the installed prompt — reinstall agent to pick up changes",
+        ))
     } else {
         None
     }
@@ -263,24 +271,24 @@ fn reinstall_hint(system_prompt: &str, cwd: &Path) -> Option<String> {
 
 pub fn context_system_lines(prompt: &str, estimate_tokens: impl Fn(&str) -> usize) -> Vec<String> {
     if prompt.trim().is_empty() {
-        return vec!["System prompt is empty.".to_string()];
+        return vec![String::from("System prompt is empty.")];
     }
 
     let sections = parse_prompt_sections(prompt);
     if sections.is_empty() {
-        return vec!["System prompt is empty.".to_string()];
+        return vec![String::from("System prompt is empty.")];
     }
 
     let total_lines: usize = sections.iter().map(|s| s.lines.len() + 1).sum();
     let total_tokens = estimate_tokens(prompt);
 
-    let mut lines = vec!["System prompt sections:".to_string(), String::new()];
+    let mut lines = vec![String::from("System prompt sections:"), String::new()];
     for section in &sections {
         let section_text = section.lines.join("\n");
         let tokens = estimate_tokens(&format!("{}\n{section_text}", section.name));
         let line_count = section.lines.len();
         let prefix = if section.header_level <= 1 { "#" } else { "##" };
-        lines.push(format!(
+        () = lines.push(format!(
             "{prefix} {}  ({line_count} {}, ~{tokens} tokens)",
             section.name,
             pluralize_lines(line_count),
@@ -293,7 +301,7 @@ pub fn context_system_lines(prompt: &str, estimate_tokens: impl Fn(&str) -> usiz
             .take(3)
             .collect();
         for line in preview_lines {
-            lines.push(truncate_preview(line, 80));
+            () = lines.push(truncate_preview(line, 80));
         }
         if section
             .lines
@@ -302,14 +310,14 @@ pub fn context_system_lines(prompt: &str, estimate_tokens: impl Fn(&str) -> usiz
             .count()
             > 3
         {
-            lines.push("...".to_string());
+            () = lines.push(String::from("..."));
         }
-        lines.push(String::new());
+        () = lines.push(String::new());
     }
     if lines.last().is_some_and(String::is_empty) {
         lines.pop();
     }
-    lines.push(format!(
+    () = lines.push(format!(
         "Total: {total_lines} lines, ~{total_tokens} tokens (estimated)"
     ));
     lines
@@ -318,17 +326,17 @@ pub fn context_system_lines(prompt: &str, estimate_tokens: impl Fn(&str) -> usiz
 pub fn context_files_lines(messages: &[AgentMessage]) -> Vec<String> {
     let files = extract_context_files(messages);
     if files.is_empty() {
-        return vec!["(no files referenced yet)".to_string()];
+        return vec![String::from("(no files referenced yet)")];
     }
 
-    let mut lines = vec!["Files in this conversation:".to_string(), String::new()];
+    let mut lines = vec![String::from("Files in this conversation:"), String::new()];
     for (action, paths) in &files {
         let joined = paths
             .iter()
             .map(String::as_str)
             .collect::<Vec<_>>()
             .join(", ");
-        lines.push(format!(
+        () = lines.push(format!(
             "{} {:<9} {joined}",
             action.icon(),
             format!("{}:", action.label()),

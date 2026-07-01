@@ -6,6 +6,7 @@ pub(crate) use coding::{
 
 use {
     crate::{
+        cli::Cli,
         config::{Config, McpConfig},
         project_context::assemble_system_prompt,
         providers::Provider,
@@ -26,6 +27,23 @@ use {
     yoagent::SkillSet,
 };
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AgentConfigOptions {
+    pub bare: bool,
+    pub explicit_skills: bool,
+    pub explicit_mcp: bool,
+}
+
+impl AgentConfigOptions {
+    pub fn from_cli(cli: &Cli) -> Self {
+        Self {
+            bare: cli.bare,
+            explicit_skills: cli.skills.is_some(),
+            explicit_mcp: cli.mcp.is_some(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Resource)]
 pub struct AgentConfig {
     pub model: String,
@@ -37,8 +55,11 @@ pub struct AgentConfig {
     pub mcp: Vec<McpConfig>,
 }
 
-impl From<&Config> for AgentConfig {
-    fn from(config: &Config) -> Self {
+impl AgentConfig {
+    /// Build agent config. Pass [`AgentConfigOptions::from_cli`] at startup so `--bare`
+    /// can skip auto-loaded project context, skills, and MCP (Claude Code bare parity).
+    pub fn from_config(config: &Config, opts: AgentConfigOptions) -> Self {
+        let bare = opts.bare;
         let provider = config.get_provider();
         let model = config
             .get_model()
@@ -49,12 +70,21 @@ impl From<&Config> for AgentConfig {
                     .unwrap_or_else(|| "claude-fable-5".to_owned())
             });
         let base_url = config.get_base_url().unwrap_or_default();
-        let skills = SkillSet::load(config.get_skills().as_slice()).expect("Failed to load skills");
+        let skill_paths = if bare && !opts.explicit_skills {
+            Vec::new()
+        } else {
+            config.get_skills()
+        };
+        let skills = SkillSet::load(skill_paths.as_slice()).expect("Failed to load skills");
         let base_prompt = config.get_system_prompt();
         let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let (system_prompt, _) = assemble_system_prompt(&base_prompt, &cwd);
+        let (system_prompt, _) = assemble_system_prompt(&base_prompt, &cwd, bare);
         let api_key = config.get_api_key(provider).unwrap_or_default();
-        let mcp = config.get_mcp();
+        let mcp = if bare && !opts.explicit_mcp {
+            Vec::new()
+        } else {
+            config.get_mcp()
+        };
 
         AgentConfig {
             provider: provider.unwrap_or_default(),
@@ -68,17 +98,27 @@ impl From<&Config> for AgentConfig {
     }
 }
 
+impl From<&Config> for AgentConfig {
+    fn from(config: &Config) -> Self {
+        Self::from_config(config, AgentConfigOptions::default())
+    }
+}
+
 #[derive(Default, Deref, Resource)]
 pub struct AgentsCancelToken(Arc<CancellationToken>);
 
 fn setup(
     config: Res<Config>,
+    cli: Res<crate::cli::Cli>,
     mut commands: Commands,
     app_cancel: Res<AppCancelToken>,
     agents_cancel: Res<AgentsCancelToken>,
     tokio_runtime: ResMut<TokioTasksRuntime>,
 ) {
-    let agent_config = AgentConfig::from(config.into_inner());
+    let agent_config = AgentConfig::from_config(
+        config.into_inner(),
+        AgentConfigOptions::from_cli(cli.as_ref()),
+    );
     commands.insert_resource(agent_config);
 
     let app_cancel = app_cancel.clone();

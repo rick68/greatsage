@@ -91,12 +91,13 @@ fn setup(_app_cancel: Res<AppCancelToken>, _tokio_runtime: ResMut<TokioTasksRunt
 
 fn print_system_prompt(
     config: Res<Config>,
+    cli: Res<Cli>,
     mut stdout: MessageWriter<StdoutMessage>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let base_prompt = config.get_system_prompt();
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let (system_prompt, _) = assemble_system_prompt(&base_prompt, &cwd);
+    let (system_prompt, _) = assemble_system_prompt(&base_prompt, &cwd, cli.bare);
     stdout.write(StdoutMessage::from(
         system_prompt.trim_end_matches([' ', '\t', '\n']),
     ));
@@ -844,6 +845,7 @@ fn read_stdin_stream(
                         coding_agent.as_deref(),
                         runtime,
                         dashboard,
+                        cli.bare,
                     ) {
                         DispatchResult::Exit => {
                             () = persist_repl_history(

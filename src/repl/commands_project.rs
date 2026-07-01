@@ -49,7 +49,7 @@ pub(super) fn dispatch_context(args: &str, ctx: &ReplDispatchCtx<'_>) -> Dispatc
             .unwrap_or_default();
         context_files_lines(&messages)
     } else if trimmed.is_empty() {
-        context_list_lines(&cwd, system_prompt)
+        context_list_lines(&cwd, system_prompt, ctx.bare)
     } else {
         return unknown_subcommand(trimmed);
     };

@@ -30,6 +30,8 @@ pub(super) struct ReplDispatchCtx<'a> {
     pub runtime: &'a tokio::runtime::Runtime,
     /// Precomputed for `/status`, `/tokens`, `/cost` when dispatch runs from the stdin loop.
     pub dashboard: Option<SessionDashboardSnapshot>,
+    /// CLI `-b` / `--bare`: project context is not loaded into the agent.
+    pub bare: bool,
 }
 
 pub(super) enum AgentOp {
@@ -104,6 +106,7 @@ pub(super) fn dispatch_slash_command(
     coding_agent: Option<&crate::agents::CodingAgent>,
     runtime: &tokio::runtime::Runtime,
     dashboard: Option<SessionDashboardSnapshot>,
+    bare: bool,
 ) -> DispatchResult {
     let (cmd, args) = command_name_and_args(line);
     let route = route_command(cmd);
@@ -115,6 +118,7 @@ pub(super) fn dispatch_slash_command(
         coding_agent,
         runtime,
         dashboard,
+        bare,
     };
 
     match route {

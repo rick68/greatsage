@@ -59,6 +59,10 @@ pub struct Cli {
     /// Print the fully assembled system prompt and exit
     #[arg(long)]
     pub print_system_prompt: bool,
+    /// Minimal mode (Claude Code parity): skip auto-loaded project context, memories,
+    /// skills, and MCP; use explicit --skills / --mcp to opt back in
+    #[arg(short = 'b', long)]
+    pub bare: bool,
     /// Do not print startup hints, banner, and usage statistics
     #[arg(short = 'n', long)]
     pub no_hints: bool,

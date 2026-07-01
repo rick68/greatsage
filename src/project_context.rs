@@ -67,9 +67,13 @@ pub fn load_project_context(cwd: &Path) -> Option<String> {
     }
 }
 
-pub fn assemble_system_prompt(base: &str, cwd: &Path) -> (String, Vec<&'static str>) {
-    let loaded_paths = loaded_project_context_paths(cwd);
+pub fn assemble_system_prompt(base: &str, cwd: &Path, bare: bool) -> (String, Vec<&'static str>) {
     let base_trimmed = base.trim();
+    if bare {
+        return (base_trimmed.to_owned(), Vec::new());
+    }
+
+    let loaded_paths = loaded_project_context_paths(cwd);
     let project = load_project_context(cwd);
 
     let mut full = match (base_trimmed.is_empty(), project) {

@@ -1,6 +1,6 @@
 use {
     crate::{
-        agents::{AgentConfig, AgentsCancelToken},
+        agents::{AgentConfig, AgentConfigOptions, AgentsCancelToken},
         cli::Cli,
         config::{Config, McpConfig},
         project_context::project_context_hint_lines,
@@ -291,12 +291,13 @@ fn setup(
     cli: Res<Cli>,
 ) {
     let config = config.clone();
-    let agent_config = AgentConfig::from(&config);
+    let opts = AgentConfigOptions::from_cli(cli.as_ref());
+    let agent_config = AgentConfig::from_config(&config, opts);
     let model = agent_config.model.clone();
     let provider = agent_config.provider.to_string();
 
     tokio_runtime.spawn_background_task(move |mut ctx| async move {
-        let agent_config = AgentConfig::from(&config);
+        let agent_config = AgentConfig::from_config(&config, opts);
         let coding_agent = CodingAgent::new_with_agent_config(&agent_config).await;
         ctx.run_on_main_thread(move |ctx| {
             () = install_coding_agent(ctx.world, coding_agent, model, provider);
@@ -317,7 +318,7 @@ fn setup(
         }
     });
 
-    if !cli.no_hints && !cli.print_system_prompt {
+    if !cli.bare && !cli.no_hints && !cli.print_system_prompt {
         let context_lines = env::current_dir()
             .map(|cwd| project_context_hint_lines(&cwd))
             .unwrap_or_default();
