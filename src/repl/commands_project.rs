@@ -1,4 +1,4 @@
-//! Project-related slash commands: `/context` (and future `/init`).
+//! Project-related slash commands: `/context`, `/init`.
 
 use {
     super::{
@@ -7,7 +7,10 @@ use {
         session_dashboard::estimate_tokens,
         session_ops::block_on_session,
     },
-    crate::agents::SYSTEM_PROMPT,
+    crate::{
+        agents::SYSTEM_PROMPT,
+        project_init::{detect_ai_config_files, init_greatsage_md, init_repl_output_lines},
+    },
     std::path::Path,
     yoagent::types::AgentMessage,
 };
@@ -50,6 +53,35 @@ pub(super) fn dispatch_context(args: &str, ctx: &ReplDispatchCtx<'_>) -> Dispatc
     } else {
         return unknown_subcommand(trimmed);
     };
+
+    DispatchResult::Handled {
+        output,
+        detail: Vec::new(),
+        redraw_prompt: true,
+        reinstall: None,
+    }
+}
+
+pub(super) fn dispatch_init(args: &str, _ctx: &ReplDispatchCtx<'_>) -> DispatchResult {
+    if !args.trim().is_empty() {
+        return DispatchResult::Handled {
+            output: vec![
+                format!("invalid argument: \"{}\"", args.trim()),
+                String::from("usage: /init"),
+            ],
+            detail: Vec::new(),
+            redraw_prompt: true,
+            reinstall: None,
+        };
+    }
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
+    let ai_names: Vec<&str> = detect_ai_config_files(&cwd)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    let outcome = init_greatsage_md(&cwd);
+    let output = init_repl_output_lines(&outcome, &ai_names);
 
     DispatchResult::Handled {
         output,

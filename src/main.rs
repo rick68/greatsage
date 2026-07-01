@@ -9,6 +9,7 @@ mod config;
 mod config_paths;
 mod env_load;
 mod project_context;
+mod project_init;
 mod providers;
 mod repl;
 mod session;

@@ -121,6 +121,7 @@ pub(super) fn dispatch_slash_command(
         route if route.is_lifecycle() => commands_lifecycle::dispatch(route, &mut ctx),
         route if route.is_session() => commands_session::dispatch(route, args, &mut ctx),
         CommandRoute::Context => commands_project::dispatch_context(args, &ctx),
+        CommandRoute::Init => commands_project::dispatch_init(args, &ctx),
         route if route.is_info() => commands_info::dispatch(route, args, &ctx),
         CommandRoute::UnknownSlash | CommandRoute::NotSlash => DispatchResult::Unknown,
         _ => DispatchResult::Unknown,

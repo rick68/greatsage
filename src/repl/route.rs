@@ -23,6 +23,7 @@ pub(super) enum CommandRoute {
     Tokens,
     Cost,
     Context,
+    Init,
     UnknownSlash,
     NotSlash,
 }
@@ -65,7 +66,9 @@ pub(super) fn route_command(cmd: &str) -> CommandRoute {
         "/status" => CommandRoute::Status,
         "/tokens" => CommandRoute::Tokens,
         "/cost" => CommandRoute::Cost,
+        // Project
         "/context" => CommandRoute::Context,
+        "/init" => CommandRoute::Init,
         // AI
         "/model" => CommandRoute::Model,
         "/provider" => CommandRoute::Provider,
