@@ -7,6 +7,7 @@ pub(crate) use coding::{
 use {
     crate::{
         config::{Config, McpConfig},
+        project_context::assemble_system_prompt,
         providers::Provider,
         tokio::AppCancelToken,
     },
@@ -20,7 +21,7 @@ use {
         prelude::Deref,
     },
     bevy_tokio_tasks::TokioTasksRuntime,
-    std::sync::Arc,
+    std::{env, path::PathBuf, sync::Arc},
     tokio_util::sync::CancellationToken,
     yoagent::SkillSet,
 };
@@ -49,7 +50,9 @@ impl From<&Config> for AgentConfig {
             });
         let base_url = config.get_base_url().unwrap_or_default();
         let skills = SkillSet::load(config.get_skills().as_slice()).expect("Failed to load skills");
-        let system_prompt = config.get_system_prompt();
+        let base_prompt = config.get_system_prompt();
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let (system_prompt, _) = assemble_system_prompt(&base_prompt, &cwd);
         let api_key = config.get_api_key(provider).unwrap_or_default();
         let mcp = config.get_mcp();
 

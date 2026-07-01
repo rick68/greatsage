@@ -3,6 +3,7 @@ use {
         agents::{AgentConfig, AgentsCancelToken},
         cli::Cli,
         config::{Config, McpConfig},
+        project_context::project_context_hint_lines,
         providers::Provider,
         repl::prompt_symbol,
         session::{
@@ -316,8 +317,14 @@ fn setup(
         }
     });
 
-    if !cli.no_hints {
+    if !cli.no_hints && !cli.print_system_prompt {
+        let context_lines = env::current_dir()
+            .map(|cwd| project_context_hint_lines(&cwd))
+            .unwrap_or_default();
         stdout.write(StdoutMessage::from(banner()));
+        for line in context_lines {
+            stdout.write(StdoutMessage::from(format!("{line}\n").dimmed()));
+        }
         stdout.write(StdoutMessage::from(
             format!("  model: {}\n", agent_config.model).dimmed(),
         ));
@@ -727,10 +734,10 @@ fn handle_coding_agent_events(
                             stdout.write(StdoutMessage::from(line));
                         }
                         if let LlmMessage::Assistant { usage, .. } = llm_message {
-                            if cli.no_hints {
-                                stdout.write(StdoutMessage::newline());
-                            } else {
+                            if !cli.no_hints {
                                 stdout.write(StdoutMessage::from(usage_info(usage)));
+                            } else {
+                                stdout.write(StdoutMessage::newline());
                             }
                             *last_usage = usage.clone();
                             usage_printed = true;

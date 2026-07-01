@@ -11,8 +11,8 @@ use {
         model_cmd::model_context_window,
         session_ops::block_on_session,
     },
-    bevy::utils::default,
     crate::{agents::CodingAgent, providers::Provider, utils::now_ms},
+    bevy::utils::default,
     yoagent::{
         context::{ContextTracker, total_tokens},
         types::{AgentMessage, Content, Message as LlmMessage, Usage},

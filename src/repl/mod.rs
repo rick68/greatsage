@@ -35,6 +35,7 @@ use {
         },
         cli::Cli,
         config::Config,
+        project_context::assemble_system_prompt,
         session::{
             SessionId, SessionLifetimeUsage, SessionManager, SessionMeta, TurnEntity, TurnSummary,
         },
@@ -71,6 +72,7 @@ use {
         save_messages,
     },
     session_state::ReplSessionState,
+    std::{env, path::PathBuf},
     tab::{ReplTabLocals, TabListConfirm, accept_tab_candidate_list, handle_tab_completion},
     terminal::{
         erase_ahead_echo, redraw_input_line, replace_input_line_in_place, sync_inline_hint,
@@ -89,7 +91,9 @@ fn print_system_prompt(
     mut stdout: MessageWriter<StdoutMessage>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    let system_prompt = config.get_system_prompt();
+    let base_prompt = config.get_system_prompt();
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let (system_prompt, _) = assemble_system_prompt(&base_prompt, &cwd);
     stdout.write(StdoutMessage::from(
         system_prompt.trim_end_matches([' ', '\t', '\n']),
     ));
