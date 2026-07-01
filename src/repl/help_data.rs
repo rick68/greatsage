@@ -315,6 +315,68 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
             "  /provider google\n",
         ),
     },
+    ReplCommand {
+        name: "/remember",
+        summary: "Save a project-specific memory",
+        category: ReplCommandCategory::Ai,
+        args: "<note>",
+        arg_hint: "",
+        usage: "/remember <note> — Save a project-specific memory",
+        detail: concat!(
+            "Usage:\n",
+            "  /remember <note>\tSave a memory for this project\n",
+            "\n",
+            "Saves a note that persists across sessions for the current\n",
+            "project directory. Memories are loaded automatically when\n",
+            "you start greatsage in the same directory.\n",
+            "\n",
+            "Examples:\n",
+            "  /remember always run migrations before testing\n",
+            "  /remember the auth module uses JWT with RS256\n"
+        ),
+    },
+    ReplCommand {
+        name: "/memories",
+        summary: "List project memories",
+        category: ReplCommandCategory::Ai,
+        args: "[query]",
+        arg_hint: "",
+        usage: "/memories [query] — List or search project memories",
+        detail: concat!(
+            "Usage:\n",
+            "  /memories\t\tList all saved memories\n",
+            "  /memories <query>\tSearch memories by keyword (case-insensitive)\n",
+            "\n",
+            "Shows saved memories for the current project directory.\n",
+            "Each memory is displayed with its index (for use with /forget),\n",
+            "the saved text, and a feed-style timestamp (e.g. 5m ago,\n",
+            "Yesterday at 22:00, May 1).\n",
+            "\n",
+            "Examples:\n",
+            "  /memories\n",
+            "  /memories docker\n",
+            "  /memories sqlx\n"
+        ),
+    },
+    ReplCommand {
+        name: "/forget",
+        summary: "Remove a project memory by index",
+        category: ReplCommandCategory::Ai,
+        args: "<n>",
+        arg_hint: "",
+        usage: "/forget <n> — Remove a project memory by index",
+        detail: concat!(
+            "Usage:\n",
+            "  /forget <n>\nDelete the memory at the given index\n",
+            "\n",
+            "Removes a previously saved project memory. Use /memories to\n",
+            "see all memories with their indices.\n",
+            "\n",
+            "Examples:\n",
+            "  /forget 0\n",
+            "  /forget 3\n"
+        ),
+    },
 ];
 
 /// Split [`ReplCommand::detail`] for display.

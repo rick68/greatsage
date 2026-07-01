@@ -44,8 +44,30 @@ fn is_init_output(output: &[String]) -> bool {
         .is_some_and(|line| line == "Scanning project...")
 }
 
+fn is_memory_output(output: &[String]) -> bool {
+    output.first().is_some_and(|line| {
+        line.starts_with("usage: /remember")
+            || line.starts_with("usage: /forget")
+            || line.starts_with("No project memories")
+            || line.starts_with("Project memories (")
+            || line.starts_with("Found ")
+            || line.starts_with("✓ Remembered:")
+            || line.starts_with("✓ Forgot:")
+            || line.starts_with("error:")
+            || line.starts_with("No memories matching")
+    })
+}
+
 fn is_init_success_line(line: &str) -> bool {
     line.starts_with("✓ Created GREATSAGE.md")
+}
+
+fn is_memory_success_line(line: &str) -> bool {
+    line.starts_with("✓ Remembered:") || line.starts_with("✓ Forgot:")
+}
+
+fn is_memory_error_line(line: &str) -> bool {
+    line.starts_with("error:")
 }
 
 fn is_model_info_separator(line: &str) -> bool {
@@ -219,6 +241,16 @@ fn style_init_line(line: &str) -> String {
     }
 }
 
+fn style_memory_line(line: &str) -> String {
+    if is_memory_success_line(line) {
+        format!("  {line}").green().to_string()
+    } else if is_memory_error_line(line) {
+        format!("  {line}").red().to_string()
+    } else {
+        format!("  {line}").dimmed().to_string()
+    }
+}
+
 fn style_repl_output_line(line: &str) -> String {
     if line.starts_with("unknown provider:") || line.starts_with("No models match") {
         format!("  {line}").yellow().to_string()
@@ -273,6 +305,7 @@ pub(super) fn write_repl_handled_output(
     let model_info = is_model_info_output(output);
     let tokens_output = is_tokens_output(output);
     let init_output = is_init_output(output);
+    let memory_output = is_memory_output(output);
     let context_mode = context_output_mode(output);
     let mut in_session_totals = false;
     for line in output {
@@ -285,6 +318,8 @@ pub(super) fn write_repl_handled_output(
             style_tokens_line(line, in_session_totals)
         } else if init_output {
             style_init_line(line)
+        } else if memory_output {
+            style_memory_line(line)
         } else if let Some(mode) = context_mode {
             style_context_line(line, mode)
         } else {

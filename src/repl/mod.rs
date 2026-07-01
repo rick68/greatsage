@@ -8,6 +8,7 @@
 mod commands_help;
 mod commands_info;
 mod commands_lifecycle;
+mod commands_memory;
 mod commands_project;
 mod commands_session;
 mod completion;

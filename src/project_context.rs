@@ -1,6 +1,9 @@
 //! Project instruction files from cwd appended to the agent system prompt.
 
-use std::{fs, path::Path};
+use {
+    crate::project_memory::{format_memories_for_prompt, load_memories_from, memory_file_path},
+    std::{fs, path::Path},
+};
 
 pub const PROJECT_CONTEXT_FILES: &[&str] = &[
     "GREATSAGE.md",
@@ -69,12 +72,21 @@ pub fn assemble_system_prompt(base: &str, cwd: &Path) -> (String, Vec<&'static s
     let base_trimmed = base.trim();
     let project = load_project_context(cwd);
 
-    let full = match (base_trimmed.is_empty(), project) {
+    let mut full = match (base_trimmed.is_empty(), project) {
         (true, Some(project)) => project,
         (false, Some(project)) => format!("{base_trimmed}\n\n{project}"),
         (false, None) => base_trimmed.to_owned(),
         (true, None) => String::new(),
     };
+
+    let memory = load_memories_from(&memory_file_path(cwd));
+    if let Some(memories_section) = format_memories_for_prompt(&memory) {
+        full = if full.is_empty() {
+            memories_section
+        } else {
+            format!("{full}\n\n{memories_section}")
+        };
+    }
 
     (full, loaded_paths)
 }
