@@ -573,12 +573,11 @@ fn handle_coding_agent_events(
                 ));
             }
             AgentEvent::TurnEnd { message, .. } => {
-                if let AgentMessage::Llm(llm_message) = &message {
-                    if let Some(line) = assistant_error_line(llm_message)
+                if let AgentMessage::Llm(llm_message) = &message
+                    && let Some(line) = assistant_error_line(llm_message)
                         .or_else(|| empty_assistant_hint(llm_message))
-                    {
-                        stdout.write(StdoutMessage::from(line));
-                    }
+                {
+                    stdout.write(StdoutMessage::from(line));
                 }
             }
             AgentEvent::ToolExecutionStart {

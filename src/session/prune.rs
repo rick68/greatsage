@@ -8,7 +8,7 @@ use {
 
 /// When `seqs.len() > max`, return the seq threshold: entities with `seq <= cutoff` are the
 /// oldest excess and should be despawned. Uses `select_nth_unstable` (no full sort).
-fn seq_cutoff(seqs: &mut Vec<u64>, max: usize) -> Option<u64> {
+fn seq_cutoff(seqs: &mut [u64], max: usize) -> Option<u64> {
     if seqs.len() <= max {
         return None;
     }

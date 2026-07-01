@@ -11,6 +11,7 @@ use {
         model_cmd::model_context_window,
         session_ops::block_on_session,
     },
+    bevy::utils::default,
     crate::{agents::CodingAgent, providers::Provider, utils::now_ms},
     yoagent::{
         context::{ContextTracker, total_tokens},
@@ -166,9 +167,10 @@ pub fn build_snapshot(
                 })
             })
             .unwrap_or(0);
-        let mut usage = Usage::default();
-        usage.input = tokens;
-        usage
+        Usage {
+            input: tokens,
+            ..default()
+        }
     };
 
     let (message_count, context_used, messages_compacted) = coding_agent
@@ -360,11 +362,9 @@ pub fn format_context_breakdown(breakdown: &ContextBreakdown) -> Vec<String> {
         }
         let pct = (value as f64 / total as f64) * 100.0;
         let tok_str = format_token_amount(value as u64);
-        lines.push(format!(
-            "    {label:<16} {tok_str:>7} tokens  ({pct:.0}%)"
-        ));
+        lines.push(format!("    {label:<16} {tok_str:>7} tokens  ({pct:.0}%)"));
     }
-    () =lines.push(format!("    {}", "─".repeat(38)));
+    () = lines.push(format!("    {}", "─".repeat(38)));
     () = lines.push(format!(
         "    {:<16} {:>7} tokens",
         "total",
@@ -382,7 +382,10 @@ pub fn format_context_breakdown(breakdown: &ContextBreakdown) -> Vec<String> {
 }
 
 /// Estimate how many more turns fit before hitting the context limit.
-pub fn estimate_remaining_turns(messages: &[AgentMessage], max_context: u64) -> Option<(usize, f64)> {
+pub fn estimate_remaining_turns(
+    messages: &[AgentMessage],
+    max_context: u64,
+) -> Option<(usize, f64)> {
     if max_context == 0 {
         return None;
     }

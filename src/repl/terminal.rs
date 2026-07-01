@@ -140,7 +140,7 @@ pub(super) fn write_unknown_slash_feedback(
         ));
     }
     stdout.write(StdoutMessage::from(
-        format!("  type /help for available commands\n").dimmed(),
+        String::from("  type /help for available commands\n").dimmed(),
     ));
 }
 

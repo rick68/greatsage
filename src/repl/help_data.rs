@@ -357,6 +357,10 @@ pub(super) fn command_arg_hint(cmd_name: &str) -> Option<&'static str> {
     if cmd.args.is_empty() {
         return None;
     }
+    // yoyo omits ghost hints for optional-flag commands (e.g. bare `/compact `).
+    if normalized == "/compact" {
+        return None;
+    }
     if cmd.arg_hint.is_empty() {
         Some(cmd.args)
     } else {

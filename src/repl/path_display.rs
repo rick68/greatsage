@@ -10,12 +10,12 @@ use std::{
 
 /// Short path for REPL status lines (strip cwd or `~`, else basename).
 fn display_session_path(path: impl AsRef<Path>) -> String {
-    if let Ok(cwd) = env::current_dir() {
-        if let Ok(rel) = path.as_ref().strip_prefix(&cwd) {
-            let rel = rel.display().to_string();
-            if !rel.is_empty() {
-                return rel;
-            }
+    if let Ok(cwd) = env::current_dir()
+        && let Ok(rel) = path.as_ref().strip_prefix(&cwd)
+    {
+        let rel = rel.display().to_string();
+        if !rel.is_empty() {
+            return rel;
         }
     }
 

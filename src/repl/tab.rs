@@ -94,41 +94,42 @@ pub(super) fn handle_tab_completion(
         return;
     }
 
-    if let Some(state) = tab_cycle.as_ref() {
-        if state.session_dir_listed && state.snapshot == *content && state.cursor == *cursor {
-            *tab_cycle = None;
-            return;
-        }
+    if let Some(state) = tab_cycle.as_ref()
+        && state.session_dir_listed
+        && state.snapshot == *content
+        && state.cursor == *cursor
+    {
+        *tab_cycle = None;
+        return;
     }
 
-    if let Some(state) = tab_cycle.as_ref() {
-        if state.snapshot == *content
-            && state.cursor == *cursor
-            && state.candidates.len() > 1
-            && !session_path_char_completion(content, *cursor)
-        {
-            let next_index = (state.index + 1) % state.candidates.len();
-            let replacement = state.candidates[next_index].clone();
-            let (start_char, end_char) = token_bounds(content, *cursor);
-            () = apply_token_replacement(
-                content,
-                cursor,
-                stdout,
-                start_char,
-                end_char,
-                &replacement,
-                agent_config,
-                hint_width,
-            );
-            *tab_cycle = Some(TabCycleState {
-                snapshot: content.clone(),
-                cursor: *cursor,
-                candidates: state.candidates.clone(),
-                index: next_index,
-                session_dir_listed: false,
-            });
-            return;
-        }
+    if let Some(state) = tab_cycle.as_ref()
+        && state.snapshot == *content
+        && state.cursor == *cursor
+        && state.candidates.len() > 1
+        && !session_path_char_completion(content, *cursor)
+    {
+        let next_index = (state.index + 1) % state.candidates.len();
+        let replacement = state.candidates[next_index].clone();
+        let (start_char, end_char) = token_bounds(content, *cursor);
+        () = apply_token_replacement(
+            content,
+            cursor,
+            stdout,
+            start_char,
+            end_char,
+            &replacement,
+            agent_config,
+            hint_width,
+        );
+        *tab_cycle = Some(TabCycleState {
+            snapshot: content.clone(),
+            cursor: *cursor,
+            candidates: state.candidates.clone(),
+            index: next_index,
+            session_dir_listed: false,
+        });
+        return;
     }
 
     let candidates = completions(content, *cursor, agent_config);

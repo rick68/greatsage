@@ -232,7 +232,7 @@ fn prompt_provider(existing: &ExistingSetup) -> Result<Option<Provider>, SetupEr
     match select.prompt_skippable()? {
         None => Ok(None),
         Some(label) => {
-            let provider = provider_from_label(&label);
+            let provider = provider_from_label(label);
             () = print_ok(&format!("Provider: {label}"));
             Ok(Some(provider))
         }
@@ -501,7 +501,7 @@ pub fn run_wizard() -> Result<(), SetupError> {
 
     let mut step = WizardStep::Provider;
     let mut prior_provider = existing.provider;
-    let mut provider = existing.provider.unwrap_or(Provider::default());
+    let mut provider = existing.provider.unwrap_or_default();
     let mut provider_changed = false;
     let mut skipped_api_key = false;
     let mut api_key: Option<String> = None;

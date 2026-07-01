@@ -77,7 +77,7 @@ pub struct SessionId(pub u64);
 ///
 /// Fields are written by ingest/setup and read by BRP `world_query`, not in-process Rust.
 #[allow(dead_code)]
-#[derive(Debug, Clone, Component)]
+#[derive(Clone, Debug, Default, Component)]
 #[cfg_attr(feature = "dev_native", derive(Reflect), reflect(Component))]
 pub(crate) struct SessionMeta {
     pub(crate) session_id: SessionId,
@@ -85,18 +85,6 @@ pub(crate) struct SessionMeta {
     pub(crate) cwd: String,
     pub(crate) model: String,
     pub(crate) provider: String,
-}
-
-impl Default for SessionMeta {
-    fn default() -> Self {
-        Self {
-            session_id: SessionId::default(),
-            started_at_ms: 0,
-            cwd: String::new(),
-            model: String::new(),
-            provider: String::new(),
-        }
-    }
 }
 
 /// Monotonic sequence counter for turn and tool records within a session.

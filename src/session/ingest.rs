@@ -471,7 +471,7 @@ pub(crate) fn ingest_agent_events(
                             seq,
                             tool_call_id: tool_call_id.clone(),
                             tool_name: tool_name.clone(),
-                            summary: tool_summary(&tool_name, args),
+                            summary: tool_summary(tool_name, args),
                             started_at_ms: now_ms(),
                             ended_at_ms: None,
                             is_error: false,

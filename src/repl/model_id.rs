@@ -62,10 +62,10 @@ pub const VENDOR_SLUGS: &[&str] = &[
 pub fn canonical_model_name(model_id: &str) -> String {
     let base = model_id.split(':').next().unwrap_or(model_id);
     let name = base.strip_prefix('~').unwrap_or(base).to_lowercase();
-    if let Some((vendor, rest)) = name.split_once('/') {
-        if VENDOR_SLUGS.contains(&vendor) {
-            return String::from(rest);
-        }
+    if let Some((vendor, rest)) = name.split_once('/')
+        && VENDOR_SLUGS.contains(&vendor)
+    {
+        return String::from(rest);
     }
     name
 }

@@ -84,7 +84,5 @@ fn has_credentials() -> bool {
 
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-    config_search_paths(&cwd)
-        .iter()
-        .any(|path| toml_has_credentials(path))
+    config_search_paths(&cwd).iter().any(toml_has_credentials)
 }

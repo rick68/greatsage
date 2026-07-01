@@ -131,10 +131,10 @@ pub fn env_file_search_paths_low_to_high(cwd: &Path) -> Vec<PathBuf> {
     if let Some(project) = find_existing_file_upward(cwd, project_env_path) {
         () = paths.push(project);
     }
-    if let Some(repo) = find_existing_file_upward(cwd, repo_env_path) {
-        if !paths.contains(&repo) {
-            () = paths.push(repo);
-        }
+    if let Some(repo) = find_existing_file_upward(cwd, repo_env_path)
+        && !paths.contains(&repo)
+    {
+        () = paths.push(repo);
     }
     paths
 }

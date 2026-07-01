@@ -502,8 +502,6 @@ fn handle_agent_busy_key(
             input.backspace_buffered();
             if let Some(width) = removed_width {
                 () = input.erase_ahead_char(stdout, width);
-            } else if !input.content.is_empty() {
-                () = input.sync_ahead_echo_full(stdout);
             } else {
                 () = input.sync_ahead_echo_full(stdout);
             }
@@ -624,7 +622,7 @@ fn read_stdin_stream(
                 {
                     continue;
                 }
-                (KeyCode::Char(c), KeyEventKind::Press) if matches!(c, 'y' | 'Y') => {
+                (KeyCode::Char('y' | 'Y'), KeyEventKind::Press) => {
                     session_state.pending_clear_confirm = false;
                     session_state.last_user_prompt = None;
                     stdout.write(StdoutMessage::newline());
@@ -634,7 +632,7 @@ fn read_stdin_stream(
                     () = input.clear_line();
                     continue;
                 }
-                (KeyCode::Char(c), KeyEventKind::Press) if matches!(c, 'n' | 'N') => {
+                (KeyCode::Char('n' | 'N'), KeyEventKind::Press) => {
                     session_state.pending_clear_confirm = false;
                     stdout.write(StdoutMessage::newline());
                     () = write_repl_response(&mut stdout, "(clear cancelled)");
@@ -657,11 +655,11 @@ fn read_stdin_stream(
                 {
                     continue;
                 }
-                (KeyCode::Char(c), KeyEventKind::Press) if matches!(c, 'y' | 'Y') => {
+                (KeyCode::Char('y' | 'Y'), KeyEventKind::Press) => {
                     () = input.accept_tab_list(&mut stdout, confirm, agent_config.as_ref());
                     continue;
                 }
-                (KeyCode::Char(c), KeyEventKind::Press) if matches!(c, 'n' | 'N') => {
+                (KeyCode::Char('n' | 'N'), KeyEventKind::Press) => {
                     input.tab.list_confirm = None;
                     stdout.write(StdoutMessage::newline());
                     () = input.redraw_line(&mut stdout, agent_config.as_ref());
@@ -889,7 +887,7 @@ fn read_stdin_stream(
                                 &mut tokio_runtime,
                                 op,
                                 output_channel.as_ref(),
-                                coding_agent.as_deref().map(|a| a.clone()),
+                                coding_agent.as_deref().cloned(),
                             );
                             () = input.clear_line();
                         }

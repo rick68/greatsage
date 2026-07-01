@@ -47,6 +47,7 @@ dev_native = [
 [lints.clippy]
 diverging_sub_expression = "allow"
 let_underscore_future = "allow"
+too_many_arguments = "allow"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(bevy_lint)"] }

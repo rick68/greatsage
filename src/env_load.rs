@@ -74,18 +74,17 @@ pub fn resolve_credential_value_with_paired_env(
     value: &str,
     paired_env: Option<&Path>,
 ) -> Option<String> {
-    if let Some(name) = env_reference_name(value.as_ref()) {
+    if let Some(name) = env_reference_name(value) {
         if let Ok(shell) = env::var(name)
             && !shell.trim().is_empty()
         {
             return Some(shell);
         }
-        if let Some(path) = paired_env.filter(|path| path.is_file()) {
-            if let Some(file_value) = parse_env_file(path).get(name).cloned()
-                && !file_value.trim().is_empty()
-            {
-                return Some(file_value);
-            }
+        if let Some(path) = paired_env.filter(|path| path.is_file())
+            && let Some(file_value) = parse_env_file(path).get(name).cloned()
+            && !file_value.trim().is_empty()
+        {
+            return Some(file_value);
         }
         return None;
     }
@@ -164,5 +163,5 @@ pub fn upsert_env_file(path: &Path, key: &str, value: &str) -> io::Result<()> {
         () = content.push('\n');
     }
     () = fs::write(path, content)?;
-    restrict_env_permissions(path.as_ref())
+    restrict_env_permissions(path)
 }
