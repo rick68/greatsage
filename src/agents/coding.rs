@@ -13,16 +13,15 @@ use {
         config::{Config, McpConfig},
         config_paths::resolved_config_path,
         providers::Provider,
-        repl::{
-            startup_hints::{StartupHintInput, StartupHintPart, startup_hint_parts},
-        },
+        repl::startup_hints::{StartupHintInput, StartupHintPart, startup_hint_parts},
         session::{
             AgentId, FocusedSession, SessionContextStats, SessionId, SessionManager,
-            SessionRuntimeStatus, spawn_session_root, sync_session_meta, teardown_session,
+            SessionRuntimeStatus,
             context_stats::{
                 PendingContextStatsSync, apply_context_stats, request_context_stats_sync,
             },
             ingest::ingest_agent_events,
+            spawn_session_root, sync_session_meta, teardown_session,
         },
         setup,
         stdout::{StdoutMessage, prompt_symbol},
@@ -298,9 +297,10 @@ impl CodingAgentPromptChannel {
     }
 }
 
-/// Loopback BRP `session.clear` enqueue target; drained by the REPL stdin loop.
+/// Loopback BRP `session.clear` enqueue target; drained by the coding agent plugin.
 #[derive(Clone, Resource)]
 pub struct CodingAgentClearChannel {
+    #[cfg_attr(not(feature = "dev_native"), allow(dead_code))]
     pub sender: crossbeam_channel::Sender<()>,
     pub receiver: crossbeam_channel::Receiver<()>,
 }
@@ -313,6 +313,7 @@ impl Default for CodingAgentClearChannel {
 }
 
 impl CodingAgentClearChannel {
+    #[cfg(feature = "dev_native")]
     pub fn request_clear(&self) {
         let _ = self.sender.send(());
     }

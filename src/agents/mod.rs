@@ -1,8 +1,9 @@
 mod coding;
+#[cfg(feature = "dev_native")]
+pub(crate) use coding::CodingAgentClearChannel;
 pub(crate) use coding::{
-    CodingAgent, CodingAgentClearChannel, CodingAgentEvent, CodingAgentPromptChannel,
-    CodingAgentTask, SYSTEM_PROMPT, coding_agent_plugin, install_coding_agent,
-    prepare_coding_agent_preserving_messages,
+    CodingAgent, CodingAgentEvent, CodingAgentPromptChannel, CodingAgentTask, SYSTEM_PROMPT,
+    coding_agent_plugin, install_coding_agent, prepare_coding_agent_preserving_messages,
 };
 
 pub(crate) mod hooks;

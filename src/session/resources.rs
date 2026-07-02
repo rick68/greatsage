@@ -1,12 +1,11 @@
 #[cfg(feature = "dev_native")]
-use bevy::prelude::ReflectResource;
+use bevy::prelude::{Reflect, ReflectResource};
 
 use {
     super::components::SessionId,
     bevy::{
         ecs::{entity::Entity, resource::Resource},
         platform::collections::HashMap,
-        reflect::Reflect,
         utils::default,
     },
     yoagent::types::Usage,
