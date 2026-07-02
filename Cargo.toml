@@ -2,6 +2,7 @@
 temp_env_vars = "0.2.1"
 
 [dependencies]
+async-trait = "0.1.89"
 bevy = { version = "0.19.0", default-features = false, features = [
     "bevy_state",
     "std",

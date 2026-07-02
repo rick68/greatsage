@@ -3515,6 +3515,7 @@ dependencies = [
 name = "greatsage"
 version = "0.0.6"
 dependencies = [
+ "async-trait",
  "bevy 0.19.0",
  "bevy-tokio-tasks",
  "bevy_brp_extras",
