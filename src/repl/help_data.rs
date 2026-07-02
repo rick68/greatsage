@@ -228,6 +228,35 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
         ),
     },
     ReplCommand {
+        name: "/hooks",
+        summary: "Show active hooks",
+        category: ReplCommandCategory::Session,
+        args: "",
+        arg_hint: "",
+        usage: "/hooks — Show active hooks (pre/post tool execution)",
+        detail: concat!(
+            "Lists all shell hooks configured in .greatsage.toml.\n",
+            "Shows each hook's phase (pre/post), tool pattern, and command.\n",
+            "\n",
+            "Configuration (.greatsage.toml):\n",
+            "\n",
+            "  # Pre-hook: runs before bash tool calls\n",
+            "  hooks.pre.bash = \"echo 'About to run bash'\"\n",
+            "\n",
+            "  # Post-hook: runs after every tool call (wildcard)\n",
+            "  hooks.post.* = \"echo 'Tool finished'\"\n",
+            "\n",
+            "Pre-hooks that exit non-zero block the tool from executing.\n",
+            "Post-hooks always pass through the original tool output.\n",
+            "All hooks have a 5-second timeout to prevent hanging.\n",
+            "\n",
+            "Environment variables available to hooks:\n",
+            "  TOOL_NAME   — the tool being executed\n",
+            "  TOOL_PARAMS — JSON string of tool parameters\n",
+            "  TOOL_OUTPUT — (post-hooks only) tool output, truncated to 1000 chars\n",
+        ),
+    },
+    ReplCommand {
         name: "/context",
         summary: "Show loaded project context files",
         category: ReplCommandCategory::Project,
@@ -448,6 +477,40 @@ pub fn command_usage(name: &str) -> Option<&'static str> {
         .iter()
         .find(|cmd| cmd.name == normalized)
         .map(|cmd| cmd.usage)
+}
+
+/// Short description for inline ghost hints (yoyo `command_short_description`).
+///
+/// Explicit per-command strings aligned with yoyo-evolve; independent of [`ReplCommand::summary`]
+/// and [`ReplCommand::usage`] (those feed `/help` list and detail).
+pub fn command_short_description(cmd_name: &str) -> Option<&'static str> {
+    let normalized = normalize_command_name(cmd_name);
+    let name = normalized.strip_prefix('/').unwrap_or(normalized.as_str());
+    if !KNOWN_COMMANDS.iter().any(|c| c.name == normalized) {
+        return None;
+    }
+    match name {
+        "help" => Some("Show help for commands"),
+        "quit" | "exit" => Some("Exit greatsage"),
+        "clear" => Some("Clear conversation history"),
+        "clear!" => Some("Force-clear without confirmation"),
+        "compact" => Some("Compact conversation to save context"),
+        "save" => Some("Save session to file"),
+        "load" => Some("Load session from file"),
+        "retry" => Some("Re-send the last user input"),
+        "status" => Some("Show session dashboard"),
+        "tokens" => Some("Show token usage and context window"),
+        "cost" => Some("Show estimated session cost"),
+        "hooks" => Some("Show active hooks (pre/post tool execution)"),
+        "context" => Some("Show project context, system prompt sections, or token budget"),
+        "init" => Some("Generate a GREATSAGE.md context file"),
+        "model" => Some("Switch, list, or inspect models"),
+        "provider" => Some("Switch or show current provider"),
+        "remember" => Some("Save a project-specific memory"),
+        "memories" => Some("List or search project memories"),
+        "forget" => Some("Remove a project memory by index"),
+        _ => None,
+    }
 }
 
 /// Argument hint for inline ghost text after `cmd ` (name with or without `/`).

@@ -4,6 +4,9 @@ pub(crate) use coding::{
     coding_agent_plugin, install_coding_agent, prepare_coding_agent_preserving_messages,
 };
 
+pub(crate) mod hooks;
+pub(crate) use hooks::ShellHook;
+
 mod tool_display;
 
 use {
@@ -55,6 +58,7 @@ pub struct AgentConfig {
     pub system_prompt: String,
     pub api_key: String,
     pub mcp: Vec<McpConfig>,
+    pub shell_hooks: Vec<ShellHook>,
 }
 
 impl AgentConfig {
@@ -87,6 +91,11 @@ impl AgentConfig {
         } else {
             config.get_mcp()
         };
+        let shell_hooks = if bare {
+            Vec::new()
+        } else {
+            config.get_shell_hooks()
+        };
 
         AgentConfig {
             provider: provider.unwrap_or_default(),
@@ -96,6 +105,7 @@ impl AgentConfig {
             system_prompt,
             api_key,
             mcp,
+            shell_hooks,
         }
     }
 }

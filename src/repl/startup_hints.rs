@@ -15,6 +15,7 @@ pub struct StartupHintInput<'a> {
     pub model: &'a str,
     pub skills_len: usize,
     pub mcp_len: usize,
+    pub hooks_len: usize,
     pub needs_setup: bool,
 }
 
@@ -60,6 +61,9 @@ pub fn startup_hint_dimmed_lines(input: &StartupHintInput<'_>) -> Vec<String> {
         }
         if input.mcp_len > 0 {
             () = lines.push(format!("  mcp: {} server(s) connected\n", input.mcp_len));
+        }
+        if input.hooks_len > 0 {
+            () = lines.push(format!("  hooks: {} active\n", input.hooks_len));
         }
     }
 

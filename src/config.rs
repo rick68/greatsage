@@ -1,7 +1,11 @@
 use {
     crate::{
-        Cli, agents::SYSTEM_PROMPT, config_paths::resolved_config_path,
-        env_load::resolve_credential_value_with_paired_env, providers::Provider,
+        Cli,
+        agents::SYSTEM_PROMPT,
+        agents::{ShellHook, hooks::shell_hooks_from_toml},
+        config_paths::resolved_config_path,
+        env_load::resolve_credential_value_with_paired_env,
+        providers::Provider,
     },
     bevy::{
         app::{App, PreStartup},
@@ -11,7 +15,11 @@ use {
     config::builder::DefaultState,
     serde::{Deserialize, Serialize},
     serde_json::json,
-    std::{env, fs, path::PathBuf, str::FromStr},
+    std::{
+        env, fs,
+        path::{Path, PathBuf},
+        str::FromStr,
+    },
     toml_edit::{DocumentMut, Item, Value},
     url::Url,
 };
@@ -332,6 +340,10 @@ impl Config {
         }
     }
 
+    pub fn get_shell_hooks(&self) -> Vec<ShellHook> {
+        shell_hooks_from_config_file(&Self::config_file())
+    }
+
     /// `[session]` retention keys in config.toml:
     /// - `max_turns` — max `TurnSummary` entities per session before prune (default 200)
     /// - `max_tool_records` — max `ToolCallRecord` entities per session before prune (default 2000)
@@ -343,8 +355,15 @@ impl Config {
     }
 }
 
+pub(crate) fn shell_hooks_from_config_file(path: &Path) -> Vec<ShellHook> {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return vec![];
+    };
+    shell_hooks_from_toml(&contents)
+}
+
 fn setup(mut commands: Commands, cli: Res<Cli>) {
-    commands.insert_resource(Config::from(cli.into_inner()));
+    () = commands.insert_resource(Config::from(cli.into_inner()));
 }
 
 pub(crate) fn config_plugin(app: &mut App) {

@@ -11,12 +11,11 @@ pub const CONFIG_FILENAME: &str = "config.toml";
 pub const ENV_FILENAME: &str = ".env";
 const APP_CONFIG_SUBDIR: &str = "greatsage";
 
-/// Config base directory (`~/.config` on typical Linux; honors `XDG_CONFIG_HOME` when set).
+/// Config base directory — always `~/.config` unless `XDG_CONFIG_HOME` is set (Linux/macOS parity).
 pub fn xdg_config_dir() -> PathBuf {
     env::var_os("XDG_CONFIG_HOME")
         .filter(|path| Path::new(path).is_absolute())
         .map(PathBuf::from)
-        .or_else(dirs::config_dir)
         .unwrap_or_else(|| {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
@@ -24,14 +23,24 @@ pub fn xdg_config_dir() -> PathBuf {
         })
 }
 
-/// User-level greatsage directory (`~/.config/greatsage` display; see `xdg_config_dir()`).
+/// User-level greatsage directory (`~/.config/greatsage`; honors `XDG_CONFIG_HOME` when set).
 pub fn user_config_dir() -> PathBuf {
     xdg_config_dir().join(APP_CONFIG_SUBDIR)
 }
 
-/// User config: `~/.config/greatsage/config.toml` (via `xdg_config_dir()`)
+/// User config: `~/.config/greatsage/config.toml` (honors `XDG_CONFIG_HOME` when set).
 pub fn user_config_path() -> PathBuf {
     user_config_dir().join(CONFIG_FILENAME)
+}
+
+/// Legacy macOS path (`~/Library/Application Support/greatsage/config.toml`) for migration only.
+pub fn legacy_platform_config_path() -> Option<PathBuf> {
+    let legacy = dirs::config_dir()?.join(APP_CONFIG_SUBDIR).join(CONFIG_FILENAME);
+    if legacy == user_config_path() {
+        None
+    } else {
+        Some(legacy)
+    }
 }
 
 /// REPL prompt input history (readline-style ↑↓ recall).
@@ -102,13 +111,16 @@ pub fn config_hint_line(config_path: &Path, cwd: &Path) -> String {
     format!("  config: {}", display_config_path(config_path, cwd))
 }
 
-/// Config search order (first populated file wins): project (walk-up) → user.
+/// Config search order (first populated file wins): project (walk-up) → `~/.config` user → legacy macOS.
 pub fn config_search_paths(cwd: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(project) = find_populated_project_config(cwd) {
         () = paths.push(project);
     }
     () = paths.push(user_config_path());
+    if let Some(legacy) = legacy_platform_config_path() {
+        () = paths.push(legacy);
+    }
     paths
 }
 

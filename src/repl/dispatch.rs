@@ -8,8 +8,8 @@
 
 use {
     super::{
-        commands_help, commands_info, commands_lifecycle, commands_memory, commands_project,
-        commands_session,
+        commands_help, commands_hooks, commands_info, commands_lifecycle, commands_memory,
+        commands_project, commands_session,
         route::{CommandRoute, route_command},
         session_dashboard::SessionDashboardSnapshot,
         session_state::ReplSessionState,
@@ -130,6 +130,7 @@ pub(super) fn dispatch_slash_command(
         CommandRoute::Remember => commands_memory::dispatch_remember(args, &ctx),
         CommandRoute::Memories => commands_memory::dispatch_memories(args, &ctx),
         CommandRoute::Forget => commands_memory::dispatch_forget(args, &ctx),
+        CommandRoute::Hooks => commands_hooks::dispatch_hooks(&ctx),
         route if route.is_info() => commands_info::dispatch(route, args, &ctx),
         CommandRoute::UnknownSlash | CommandRoute::NotSlash => DispatchResult::Unknown,
         _ => DispatchResult::Unknown,

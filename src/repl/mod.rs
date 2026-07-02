@@ -6,6 +6,7 @@
 //! definitions when a callee is already defined above.
 
 mod commands_help;
+mod commands_hooks;
 mod commands_info;
 mod commands_lifecycle;
 mod commands_memory;

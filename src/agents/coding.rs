@@ -1,12 +1,14 @@
 use {
     crate::{
         agents::tool_display::{
-            first_text_after_thinking_block, format_tool_execution_summary,
+            ToolDisplayLine, first_text_after_thinking_block, format_tool_execution_summary,
             format_tool_inline_line, format_tool_start_line, tool_batch_complete,
             tool_batch_pending_count, tool_batch_redraw_cursor_up, tool_line_clear_prefix,
-            ToolDisplayLine,
         },
-        agents::{AgentConfig, AgentConfigOptions, AgentsCancelToken},
+        agents::{
+            AgentConfig, AgentConfigOptions, AgentsCancelToken,
+            hooks::{build_hook_registry, wrap_tools_with_hooks},
+        },
         cli::Cli,
         config::{Config, McpConfig},
         config_paths::resolved_config_path,
@@ -140,12 +142,22 @@ impl CodingAgent {
             Provider::Google => Agent::new(GoogleProvider),
         };
 
+        let tools = {
+            let base = default_tools();
+            if agent_config.shell_hooks.is_empty() {
+                base
+            } else {
+                let registry = build_hook_registry(&agent_config.shell_hooks);
+                wrap_tools_with_hooks(base, &registry)
+            }
+        };
+
         let mut agent = agent
             .with_model_config(model_config)
             .with_system_prompt(system_prompt)
             .with_model(model)
             .with_api_key(api_key)
-            .with_tools(default_tools());
+            .with_tools(tools);
 
         if !skills.is_empty() {
             agent = agent.with_skills(skills.clone());
@@ -232,7 +244,7 @@ pub async fn prepare_coding_agent_preserving_messages(
         .map_err(|e| format!("failed to save messages: {e}"))?;
 
     let coding_agent = CodingAgent::new_with_agent_config(agent_config).await;
-    coding_agent
+    () = coding_agent
         .lock()
         .await
         .restore_messages(&saved)
@@ -307,7 +319,7 @@ fn setup(
         .await;
     });
 
-    commands.init_resource::<CodingAgentPromptChannel>();
+    () = commands.init_resource::<CodingAgentPromptChannel>();
 
     let app_cancel = app_cancel.clone();
     let agents_cancel = agents_cancel.clone();
@@ -331,6 +343,7 @@ fn setup(
             model: &agent_config.model,
             skills_len: agent_config.skills.len(),
             mcp_len: agent_config.mcp.len(),
+            hooks_len: agent_config.shell_hooks.len(),
             needs_setup: setup::needs_setup(),
         };
         for part in startup_hint_parts(&hint_input) {
@@ -447,7 +460,7 @@ fn spawn_agent_task(
                     status.set_idle();
                 }
 
-                world
+                () = world
                     .get_resource_mut::<NextState<CodingAgentState>>()
                     .unwrap()
                     .set(CodingAgentState::Idle);
@@ -644,7 +657,9 @@ fn handle_coding_agent_events(
                 });
                 if !cli.no_hints {
                     let line = format_tool_start_line(&summary);
-                    stdout.write(StdoutMessage::from(<&str as Colorize>::yellow(line.as_str())));
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::yellow(
+                        line.as_str(),
+                    )));
                 }
             }
             AgentEvent::ToolExecutionEnd {

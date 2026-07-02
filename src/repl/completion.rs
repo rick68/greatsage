@@ -6,7 +6,10 @@
 use {
     super::{
         dispatch::command_name_and_args,
-        help_data::{KNOWN_COMMANDS, command_arg_hint as help_arg_hint},
+        help_data::{
+            KNOWN_COMMANDS, command_arg_hint as help_arg_hint,
+            command_short_description,
+        },
     },
     crate::{agents::AgentConfig, providers::PROVIDER_SPECS},
     std::{
@@ -526,13 +529,15 @@ pub fn inline_hint(line: &str, cursor: usize, agent_config: &AgentConfig) -> Opt
         let cmd_name = &cmd.name[1..];
         if cmd_name.starts_with(typed) && cmd_name != typed {
             let rest = &cmd_name[typed.len()..];
-            return Some(format!("{rest} — {}", cmd.summary));
+            let desc = command_short_description(cmd.name)?;
+            return Some(format!("{rest} — {desc}"));
         }
     }
     for cmd in KNOWN_COMMANDS {
         let cmd_name = &cmd.name[1..];
         if cmd_name == typed {
-            return Some(format!(" — {}", cmd.summary));
+            let desc = command_short_description(cmd.name)?;
+            return Some(format!(" — {desc}"));
         }
     }
     None

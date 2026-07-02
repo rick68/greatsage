@@ -27,6 +27,7 @@ pub(super) enum CommandRoute {
     Remember,
     Memories,
     Forget,
+    Hooks,
     UnknownSlash,
     NotSlash,
 }
@@ -69,6 +70,7 @@ pub(super) fn route_command(cmd: &str) -> CommandRoute {
         "/status" => CommandRoute::Status,
         "/tokens" => CommandRoute::Tokens,
         "/cost" => CommandRoute::Cost,
+        "/hooks" => CommandRoute::Hooks,
         // Project
         "/context" => CommandRoute::Context,
         "/init" => CommandRoute::Init,
