@@ -40,6 +40,8 @@ impl ReplCommandCategory {
 pub struct ReplCommand {
     pub name: &'static str,
     pub summary: &'static str,
+    /// Inline ghost hint override; [`None`] uses [`Self::summary`].
+    pub short_description: Option<&'static str>,
     pub category: ReplCommandCategory,
     /// Argument synopsis in `/help` list (`[opt]`, `<required>`, or empty).
     pub args: &'static str,
@@ -55,6 +57,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/help",
         summary: "Show this help",
+        short_description: Some("Show help for commands"),
         category: ReplCommandCategory::Session,
         args: "[command]",
         arg_hint: "",
@@ -73,6 +76,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/quit",
         summary: "Exit greatsage",
+        short_description: None,
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
@@ -82,6 +86,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/exit",
         summary: "Exit greatsage (alias for /quit)",
+        short_description: Some("Exit greatsage"),
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
@@ -91,6 +96,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/clear",
         summary: "Clear conversation history",
+        short_description: None,
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
@@ -107,6 +113,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/clear!",
         summary: "Force-clear without confirmation",
+        short_description: None,
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
@@ -119,6 +126,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/compact",
         summary: "Compact conversation to save context",
+        short_description: None,
         category: ReplCommandCategory::Session,
         args: "[N|all|--preview]",
         arg_hint: "",
@@ -137,6 +145,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/save",
         summary: "Save session to file",
+        short_description: None,
         category: ReplCommandCategory::Session,
         args: "[path]",
         arg_hint: "<filename.json>",
@@ -157,6 +166,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/load",
         summary: "Load session from file",
+        short_description: None,
         category: ReplCommandCategory::Session,
         args: "[path]",
         arg_hint: "<filename.json>",
@@ -177,6 +187,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/retry",
         summary: "Re-send the last user input",
+        short_description: None,
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
@@ -190,6 +201,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/status",
         summary: "Show session info",
+        short_description: Some("Show session dashboard"),
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
@@ -203,6 +215,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/tokens",
         summary: "Show token usage and context window",
+        short_description: None,
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
@@ -217,6 +230,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/cost",
         summary: "Show estimated session cost",
+        short_description: None,
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
@@ -230,15 +244,17 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/hooks",
         summary: "Show active hooks",
+        short_description: Some("Show active hooks (pre/post tool execution)"),
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
         usage: "/hooks — Show active hooks (pre/post tool execution)",
         detail: concat!(
-            "Lists all shell hooks configured in .greatsage.toml.\n",
+            "Lists shell hooks from the resolved user config at\n",
+            "~/.config/greatsage/config.toml (or $XDG_CONFIG_HOME/greatsage/config.toml).\n",
             "Shows each hook's phase (pre/post), tool pattern, and command.\n",
             "\n",
-            "Configuration (.greatsage.toml):\n",
+            "Configuration (config.toml):\n",
             "\n",
             "  # Pre-hook: runs before bash tool calls\n",
             "  hooks.pre.bash = \"echo 'About to run bash'\"\n",
@@ -259,6 +275,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/context",
         summary: "Show loaded project context files",
+        short_description: Some("Show project context, system prompt sections, or token budget"),
         category: ReplCommandCategory::Project,
         args: "[system|files]",
         arg_hint: "",
@@ -278,6 +295,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/init",
         summary: "Generate a GREATSAGE.md project context",
+        short_description: Some("Generate a GREATSAGE.md context file"),
         category: ReplCommandCategory::Project,
         args: "",
         arg_hint: "",
@@ -297,6 +315,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/model",
         summary: "Switch, list, or inspect models",
+        short_description: None,
         category: ReplCommandCategory::Ai,
         args: "<name>",
         arg_hint: "",
@@ -322,6 +341,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/provider",
         summary: "Switch provider (resets model to provider default)",
+        short_description: Some("Switch or show current provider"),
         category: ReplCommandCategory::Ai,
         args: "<name>",
         arg_hint: "",
@@ -347,6 +367,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/remember",
         summary: "Save a project-specific memory",
+        short_description: None,
         category: ReplCommandCategory::Ai,
         args: "<note>",
         arg_hint: "",
@@ -367,6 +388,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/memories",
         summary: "List project memories",
+        short_description: Some("List or search project memories"),
         category: ReplCommandCategory::Ai,
         args: "[query]",
         arg_hint: "",
@@ -390,6 +412,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/forget",
         summary: "Remove a project memory by index",
+        short_description: None,
         category: ReplCommandCategory::Ai,
         args: "<n>",
         arg_hint: "",
@@ -479,38 +502,19 @@ pub fn command_usage(name: &str) -> Option<&'static str> {
         .map(|cmd| cmd.usage)
 }
 
+fn inline_hint_description(cmd: &ReplCommand) -> &'static str {
+    cmd.short_description.unwrap_or(cmd.summary)
+}
+
 /// Short description for inline ghost hints (yoyo `command_short_description`).
 ///
-/// Explicit per-command strings aligned with yoyo-evolve; independent of [`ReplCommand::summary`]
-/// and [`ReplCommand::usage`] (those feed `/help` list and detail).
+/// Returns [`ReplCommand::short_description`] when set; otherwise [`ReplCommand::summary`].
 pub fn command_short_description(cmd_name: &str) -> Option<&'static str> {
     let normalized = normalize_command_name(cmd_name);
-    let name = normalized.strip_prefix('/').unwrap_or(normalized.as_str());
-    if !KNOWN_COMMANDS.iter().any(|c| c.name == normalized) {
-        return None;
-    }
-    match name {
-        "help" => Some("Show help for commands"),
-        "quit" | "exit" => Some("Exit greatsage"),
-        "clear" => Some("Clear conversation history"),
-        "clear!" => Some("Force-clear without confirmation"),
-        "compact" => Some("Compact conversation to save context"),
-        "save" => Some("Save session to file"),
-        "load" => Some("Load session from file"),
-        "retry" => Some("Re-send the last user input"),
-        "status" => Some("Show session dashboard"),
-        "tokens" => Some("Show token usage and context window"),
-        "cost" => Some("Show estimated session cost"),
-        "hooks" => Some("Show active hooks (pre/post tool execution)"),
-        "context" => Some("Show project context, system prompt sections, or token budget"),
-        "init" => Some("Generate a GREATSAGE.md context file"),
-        "model" => Some("Switch, list, or inspect models"),
-        "provider" => Some("Switch or show current provider"),
-        "remember" => Some("Save a project-specific memory"),
-        "memories" => Some("List or search project memories"),
-        "forget" => Some("Remove a project memory by index"),
-        _ => None,
-    }
+    KNOWN_COMMANDS
+        .iter()
+        .find(|cmd| cmd.name == normalized)
+        .map(inline_hint_description)
 }
 
 /// Argument hint for inline ghost text after `cmd ` (name with or without `/`).
