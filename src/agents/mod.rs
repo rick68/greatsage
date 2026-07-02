@@ -1,7 +1,8 @@
 mod coding;
 pub(crate) use coding::{
-    CodingAgent, CodingAgentEvent, CodingAgentPromptChannel, CodingAgentTask, SYSTEM_PROMPT,
-    coding_agent_plugin, install_coding_agent, prepare_coding_agent_preserving_messages,
+    CodingAgent, CodingAgentClearChannel, CodingAgentEvent, CodingAgentPromptChannel,
+    CodingAgentTask, SYSTEM_PROMPT, coding_agent_plugin, install_coding_agent,
+    prepare_coding_agent_preserving_messages,
 };
 
 pub(crate) mod hooks;

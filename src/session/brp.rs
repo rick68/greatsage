@@ -3,7 +3,7 @@ use {
         components::{AgentRuntimeState, SessionId, SessionRuntimeStatus},
         resources::{FocusedSession, SessionManager},
     },
-    crate::agents::CodingAgentPromptChannel,
+    crate::agents::{CodingAgentClearChannel, CodingAgentPromptChannel},
     bevy::{
         ecs::{system::In, world::World},
         remote::{BrpError, BrpResult, RemotePlugin, error_codes},
@@ -74,8 +74,10 @@ pub fn session_send_prompt(In(params): In<Option<Value>>, world: &mut World) -> 
     Ok(json!({ "accepted": true }))
 }
 
-pub fn session_runtime_status(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
-    let session_id = resolve_session_id(world, params.as_ref())?;
+fn session_runtime_for_id(
+    world: &World,
+    session_id: SessionId,
+) -> Result<SessionRuntimeStatus, BrpError> {
     let root = world
         .resource::<SessionManager>()
         .root_entity(session_id)
@@ -86,16 +88,42 @@ pub fn session_runtime_status(In(params): In<Option<Value>>, world: &mut World) 
             )
         })?;
 
-    let status = world
+    world
         .get_entity(root)
         .ok()
-        .and_then(|entity| entity.get::<SessionRuntimeStatus>())
+        .and_then(|entity| entity.get::<SessionRuntimeStatus>().cloned())
         .ok_or_else(|| {
             BrpError::component_not_present(
                 "greatsage::session::components::SessionRuntimeStatus",
                 root,
             )
+        })
+}
+
+pub fn session_clear(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let session_id = resolve_session_id(world, params.as_ref())?;
+    let status = session_runtime_for_id(world, session_id)?;
+
+    if status.runtime_state() == AgentRuntimeState::Processing {
+        return Err(session_error(
+            error_codes::INVALID_PARAMS,
+            "session is processing",
+        ));
+    }
+
+    let channel = world
+        .get_resource::<CodingAgentClearChannel>()
+        .ok_or_else(|| {
+            BrpError::resource_not_present("greatsage::agents::CodingAgentClearChannel")
         })?;
+
+    channel.request_clear();
+    Ok(json!({ "accepted": true }))
+}
+
+pub fn session_runtime_status(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let session_id = resolve_session_id(world, params.as_ref())?;
+    let status = session_runtime_for_id(world, session_id)?;
 
     let state = match status.runtime_state() {
         AgentRuntimeState::Idle => "idle",
@@ -112,4 +140,5 @@ pub fn register_session_brp_methods(plugin: RemotePlugin) -> RemotePlugin {
     plugin
         .with_method_main("session.send_prompt", session_send_prompt)
         .with_method_main("session.runtime_status", session_runtime_status)
+        .with_method_main("session.clear", session_clear)
 }

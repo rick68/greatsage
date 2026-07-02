@@ -295,6 +295,26 @@ impl CodingAgentPromptChannel {
     }
 }
 
+/// Loopback BRP `session.clear` enqueue target; drained by the REPL stdin loop.
+#[derive(Clone, Resource)]
+pub struct CodingAgentClearChannel {
+    pub sender: crossbeam_channel::Sender<()>,
+    pub receiver: crossbeam_channel::Receiver<()>,
+}
+
+impl Default for CodingAgentClearChannel {
+    fn default() -> Self {
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        Self { sender, receiver }
+    }
+}
+
+impl CodingAgentClearChannel {
+    pub fn request_clear(&self) {
+        let _ = self.sender.send(());
+    }
+}
+
 fn setup(
     config: Res<Config>,
     tokio_runtime: ResMut<TokioTasksRuntime>,
@@ -320,6 +340,7 @@ fn setup(
     });
 
     () = commands.init_resource::<CodingAgentPromptChannel>();
+    () = commands.init_resource::<CodingAgentClearChannel>();
 
     let app_cancel = app_cancel.clone();
     let agents_cancel = agents_cancel.clone();
@@ -404,6 +425,26 @@ impl std::ops::Deref for CodingAgentEvent {
 
     fn deref(&self) -> &Self::Target {
         &self.event
+    }
+}
+
+/// BRP `session.clear` and headless dev_native drain target (REPL `/clear!` reinstalls directly).
+fn drain_session_clear_requests(
+    clear_channel: Res<CodingAgentClearChannel>,
+    agent_config: Res<AgentConfig>,
+    mut tokio_runtime: ResMut<TokioTasksRuntime>,
+) {
+    while clear_channel.receiver.try_recv().is_ok() {
+        let config = agent_config.clone();
+        let model = config.model.clone();
+        let provider = config.provider.to_string();
+        tokio_runtime.spawn_background_task(move |mut ctx| async move {
+            let coding_agent = CodingAgent::new_with_agent_config(&config).await;
+            ctx.run_on_main_thread(move |main_ctx| {
+                () = install_coding_agent(main_ctx.world, coding_agent, model, provider);
+            })
+            .await;
+        });
     }
 }
 
@@ -839,10 +880,15 @@ pub fn coding_agent_plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                spawn_agent_task.run_if(
-                    in_state(CodingAgentState::Idle)
-                        .and_then(not(resource_exists::<CodingAgentTask>)),
-                ),
+                (
+                    drain_session_clear_requests,
+                    spawn_agent_task,
+                )
+                    .chain()
+                    .run_if(
+                        in_state(CodingAgentState::Idle)
+                            .and_then(not(resource_exists::<CodingAgentTask>)),
+                    ),
                 handle_coding_agent_events.run_if(
                     in_state(CodingAgentState::Processing)
                         .and_then(resource_exists::<CodingAgentTask>),
