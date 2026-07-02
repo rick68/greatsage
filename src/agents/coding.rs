@@ -1,6 +1,11 @@
 use {
     crate::{
-        agents::tool_display::{format_tool_execution_summary, tool_checkmark_cursor_moves},
+        agents::tool_display::{
+            first_text_after_thinking_block, format_tool_execution_summary,
+            format_tool_inline_line, format_tool_start_line, tool_batch_complete,
+            tool_batch_pending_count, tool_batch_redraw_cursor_up, tool_line_clear_prefix,
+            ToolDisplayLine,
+        },
         agents::{AgentConfig, AgentConfigOptions, AgentsCancelToken},
         cli::Cli,
         config::{Config, McpConfig},
@@ -356,10 +361,14 @@ pub struct CodingAgentTask {
     /// Tracks whether we have already displayed thinking content during this response
     /// (via StreamDelta::Thinking). Used to avoid duplicating Content::Thinking in MessageEnd.
     thinking_shown: bool,
-    /// Maps `tool_call_id` → 0-based terminal line index for inline ✓/✗ placement.
-    tool_line_by_id: HashMap<String, usize>,
-    /// Next tool line index to assign on `ToolExecutionStart`.
-    next_tool_line: usize,
+    /// Active parallel tool rows (cleared after the batch fully completes).
+    tool_batch_display: Vec<ToolDisplayLine>,
+    /// `tool_call_id` → index in `tool_batch_display`.
+    tool_batch_index_by_id: HashMap<String, usize>,
+    /// Whether the last thinking delta already ended with `\n` (avoids blank line before divider).
+    thinking_trailing_newline: bool,
+    /// Strip leading `\n` from the next non-empty text delta (after thinking divider gap).
+    pending_text_after_thinking_gap: bool,
 }
 
 /// Bevy Message (buffered) — introduced as a distinct concept in Bevy 0.17.
@@ -536,6 +545,33 @@ fn empty_assistant_hint(message: &LlmMessage) -> Option<String> {
     )
 }
 
+fn write_tool_batch_redraw(stdout: &mut MessageWriter<StdoutMessage>, lines: &[ToolDisplayLine]) {
+    if lines.is_empty() {
+        return;
+    }
+    let cursor_up = tool_batch_redraw_cursor_up(lines.len());
+    if !cursor_up.is_empty() {
+        stdout.write(StdoutMessage::from(cursor_up));
+    }
+    for (idx, line) in lines.iter().enumerate() {
+        stdout.write(StdoutMessage::from(tool_line_clear_prefix()));
+        stdout.write(StdoutMessage::from(<&str as Colorize>::yellow(
+            format_tool_inline_line(&line.summary).as_str(),
+        )));
+        if let Some(is_error) = line.finished {
+            let symbol = if is_error {
+                <&str as Colorize>::red(" ✗")
+            } else {
+                <&str as Colorize>::green(" ✓")
+            };
+            stdout.write(StdoutMessage::from(symbol));
+        }
+        if idx < lines.len().saturating_sub(1) {
+            stdout.write(StdoutMessage::newline());
+        }
+    }
+}
+
 /// Bevy buffered Message handling (confirmed for this change).
 ///
 /// Since Bevy 0.17, the engine distinguishes:
@@ -558,6 +594,10 @@ fn handle_coding_agent_events(
             in_text,
             in_thinking,
             thinking_shown,
+            tool_batch_display,
+            tool_batch_index_by_id,
+            thinking_trailing_newline,
+            pending_text_after_thinking_gap,
             ..
         } = coding_agent_task.as_mut();
 
@@ -583,19 +623,28 @@ fn handle_coding_agent_events(
                 args,
                 ..
             } => {
+                if *in_thinking {
+                    if !cli.no_hints {
+                        if !*thinking_trailing_newline {
+                            stdout.write(StdoutMessage::newline());
+                        }
+                        stdout.write(thinking_divider());
+                    }
+                    *in_thinking = false;
+                }
                 if *in_text {
                     *in_text = false;
                 }
                 let summary = format_tool_execution_summary(tool_name, args);
-                let line_idx = coding_agent_task.next_tool_line;
-                coding_agent_task
-                    .tool_line_by_id
-                    .insert(tool_call_id.clone(), line_idx);
-                coding_agent_task.next_tool_line += 1;
+                let batch_idx = tool_batch_display.len();
+                tool_batch_index_by_id.insert(tool_call_id.clone(), batch_idx);
+                () = tool_batch_display.push(ToolDisplayLine {
+                    summary: summary.clone(),
+                    finished: None,
+                });
                 if !cli.no_hints {
-                    stdout.write(StdoutMessage::from(<&str as Colorize>::yellow(
-                        format!("\n  ▶ {summary}").as_str(),
-                    )));
+                    let line = format_tool_start_line(&summary);
+                    stdout.write(StdoutMessage::from(<&str as Colorize>::yellow(line.as_str())));
                 }
             }
             AgentEvent::ToolExecutionEnd {
@@ -603,24 +652,16 @@ fn handle_coding_agent_events(
                 is_error,
                 ..
             } if !cli.no_hints => {
-                let symbol = if *is_error {
-                    <&str as Colorize>::red(" ✗")
-                } else {
-                    <&str as Colorize>::green(" ✓")
-                };
-                let last_line_idx = coding_agent_task.next_tool_line.saturating_sub(1);
-                if let Some(line_idx) = coding_agent_task.tool_line_by_id.remove(tool_call_id) {
-                    let (cursor_up, cursor_down) =
-                        tool_checkmark_cursor_moves(line_idx, last_line_idx);
-                    if !cursor_up.is_empty() {
-                        stdout.write(StdoutMessage::from(cursor_up));
-                    }
-                    stdout.write(StdoutMessage::from(symbol));
-                    if !cursor_down.is_empty() {
-                        stdout.write(StdoutMessage::from(cursor_down));
-                    }
-                } else {
-                    stdout.write(StdoutMessage::from(symbol));
+                if let Some(&batch_idx) = tool_batch_index_by_id.get(tool_call_id)
+                    && let Some(line) = tool_batch_display.get_mut(batch_idx)
+                {
+                    line.finished = Some(*is_error);
+                }
+                () = write_tool_batch_redraw(&mut stdout, tool_batch_display);
+                if tool_batch_complete(tool_batch_pending_count(tool_batch_display)) {
+                    stdout.write(StdoutMessage::newline());
+                    () = tool_batch_display.clear();
+                    () = tool_batch_index_by_id.clear();
                 }
             }
             AgentEvent::MessageUpdate {
@@ -628,23 +669,34 @@ fn handle_coding_agent_events(
                 ..
             } => {
                 // Exit thinking block when the first normal text delta arrives.
-                // We add a newline + divider here because the last thinking delta
-                // from the provider often does not end with '\n'.
                 if *in_thinking {
                     if !cli.no_hints {
-                        stdout.write(StdoutMessage::newline());
+                        if !*thinking_trailing_newline {
+                            stdout.write(StdoutMessage::newline());
+                        }
                         stdout.write(thinking_divider());
                     }
                     *in_thinking = false;
+                    *pending_text_after_thinking_gap = true;
                 }
 
+                let after_thinking_gap = *pending_text_after_thinking_gap;
                 if !*in_text {
-                    if !cli.no_hints {
+                    if !cli.no_hints && !after_thinking_gap {
                         stdout.write(StdoutMessage::newline());
                     }
                     *in_text = true;
                 }
-                stdout.write(StdoutMessage::from(delta));
+                if let Some(text) =
+                    first_text_after_thinking_block(delta, pending_text_after_thinking_gap)
+                {
+                    let out = if after_thinking_gap {
+                        format!("\n{text}")
+                    } else {
+                        String::from(text)
+                    };
+                    stdout.write(StdoutMessage::from(out));
+                }
             }
             AgentEvent::MessageUpdate { delta, .. } if !cli.no_hints => {
                 if let Some(thinking_text) = extract_thinking_from_delta(delta) {
@@ -654,8 +706,9 @@ fn handle_coding_agent_events(
                     }
 
                     if !*in_thinking {
-                        // First thinking delta of this block → print header.
-                        // We rely on previous output (tool result or previous turn) to have ended its line.
+                        // Advance past the tool batch gap line, or break off an open tool line.
+                        stdout.write(StdoutMessage::newline());
+                        *thinking_trailing_newline = false;
                         stdout.write(thinking_header());
                         *in_thinking = true;
                         *thinking_shown = true;
@@ -668,6 +721,7 @@ fn handle_coding_agent_events(
 
                     // Print thinking content dimmed (no extra newlines — deltas are incremental).
                     stdout.write(StdoutMessage::from(thinking_text.dimmed()));
+                    *thinking_trailing_newline = thinking_text.ends_with('\n');
                 }
             }
             AgentEvent::MessageEnd {
@@ -687,8 +741,12 @@ fn handle_coding_agent_events(
                     }
 
                     // Non-streaming path: add a leading newline before the header for spacing.
+                    stdout.write(StdoutMessage::newline());
                     stdout.write(thinking_header());
                     stdout.write(StdoutMessage::from(thinking_text.dimmed()));
+                    if !thinking_text.ends_with('\n') {
+                        stdout.write(StdoutMessage::newline());
+                    }
                     stdout.write(thinking_divider());
                 }
 
@@ -706,6 +764,10 @@ fn handle_coding_agent_events(
                     *in_thinking = false;
                 }
                 *thinking_shown = false;
+                () = tool_batch_display.clear();
+                () = tool_batch_index_by_id.clear();
+                *thinking_trailing_newline = false;
+                *pending_text_after_thinking_gap = false;
 
                 let mut usage_printed = false;
                 for msg in messages.iter().rev() {
