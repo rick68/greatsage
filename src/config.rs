@@ -1,7 +1,7 @@
 use {
     crate::{
-        Cli, agents::SYSTEM_PROMPT, env_load::resolve_credential_value_with_paired_env,
-        providers::Provider,
+        Cli, agents::SYSTEM_PROMPT, config_paths::resolved_config_path,
+        env_load::resolve_credential_value_with_paired_env, providers::Provider,
     },
     bevy::{
         app::{App, PreStartup},
@@ -39,20 +39,7 @@ impl Config {
     #[inline]
     fn config_file() -> PathBuf {
         let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-
-        for path in crate::config_paths::config_search_paths(&cwd) {
-            if crate::config_paths::config_file_is_populated(&path) {
-                return path.canonicalize().unwrap_or(path);
-            }
-        }
-
-        let default = crate::config_paths::user_config_path();
-        if let Some(parent) = default.parent() {
-            let _ = fs::create_dir_all(parent);
-            let _ = fs::File::create(&default);
-        }
-
-        default.canonicalize().unwrap_or(default)
+        resolved_config_path(&cwd)
     }
 
     fn get_builder() -> config::ConfigBuilder<DefaultState> {

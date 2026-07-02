@@ -58,6 +58,50 @@ pub fn find_populated_project_config(start: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Resolved `config.toml` for `cwd` — same selection order as `Config::config_file()`.
+pub fn resolved_config_path(cwd: &Path) -> PathBuf {
+    for path in config_search_paths(cwd) {
+        if config_file_is_populated(&path) {
+            return path.canonicalize().unwrap_or(path);
+        }
+    }
+
+    let default = user_config_path();
+    if let Some(parent) = default.parent() {
+        let _ = fs::create_dir_all(parent);
+        let _ = fs::File::create(&default);
+    }
+
+    default.canonicalize().unwrap_or(default)
+}
+
+/// Display path for startup `config:` hint (relative to `cwd` when possible).
+pub fn display_config_path(config_path: &Path, cwd: &Path) -> String {
+    if let Ok(rel) = config_path.strip_prefix(cwd) {
+        let rel = rel.display().to_string();
+        if !rel.is_empty() {
+            return rel;
+        }
+    }
+
+    if let Ok(home) = env::var("HOME")
+        && let Ok(rel) = config_path.strip_prefix(PathBuf::from(home))
+    {
+        return if rel.as_os_str().is_empty() {
+            String::from("~")
+        } else {
+            format!("~/{}", rel.display())
+        };
+    }
+
+    config_path.display().to_string()
+}
+
+/// One dimmed startup line: `  config: {path}`.
+pub fn config_hint_line(config_path: &Path, cwd: &Path) -> String {
+    format!("  config: {}", display_config_path(config_path, cwd))
+}
+
 /// Config search order (first populated file wins): project (walk-up) → user.
 pub fn config_search_paths(cwd: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();

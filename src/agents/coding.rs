@@ -3,9 +3,12 @@ use {
         agents::{AgentConfig, AgentConfigOptions, AgentsCancelToken},
         cli::Cli,
         config::{Config, McpConfig},
-        project_context::project_context_hint_lines,
+        config_paths::resolved_config_path,
         providers::Provider,
-        repl::prompt_symbol,
+        repl::{
+            prompt_symbol,
+            startup_hints::{StartupHintInput, StartupHintPart, startup_hint_parts},
+        },
         session::{
             AgentId, FocusedSession, SessionId, SessionManager, SessionRuntimeStatus,
             spawn_session_root, sync_session_meta, teardown_session,
@@ -273,14 +276,6 @@ impl CodingAgentPromptChannel {
     }
 }
 
-fn banner() -> String {
-    format!(
-        "\n{} {}\n",
-        <&str as Colorize>::bold("greatsage").cyan(),
-        "— a coding agent growing up in public".dimmed()
-    )
-}
-
 fn setup(
     config: Res<Config>,
     tokio_runtime: ResMut<TokioTasksRuntime>,
@@ -318,36 +313,24 @@ fn setup(
         }
     });
 
-    if !cli.bare && !cli.no_hints && !cli.print_system_prompt {
-        let context_lines = env::current_dir()
-            .map(|cwd| project_context_hint_lines(&cwd))
-            .unwrap_or_default();
-        stdout.write(StdoutMessage::from(banner()));
-        for line in context_lines {
-            stdout.write(StdoutMessage::from(format!("{line}\n").dimmed()));
-        }
-        stdout.write(StdoutMessage::from(
-            format!("  model: {}\n", agent_config.model).dimmed(),
-        ));
-        if !agent_config.skills.is_empty() {
-            stdout.write(StdoutMessage::from(
-                format!("  skills: {} loaded\n", agent_config.skills.len()).dimmed(),
-            ));
-        }
-        if !agent_config.mcp.is_empty() {
-            stdout.write(StdoutMessage::from(
-                format!("  mcp: {} server(s) connected\n", agent_config.mcp.len()).dimmed(),
-            ));
-        }
-        if let Ok(cwd) = env::current_dir() {
-            stdout.write(StdoutMessage::from(
-                format!("  cwd: {}\n", cwd.display()).dimmed(),
-            ));
-        }
-        if setup::needs_setup() {
-            stdout.write(StdoutMessage::from(
-                "  hint: no API key configured — run `greatsage setup`\n".dimmed(),
-            ));
+    if let Ok(cwd) = env::current_dir() {
+        let config_path = resolved_config_path(&cwd);
+        let hint_input = StartupHintInput {
+            bare: cli.bare,
+            no_hints: cli.no_hints,
+            print_system_prompt: cli.print_system_prompt,
+            cwd: &cwd,
+            config_path: &config_path,
+            model: &agent_config.model,
+            skills_len: agent_config.skills.len(),
+            mcp_len: agent_config.mcp.len(),
+            needs_setup: setup::needs_setup(),
+        };
+        for part in startup_hint_parts(&hint_input) {
+            match part {
+                StartupHintPart::Banner(line) => stdout.write(StdoutMessage::from(line)),
+                StartupHintPart::Dimmed(line) => stdout.write(StdoutMessage::from(line.dimmed())),
+            };
         }
     }
 

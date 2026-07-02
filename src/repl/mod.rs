@@ -26,6 +26,7 @@ mod route;
 mod session_dashboard;
 mod session_ops;
 mod session_state;
+pub(crate) mod startup_hints;
 mod suggest;
 mod tab;
 mod terminal;
