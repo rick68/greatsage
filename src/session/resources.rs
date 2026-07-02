@@ -1,8 +1,13 @@
+#[cfg(feature = "dev_native")]
+use bevy::prelude::ReflectResource;
+
 use {
     super::components::SessionId,
     bevy::{
         ecs::{entity::Entity, resource::Resource},
         platform::collections::HashMap,
+        reflect::Reflect,
+        utils::default,
     },
     yoagent::types::Usage,
 };
@@ -12,14 +17,31 @@ use {
 /// Survives `/clear` and agent reinstall; `/tokens` session totals read this plus
 /// the active session's projected turns.
 #[derive(Debug, Default, Resource)]
-pub(crate) struct SessionLifetimeUsage(pub(crate) Usage);
+#[cfg_attr(feature = "dev_native", derive(Reflect))]
+#[cfg_attr(feature = "dev_native", reflect(Resource))]
+pub(crate) struct SessionLifetimeUsage {
+    pub(crate) input: u64,
+    pub(crate) output: u64,
+    pub(crate) cache_read: u64,
+    pub(crate) cache_write: u64,
+}
 
 impl SessionLifetimeUsage {
     pub(crate) fn merge(&mut self, delta: &Usage) {
-        self.0.input = self.0.input.saturating_add(delta.input);
-        self.0.output = self.0.output.saturating_add(delta.output);
-        self.0.cache_read = self.0.cache_read.saturating_add(delta.cache_read);
-        self.0.cache_write = self.0.cache_write.saturating_add(delta.cache_write);
+        self.input = self.input.saturating_add(delta.input);
+        self.output = self.output.saturating_add(delta.output);
+        self.cache_read = self.cache_read.saturating_add(delta.cache_read);
+        self.cache_write = self.cache_write.saturating_add(delta.cache_write);
+    }
+
+    pub(crate) fn usage(&self) -> Usage {
+        Usage {
+            input: self.input,
+            output: self.output,
+            cache_read: self.cache_read,
+            cache_write: self.cache_write,
+            ..default()
+        }
     }
 }
 

@@ -5,9 +5,12 @@
 //! reflection metadata. `SessionIngestState` stays unregistered (internal cursors).
 
 use {
-    super::components::{
-        AgentRuntimeState, ContentBlock, SessionId, SessionMeta, SessionRuntimeStatus,
-        ToolCallRecord, TurnSummary,
+    super::{
+        components::{
+            AgentRuntimeState, ContentBlock, SessionContextStats, SessionId, SessionMeta,
+            SessionRuntimeStatus, ToolCallRecord, TurnSummary,
+        },
+        resources::SessionLifetimeUsage,
     },
     bevy::app::App,
 };
@@ -17,7 +20,9 @@ pub(crate) fn register_session_reflect(app: &mut App) {
         .register_type::<SessionRuntimeStatus>()
         .register_type::<SessionId>()
         .register_type::<SessionMeta>()
+        .register_type::<SessionContextStats>()
         .register_type::<ContentBlock>()
         .register_type::<TurnSummary>()
-        .register_type::<ToolCallRecord>();
+        .register_type::<ToolCallRecord>()
+        .register_type::<SessionLifetimeUsage>();
 }

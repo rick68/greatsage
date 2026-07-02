@@ -35,6 +35,14 @@ pub struct SessionMetaFields {
     pub cwd: String,
 }
 
+/// Projected active-context fields from Session ECS (`SessionContextStats`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionContextStatsFields {
+    pub message_count: u32,
+    pub context_used: u64,
+    pub context_max: u64,
+}
+
 /// Sum token fields across projected turns.
 pub fn aggregate_turn_usage(rows: &[TurnUsageRow]) -> (usize, Usage) {
     let mut usage = Usage::default();
@@ -109,6 +117,17 @@ fn lifetime_usage_nonempty(lifetime: &Usage) -> bool {
     lifetime.input > 0 || lifetime.output > 0 || lifetime.cache_read > 0 || lifetime.cache_write > 0
 }
 
+fn context_max_from_stats_or_model(
+    context_stats: Option<&SessionContextStatsFields>,
+    model: &str,
+    coding_agent: Option<&CodingAgent>,
+) -> Option<u64> {
+    context_stats
+        .and_then(|stats| (stats.context_max > 0).then_some(stats.context_max))
+        .or_else(|| coding_agent.map(CodingAgent::context_window).map(u64::from))
+        .or_else(|| model_context_window(model))
+}
+
 /// Merge archived REPL lifetime totals with the active session's projected turns.
 pub fn session_totals_usage(lifetime: &Usage, turn_rows: &[TurnUsageRow]) -> Usage {
     let (_, current) = aggregate_turn_usage(turn_rows);
@@ -135,6 +154,7 @@ pub fn build_snapshot(
     turn_rows: &[TurnUsageRow],
     meta: Option<&SessionMetaFields>,
     model: &str,
+    context_stats: Option<&SessionContextStatsFields>,
     coding_agent: Option<&CodingAgent>,
     runtime: &tokio::runtime::Runtime,
     lifetime_usage: &Usage,
@@ -173,14 +193,27 @@ pub fn build_snapshot(
         }
     };
 
-    let (message_count, context_used, messages_compacted) = coding_agent
-        .map(|agent| block_on_session(runtime, yoagent_active_context(agent)))
-        .unwrap_or((0, usage_total_tokens(&usage), false));
+    let (message_count, context_used, messages_compacted) = if let Some(stats) = context_stats {
+        let messages_compacted = coding_agent
+            .map(|agent| {
+                block_on_session(runtime, async {
+                    let guard = agent.lock().await;
+                    messages_indicate_compaction(guard.messages())
+                })
+            })
+            .unwrap_or(false);
+        (
+            stats.message_count as usize,
+            stats.context_used,
+            messages_compacted,
+        )
+    } else {
+        coding_agent
+            .map(|agent| block_on_session(runtime, yoagent_active_context(agent)))
+            .unwrap_or((0, usage_total_tokens(&usage), false))
+    };
 
-    let context_max = coding_agent
-        .map(CodingAgent::context_window)
-        .map(u64::from)
-        .or_else(|| model_context_window(model));
+    let context_max = context_max_from_stats_or_model(context_stats, model, coding_agent);
 
     let show_compaction_note =
         messages_compacted || show_compacted_context_note(usage.input, context_used);

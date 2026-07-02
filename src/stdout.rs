@@ -3,9 +3,23 @@ use {
         app::{App, PostUpdate},
         ecs::message::{Message, MessageReader},
     },
-    colored::ColoredString,
+    colored::{ColoredString, Colorize},
     std::io::{self, Write},
 };
+
+/// REPL prompt prefix on a fresh line (`\n> `).
+pub fn prompt_symbol() -> String {
+    <&str as Colorize>::bold("\n> ").green().to_string()
+}
+
+/// REPL prompt prefix on the active input line (`> `).
+pub fn prompt_symbol_inline() -> String {
+    <&str as Colorize>::bold("> ").green().to_string()
+}
+
+/// BRP / external inject: show a submitted user prompt like REPL Enter (no channel send).
+#[derive(Debug, Message, Clone)]
+pub struct ExternPromptSubmitted(pub String);
 
 #[derive(Message)]
 pub struct StdoutMessage(String);
@@ -72,5 +86,6 @@ fn print_stdout_message(mut messages: MessageReader<StdoutMessage>) {
 
 pub(crate) fn stdout_plugin(app: &mut App) {
     app.add_message::<StdoutMessage>()
+        .add_message::<ExternPromptSubmitted>()
         .add_systems(PostUpdate, print_stdout_message);
 }

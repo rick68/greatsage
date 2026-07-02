@@ -2,14 +2,15 @@ use {
     super::{
         components::{
             ActiveToolCall, ContentBlock, ContentBlockEntity, ContentProvenance, IndexedContent,
-            SessionId, SessionIngestState, SessionRuntimeStatus, SessionSeq, ToolCallRecord,
-            TurnEntity, TurnSummary,
+            SessionContextStats, SessionId, SessionIngestState, SessionRuntimeStatus, SessionSeq,
+            ToolCallRecord, TurnEntity, TurnSummary,
         },
         content::{
             content_kind_label, content_primary_text, indexed_content_from_assistant_message,
             indexed_content_from_streamed_assistant, indexed_content_from_tool_start,
             indexed_content_from_turn_tool_result, indexed_content_from_user_message,
         },
+        context_stats::{PendingContextStatsSync, apply_context_stats, request_context_stats_sync},
         resources::{SessionLifetimeUsage, SessionManager},
     },
     crate::{
@@ -314,11 +315,13 @@ pub(crate) fn ingest_agent_events(
     mut commands: Commands,
     session_manager: Res<SessionManager>,
     mut lifetime_usage: ResMut<SessionLifetimeUsage>,
+    mut pending_context_stats: ResMut<PendingContextStatsSync>,
     mut session_roots: Query<(
         Entity,
         &SessionId,
         &mut SessionIngestState,
         &mut SessionRuntimeStatus,
+        &mut SessionContextStats,
     )>,
     mut session_seq: Query<&mut SessionSeq>,
     mut tool_records: Query<&mut ToolCallRecord>,
@@ -329,7 +332,9 @@ pub(crate) fn ingest_agent_events(
             continue;
         };
 
-        let Ok((_, _, mut ingest_state, mut runtime_status)) = session_roots.get_mut(root) else {
+        let Ok((_, _, mut ingest_state, mut runtime_status, mut context_stats)) =
+            session_roots.get_mut(root)
+        else {
             continue;
         };
 
@@ -341,6 +346,11 @@ pub(crate) fn ingest_agent_events(
             }
             AgentEvent::AgentEnd { messages } => {
                 runtime_status.set_idle();
+                if !messages.is_empty() {
+                    let context_max = context_stats.context_max;
+                    () = apply_context_stats(&mut context_stats, messages, context_max);
+                    () = request_context_stats_sync(&mut pending_context_stats, session_id);
+                }
                 if !ingest_state.turn_recorded()
                     && let Some(usage) = usage_from_agent_end(messages)
                 {
@@ -453,6 +463,7 @@ pub(crate) fn ingest_agent_events(
                         seq,
                     );
                     () = ingest_state.set_turn_recorded(true);
+                    () = request_context_stats_sync(&mut pending_context_stats, session_id);
                 }
                 () = ingest_state.finish_turn();
             }

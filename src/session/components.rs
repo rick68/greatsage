@@ -73,6 +73,19 @@ impl AgentId {
 #[cfg_attr(feature = "dev_native", reflect(Component))]
 pub struct SessionId(pub u64);
 
+/// Active-session context observability for `/tokens` Active context and MCP `world_query`.
+///
+/// Reset on each new session root (`spawn_session_root`); updated at turn boundaries.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default, Component)]
+#[cfg_attr(feature = "dev_native", derive(Reflect), reflect(Component))]
+pub(crate) struct SessionContextStats {
+    pub(crate) message_count: u32,
+    pub(crate) context_used: u64,
+    /// Model context window; `0` means unknown until agent or dashboard fallback fills it.
+    pub(crate) context_max: u64,
+}
+
 /// Non-secret session metadata on the session root entity.
 ///
 /// Fields are written by ingest/setup and read by BRP `world_query`, not in-process Rust.

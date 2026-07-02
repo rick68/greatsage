@@ -3,9 +3,12 @@ use {
         components::{AgentRuntimeState, SessionId, SessionRuntimeStatus},
         resources::{FocusedSession, SessionManager},
     },
-    crate::agents::{CodingAgentClearChannel, CodingAgentPromptChannel},
+    crate::{
+        agents::{CodingAgentClearChannel, CodingAgentPromptChannel},
+        stdout::ExternPromptSubmitted,
+    },
     bevy::{
-        ecs::{system::In, world::World},
+        ecs::{message::Messages, system::In, world::World},
         remote::{BrpError, BrpResult, RemotePlugin, error_codes},
     },
     serde_json::{Value, json},
@@ -63,6 +66,10 @@ fn prompt_from_params(params: Option<Value>) -> Result<String, BrpError> {
 
 pub fn session_send_prompt(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
     let prompt = prompt_from_params(params)?;
+
+    if let Some(mut pending) = world.get_resource_mut::<Messages<ExternPromptSubmitted>>() {
+        pending.write(ExternPromptSubmitted(prompt.clone()));
+    }
 
     let channel = world
         .get_resource::<CodingAgentPromptChannel>()

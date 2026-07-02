@@ -14,15 +14,18 @@ use {
         config_paths::resolved_config_path,
         providers::Provider,
         repl::{
-            prompt_symbol,
             startup_hints::{StartupHintInput, StartupHintPart, startup_hint_parts},
         },
         session::{
-            AgentId, FocusedSession, SessionId, SessionManager, SessionRuntimeStatus,
-            spawn_session_root, sync_session_meta, teardown_session,
+            AgentId, FocusedSession, SessionContextStats, SessionId, SessionManager,
+            SessionRuntimeStatus, spawn_session_root, sync_session_meta, teardown_session,
+            context_stats::{
+                PendingContextStatsSync, apply_context_stats, request_context_stats_sync,
+            },
+            ingest::ingest_agent_events,
         },
         setup,
-        stdout::StdoutMessage,
+        stdout::{StdoutMessage, prompt_symbol},
         tokio::AppCancelToken,
         utils::format_usage_line,
     },
@@ -36,7 +39,7 @@ use {
                 IntoScheduleConfigs, SystemCondition,
                 common_conditions::{not, resource_exists},
             },
-            system::Commands,
+            system::{Commands, Query},
             world::World,
         },
         platform::collections::HashMap,
@@ -432,7 +435,7 @@ impl std::ops::Deref for CodingAgentEvent {
 fn drain_session_clear_requests(
     clear_channel: Res<CodingAgentClearChannel>,
     agent_config: Res<AgentConfig>,
-    mut tokio_runtime: ResMut<TokioTasksRuntime>,
+    tokio_runtime: ResMut<TokioTasksRuntime>,
 ) {
     while clear_channel.receiver.try_recv().is_ok() {
         let config = agent_config.clone();
@@ -489,6 +492,16 @@ fn spawn_agent_task(
                 let mut agent = coding_agent.lock().await;
                 () = agent.finish().await;
             }
+
+            // `TurnEnd` ingest may sync before `finish()`; re-queue so PostUpdate reads committed messages.
+            () = ctx
+                .run_on_main_thread(move |ctx| {
+                    () = request_context_stats_sync(
+                        &mut *ctx.world.resource_mut::<PendingContextStatsSync>(),
+                        session_id,
+                    );
+                })
+                .await;
 
             ctx.run_on_main_thread(move |ctx| {
                 let world: &mut World = ctx.world;
@@ -869,6 +882,36 @@ fn shutdown_coding_agent(
     }
 }
 
+fn sync_pending_session_context_stats(
+    coding_agent: Option<Res<CodingAgent>>,
+    tokio_runtime: Res<TokioTasksRuntime>,
+    session_manager: Res<SessionManager>,
+    mut pending: ResMut<PendingContextStatsSync>,
+    mut roots: Query<&mut SessionContextStats>,
+) {
+    let Some(session_id) = pending.0.take() else {
+        return;
+    };
+    let Some(agent) = coding_agent else {
+        return;
+    };
+    if agent.session_id() != session_id {
+        return;
+    }
+    let Some(root) = session_manager.root_entity(session_id) else {
+        return;
+    };
+    let Ok(mut stats) = roots.get_mut(root) else {
+        return;
+    };
+
+    let context_max = u64::from(agent.context_window());
+    let messages = tokio_runtime
+        .runtime()
+        .block_on(async { agent.lock().await.messages().to_vec() });
+    () = apply_context_stats(&mut stats, &messages, context_max);
+}
+
 pub fn coding_agent_plugin(app: &mut App) {
     app.init_resource::<CodingAgentPromptChannel>()
         .add_systems(Startup, setup)
@@ -880,10 +923,7 @@ pub fn coding_agent_plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                (
-                    drain_session_clear_requests,
-                    spawn_agent_task,
-                )
+                (drain_session_clear_requests, spawn_agent_task)
                     .chain()
                     .run_if(
                         in_state(CodingAgentState::Idle)
@@ -894,6 +934,10 @@ pub fn coding_agent_plugin(app: &mut App) {
                         .and_then(resource_exists::<CodingAgentTask>),
                 ),
             ),
+        )
+        .add_systems(
+            PostUpdate,
+            sync_pending_session_context_stats.after(ingest_agent_events),
         )
         .add_systems(PostUpdate, shutdown_coding_agent);
 }

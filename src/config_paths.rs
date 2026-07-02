@@ -35,7 +35,9 @@ pub fn user_config_path() -> PathBuf {
 
 /// Legacy macOS path (`~/Library/Application Support/greatsage/config.toml`) for migration only.
 pub fn legacy_platform_config_path() -> Option<PathBuf> {
-    let legacy = dirs::config_dir()?.join(APP_CONFIG_SUBDIR).join(CONFIG_FILENAME);
+    let legacy = dirs::config_dir()?
+        .join(APP_CONFIG_SUBDIR)
+        .join(CONFIG_FILENAME);
     if legacy == user_config_path() {
         None
     } else {

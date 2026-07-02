@@ -1,7 +1,8 @@
 use {
     super::{
         components::{
-            SessionId, SessionIngestState, SessionMeta, SessionRuntimeStatus, SessionSeq,
+            SessionContextStats, SessionId, SessionIngestState, SessionMeta, SessionRuntimeStatus,
+            SessionSeq,
         },
         resources::SessionManager,
     },
@@ -23,6 +24,7 @@ pub(crate) fn spawn_session_root(world: &mut World) -> (SessionId, Entity) {
             SessionMeta::default(),
             SessionIngestState::default(),
             SessionRuntimeStatus::default(),
+            SessionContextStats::default(),
         ))
         .id();
     () = world

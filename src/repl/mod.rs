@@ -42,10 +42,11 @@ use {
         config::Config,
         project_context::assemble_system_prompt,
         session::{
-            SessionId, SessionLifetimeUsage, SessionManager, SessionMeta, TurnEntity, TurnSummary,
+            SessionContextStats, SessionId, SessionLifetimeUsage, SessionManager, SessionMeta,
+            TurnEntity, TurnSummary,
         },
         stdin::StdinKeyMessage,
-        stdout::StdoutMessage,
+        stdout::{ExternPromptSubmitted, StdoutMessage, prompt_symbol, prompt_symbol_inline},
         tokio::AppCancelToken,
     },
     bevy::{
@@ -63,7 +64,6 @@ use {
         event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     },
     bevy_tokio_tasks::TokioTasksRuntime,
-    colored::Colorize,
     dispatch::{
         AgentOp, AgentOpInvocation, DispatchResult, build_unknown_slash_feedback,
         command_name_and_args, dispatch_slash_command,
@@ -71,7 +71,9 @@ use {
     history::{DEFAULT_MAX_ENTRIES, ReplInputHistory, persist_repl_history},
     output::ReplOutputChannel,
     route::{CommandRoute, route_command},
-    session_dashboard::{SessionMetaFields, TurnUsageRow, build_snapshot},
+    session_dashboard::{
+        SessionContextStatsFields, SessionMetaFields, TurnUsageRow, build_snapshot,
+    },
     session_ops::{
         agent_message_stats, block_on_session, compact_agent_with_keep, load_messages,
         save_messages,
@@ -139,12 +141,26 @@ fn drain_repl_output(
     drained
 }
 
-pub fn prompt_symbol() -> String {
-    <&str as Colorize>::bold("\n> ").green().to_string()
-}
-
-pub(crate) fn prompt_symbol_inline() -> String {
-    <&str as Colorize>::bold("> ").green().to_string()
+fn echo_extern_submitted_prompt(
+    stdout: &mut MessageWriter<StdoutMessage>,
+    input: &mut ReplInputLocals,
+    prompt: &str,
+    history: &mut ReplInputHistory,
+    session_state: &mut ReplSessionState,
+) {
+    () = input.clear_tab_state();
+    () = input.clear_inline_hint(stdout);
+    stdout.write(StdoutMessage::from("\r"));
+    stdout.write(StdoutMessage::from(format!(
+        "{}{}",
+        prompt_symbol_inline(),
+        prompt
+    )));
+    stdout.write(StdoutMessage::clear_line_from_cursor_to_end());
+    stdout.write(StdoutMessage::newline());
+    () = history.push_submitted(prompt);
+    session_state.last_user_prompt = Some(prompt.to_owned());
+    () = input.clear_line();
 }
 
 fn spawn_agent_reinstall(tokio_runtime: &mut TokioTasksRuntime, agent_config: AgentConfig) {
@@ -541,6 +557,7 @@ fn history_keys_allowed(session_state: &ReplSessionState, input: &ReplInputLocal
 struct ReplEcsDashboard<'w, 's> {
     turns: Query<'w, 's, (&'static SessionId, &'static TurnSummary), With<TurnEntity>>,
     session_meta: Query<'w, 's, &'static SessionMeta>,
+    context_stats: Query<'w, 's, &'static SessionContextStats>,
     session_manager: Res<'w, SessionManager>,
     lifetime_usage: Res<'w, SessionLifetimeUsage>,
 }
@@ -566,6 +583,34 @@ impl ReplEcsDashboard<'_, '_> {
             started_at_ms: meta.started_at_ms,
             cwd: meta.cwd.clone(),
         })
+    }
+
+    fn context_stats_fields(&self, session_id: SessionId) -> Option<SessionContextStatsFields> {
+        let root = self.session_manager.root_entity(session_id)?;
+        let stats = self.context_stats.get(root).ok()?;
+        Some(SessionContextStatsFields {
+            message_count: stats.message_count,
+            context_used: stats.context_used,
+            context_max: stats.context_max,
+        })
+    }
+}
+
+fn echo_extern_prompt_submissions(
+    mut extern_prompts: MessageReader<ExternPromptSubmitted>,
+    mut input: Local<ReplInputLocals>,
+    mut stdout: MessageWriter<StdoutMessage>,
+    mut history: ResMut<ReplInputHistory>,
+    mut session_state: ResMut<ReplSessionState>,
+) {
+    for ExternPromptSubmitted(prompt) in extern_prompts.read() {
+        () = echo_extern_submitted_prompt(
+            &mut stdout,
+            &mut input,
+            &prompt,
+            &mut history,
+            &mut session_state,
+        );
     }
 }
 
@@ -827,13 +872,15 @@ fn read_stdin_stream(
                             .unwrap_or_default();
                         let turn_rows = ecs_dashboard.turn_rows(session_id);
                         let meta = ecs_dashboard.meta_fields(session_id);
+                        let context_stats = ecs_dashboard.context_stats_fields(session_id);
                         Some(build_snapshot(
                             &turn_rows,
                             meta.as_ref(),
                             &agent_config.model,
+                            context_stats.as_ref(),
                             coding_agent.as_deref(),
                             runtime,
-                            &ecs_dashboard.lifetime_usage.0,
+                            &ecs_dashboard.lifetime_usage.usage(),
                         ))
                     } else {
                         None
@@ -945,6 +992,9 @@ pub(crate) fn repl_plugin(app: &mut App) {
         PreUpdate,
         print_system_prompt.run_if(|cli: Res<Cli>| cli.print_system_prompt),
     )
-    .add_systems(Update, (ctrl_c, read_stdin_stream).chain())
+    .add_systems(
+        Update,
+        (ctrl_c, echo_extern_prompt_submissions, read_stdin_stream).chain(),
+    )
     .add_systems(PostUpdate, shutdown_repl);
 }

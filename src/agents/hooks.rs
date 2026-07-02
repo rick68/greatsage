@@ -2,11 +2,7 @@
 
 use {
     colored::Colorize,
-    std::{
-        process::Stdio,
-        sync::Arc,
-        time::Duration,
-    },
+    std::{process::Stdio, sync::Arc, time::Duration},
     tokio::process::{Child, Command},
     tokio_util::sync::CancellationToken,
     toml_edit::{DocumentMut, Item, Value},
@@ -173,9 +169,9 @@ async fn run_hook_shell(
     let mut cmd = Command::new("sh");
     configure_hook_command(&mut cmd, command, env_vars);
 
-    let mut child = cmd.spawn().map_err(|e| {
-        HookRunError::Message(format!("Failed to spawn hook '{hook_name}': {e}"))
-    })?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| HookRunError::Message(format!("Failed to spawn hook '{hook_name}': {e}")))?;
 
     let timeout = hook_run_timeout();
 

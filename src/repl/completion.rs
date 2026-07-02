@@ -6,10 +6,7 @@
 use {
     super::{
         dispatch::command_name_and_args,
-        help_data::{
-            KNOWN_COMMANDS, command_arg_hint as help_arg_hint,
-            command_short_description,
-        },
+        help_data::{KNOWN_COMMANDS, command_arg_hint as help_arg_hint, command_short_description},
     },
     crate::{agents::AgentConfig, providers::PROVIDER_SPECS},
     std::{

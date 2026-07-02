@@ -1,6 +1,7 @@
 mod components;
 pub(crate) use components::{
-    AgentId, SessionId, SessionMeta, SessionRuntimeStatus, TurnEntity, TurnSummary,
+    AgentId, SessionContextStats, SessionId, SessionMeta, SessionRuntimeStatus, TurnEntity,
+    TurnSummary,
 };
 
 #[cfg(feature = "dev_native")]
@@ -13,7 +14,8 @@ mod content;
 mod lifecycle;
 pub(crate) use lifecycle::{spawn_session_root, sync_session_meta, teardown_session};
 
-mod ingest;
+pub(crate) mod context_stats;
+pub(crate) mod ingest;
 mod prune;
 
 #[cfg(feature = "dev_native")]
@@ -47,6 +49,7 @@ pub fn session_plugin(app: &mut App) {
     app.init_resource::<SessionManager>()
         .init_resource::<FocusedSession>()
         .init_resource::<SessionLifetimeUsage>()
+        .init_resource::<context_stats::PendingContextStatsSync>()
         // After `config::setup` (PreStartup) inserts `Config`.
         .add_systems(Startup, init_session_limits)
         // Ingest must run after `CodingAgentTask` is removed so final `TurnEnd` /
