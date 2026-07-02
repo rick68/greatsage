@@ -4,6 +4,8 @@ pub(crate) use coding::{
     coding_agent_plugin, install_coding_agent, prepare_coding_agent_preserving_messages,
 };
 
+mod tool_display;
+
 use {
     crate::{
         cli::Cli,

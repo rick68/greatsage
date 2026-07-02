@@ -1,5 +1,6 @@
 use {
     crate::{
+        agents::tool_display::{format_tool_execution_summary, tool_checkmark_cursor_moves},
         agents::{AgentConfig, AgentConfigOptions, AgentsCancelToken},
         cli::Cli,
         config::{Config, McpConfig},
@@ -16,7 +17,7 @@ use {
         setup,
         stdout::StdoutMessage,
         tokio::AppCancelToken,
-        utils::{format_usage_line, truncate},
+        utils::format_usage_line,
     },
     bevy::{
         app::{App, AppExit, PostUpdate, Startup, Update},
@@ -31,6 +32,7 @@ use {
             system::Commands,
             world::World,
         },
+        platform::collections::HashMap,
         state::{
             app::AppExtStates,
             condition::in_state,
@@ -354,6 +356,10 @@ pub struct CodingAgentTask {
     /// Tracks whether we have already displayed thinking content during this response
     /// (via StreamDelta::Thinking). Used to avoid duplicating Content::Thinking in MessageEnd.
     thinking_shown: bool,
+    /// Maps `tool_call_id` → 0-based terminal line index for inline ✓/✗ placement.
+    tool_line_by_id: HashMap<String, usize>,
+    /// Next tool line index to assign on `ToolExecutionStart`.
+    next_tool_line: usize,
 }
 
 /// Bevy Message (buffered) — introduced as a distinct concept in Bevy 0.17.
@@ -572,54 +578,49 @@ fn handle_coding_agent_events(
                 }
             }
             AgentEvent::ToolExecutionStart {
-                tool_name, args, ..
+                tool_call_id,
+                tool_name,
+                args,
+                ..
             } => {
                 if *in_text {
                     *in_text = false;
                 }
-                let summary = match tool_name.as_str() {
-                    "bash" => {
-                        let cmd = args
-                            .get("command")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("...");
-                        format!("$ {}", truncate(cmd, 80))
-                    }
-                    "read_file" => {
-                        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("?");
-                        format!("read {path}")
-                    }
-                    "write_file" => {
-                        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("?");
-                        format!("write {path}")
-                    }
-                    "edit_file" => {
-                        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("?");
-                        format!("edit {path}")
-                    }
-                    "list_files" => {
-                        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-                        format!("ls {path}")
-                    }
-                    "search" => {
-                        let pat = args.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
-                        format!("search '{}'", truncate(pat, 60))
-                    }
-                    _ => tool_name.clone(),
-                };
+                let summary = format_tool_execution_summary(tool_name, args);
+                let line_idx = coding_agent_task.next_tool_line;
+                coding_agent_task
+                    .tool_line_by_id
+                    .insert(tool_call_id.clone(), line_idx);
+                coding_agent_task.next_tool_line += 1;
                 if !cli.no_hints {
                     stdout.write(StdoutMessage::from(<&str as Colorize>::yellow(
                         format!("\n  ▶ {summary}").as_str(),
                     )));
                 }
             }
-            AgentEvent::ToolExecutionEnd { is_error, .. } if !cli.no_hints => {
-                // Append the symbol without extra newline here; the caller (or next output)
-                // is responsible for spacing. This matches the original tool status style.
-                if *is_error {
-                    stdout.write(StdoutMessage::from(<&str as Colorize>::red(" ✗")));
+            AgentEvent::ToolExecutionEnd {
+                tool_call_id,
+                is_error,
+                ..
+            } if !cli.no_hints => {
+                let symbol = if *is_error {
+                    <&str as Colorize>::red(" ✗")
                 } else {
-                    stdout.write(StdoutMessage::from(<&str as Colorize>::green(" ✓")));
+                    <&str as Colorize>::green(" ✓")
+                };
+                let last_line_idx = coding_agent_task.next_tool_line.saturating_sub(1);
+                if let Some(line_idx) = coding_agent_task.tool_line_by_id.remove(tool_call_id) {
+                    let (cursor_up, cursor_down) =
+                        tool_checkmark_cursor_moves(line_idx, last_line_idx);
+                    if !cursor_up.is_empty() {
+                        stdout.write(StdoutMessage::from(cursor_up));
+                    }
+                    stdout.write(StdoutMessage::from(symbol));
+                    if !cursor_down.is_empty() {
+                        stdout.write(StdoutMessage::from(cursor_down));
+                    }
+                } else {
+                    stdout.write(StdoutMessage::from(symbol));
                 }
             }
             AgentEvent::MessageUpdate {
