@@ -17,6 +17,8 @@ pub struct StartupHintInput<'a> {
     pub mcp_len: usize,
     pub hooks_len: usize,
     pub needs_setup: bool,
+    /// Set when `--continue` restored `.greatsage/last-session.json`.
+    pub continue_message: Option<String>,
 }
 
 pub enum StartupHintPart {
@@ -71,6 +73,10 @@ pub fn startup_hint_dimmed_lines(input: &StartupHintInput<'_>) -> Vec<String> {
 
     if input.needs_setup {
         () = lines.push("  hint: no API key configured — run `greatsage setup`\n".to_owned());
+    }
+
+    if let Some(message) = &input.continue_message {
+        () = lines.push(format!("  {message}\n"));
     }
 
     lines

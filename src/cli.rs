@@ -59,6 +59,9 @@ pub struct Cli {
     /// Print the fully assembled system prompt and exit
     #[arg(long)]
     pub print_system_prompt: bool,
+    /// Resume last auto-saved REPL session from `.greatsage/last-session.json` in cwd
+    #[arg(short = 'c', long = "continue")]
+    pub continue_session: bool,
     /// Minimal mode (Claude Code parity): skip auto-loaded project context, memories,
     /// skills, and MCP; use explicit --skills / --mcp to opt back in
     #[arg(short = 'b', long)]

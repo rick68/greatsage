@@ -25,8 +25,8 @@ mod output;
 mod path_display;
 mod route;
 mod session_dashboard;
-mod session_ops;
-mod session_state;
+pub(crate) mod session_ops;
+pub(crate) mod session_state;
 pub(crate) mod startup_hints;
 mod suggest;
 mod tab;
@@ -43,7 +43,8 @@ use {
         project_context::assemble_system_prompt,
         session::{
             SessionContextStats, SessionId, SessionLifetimeUsage, SessionManager, SessionMeta,
-            TurnEntity, TurnSummary,
+            SessionRuntimeStatus, TurnEntity, TurnSummary,
+            context_stats::sync_context_stats_on_world,
         },
         stdin::StdinKeyMessage,
         stdout::{ExternPromptSubmitted, StdoutMessage, prompt_symbol, prompt_symbol_inline},
@@ -75,8 +76,9 @@ use {
         SessionContextStatsFields, SessionMetaFields, TurnUsageRow, build_snapshot,
     },
     session_ops::{
-        agent_message_stats, block_on_session, compact_agent_with_keep, load_messages,
-        save_messages,
+        agent_message_stats, block_on_session, compact_agent_with_keep,
+        last_user_prompt_from_messages, load_agent_from_file, save_messages,
+        try_auto_save_session,
     },
     session_state::ReplSessionState,
     std::{env, path::PathBuf},
@@ -108,6 +110,16 @@ fn print_system_prompt(
     exit.write_default();
 }
 
+fn persist_session_on_exit(coding_agent: Option<&CodingAgent>, runtime: &tokio::runtime::Runtime) {
+    let Some(agent) = coding_agent else {
+        return;
+    };
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if let Err(err) = block_on_session(runtime, try_auto_save_session(agent, &cwd)) {
+        eprintln!("auto-save error: {err}");
+    }
+}
+
 fn ctrl_c(
     mut commands: Commands,
     mut stdin_key_message: MessageReader<StdinKeyMessage>,
@@ -115,6 +127,8 @@ fn ctrl_c(
     mut stdout: MessageWriter<StdoutMessage>,
     mut history: ResMut<ReplInputHistory>,
     cli: Res<Cli>,
+    coding_agent: Option<Res<CodingAgent>>,
+    tokio_runtime: Res<TokioTasksRuntime>,
 ) {
     for StdinKeyMessage(KeyEvent {
         code, modifiers, ..
@@ -122,6 +136,7 @@ fn ctrl_c(
     {
         if *code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL) {
             () = persist_repl_history(history.as_mut(), &crate::config_paths::repl_history_path());
+            persist_session_on_exit(coding_agent.as_deref(), tokio_runtime.runtime());
             () = commands.remove_resource::<CodingAgentTask>();
             () = write_quit_farewell_if_enabled(&mut stdout, cli.as_ref());
             exit.write_default();
@@ -188,10 +203,36 @@ fn spawn_agent_op(
                 Some(agent) => save_messages(&agent, &path).await,
                 None => Err(String::from("No active agent.")),
             },
-            AgentOp::Load { path } => match coding_agent {
-                Some(agent) => load_messages(&agent, &path).await,
-                None => Err(String::from("No active agent.")),
-            },
+            AgentOp::Load { path, config } => {
+                match load_agent_from_file(&config, &path).await {
+                    Ok((new_agent, message, messages)) => {
+                        let model = config.model.clone();
+                        let provider = config.provider.to_string();
+                        let context_max = u64::from(new_agent.context_window());
+                        let last_prompt = last_user_prompt_from_messages(&messages);
+                        ctx.run_on_main_thread(move |main| {
+                            () = install_coding_agent(main.world, new_agent, model, provider);
+                            if let Some(agent) = main.world.get_resource::<CodingAgent>() {
+                                let session_id = agent.session_id();
+                                sync_context_stats_on_world(
+                                    main.world,
+                                    session_id,
+                                    &messages,
+                                    context_max,
+                                );
+                            }
+                            if let Some(mut state) =
+                                main.world.get_resource_mut::<ReplSessionState>()
+                            {
+                                state.last_user_prompt = last_prompt;
+                            }
+                        })
+                        .await;
+                        Ok(message)
+                    }
+                    Err(err) => Err(err),
+                }
+            }
             AgentOp::Compact { keep_recent } => match coding_agent {
                 Some(agent) => compact_agent_with_keep(&agent, keep_recent).await,
                 None => Err(String::from("No active agent.")),
@@ -558,6 +599,7 @@ struct ReplEcsDashboard<'w, 's> {
     turns: Query<'w, 's, (&'static SessionId, &'static TurnSummary), With<TurnEntity>>,
     session_meta: Query<'w, 's, &'static SessionMeta>,
     context_stats: Query<'w, 's, &'static SessionContextStats>,
+    runtime_status: Query<'w, 's, &'static SessionRuntimeStatus>,
     session_manager: Res<'w, SessionManager>,
     lifetime_usage: Res<'w, SessionLifetimeUsage>,
 }
@@ -593,6 +635,16 @@ impl ReplEcsDashboard<'_, '_> {
             context_used: stats.context_used,
             context_max: stats.context_max,
         })
+    }
+
+    fn is_processing(&self, session_id: SessionId) -> bool {
+        let Some(root) = self.session_manager.root_entity(session_id) else {
+            return false;
+        };
+        self.runtime_status
+            .get(root)
+            .ok()
+            .is_some_and(SessionRuntimeStatus::is_processing)
     }
 }
 
@@ -885,6 +937,10 @@ fn read_stdin_stream(
                     } else {
                         None
                     };
+                    let session_processing = coding_agent
+                        .as_ref()
+                        .map(|agent| ecs_dashboard.is_processing(agent.session_id()))
+                        .unwrap_or(false);
                     match dispatch_slash_command(
                         line,
                         agent_config.as_mut(),
@@ -895,12 +951,14 @@ fn read_stdin_stream(
                         runtime,
                         dashboard,
                         cli.bare,
+                        session_processing,
                     ) {
                         DispatchResult::Exit => {
                             () = persist_repl_history(
                                 history.as_mut(),
                                 &crate::config_paths::repl_history_path(),
                             );
+                            persist_session_on_exit(coding_agent.as_deref(), runtime);
                             () = write_quit_farewell_if_enabled(&mut stdout, cli.as_ref());
                             () = commands.remove_resource::<CodingAgentTask>();
                             exit.write_default();
@@ -973,9 +1031,15 @@ fn read_stdin_stream(
     }
 }
 
-fn shutdown_repl(mut messages: MessageReader<AppExit>, mut history: ResMut<ReplInputHistory>) {
+fn shutdown_repl(
+    mut messages: MessageReader<AppExit>,
+    mut history: ResMut<ReplInputHistory>,
+    coding_agent: Option<Res<CodingAgent>>,
+    tokio_runtime: Res<TokioTasksRuntime>,
+) {
     for _message in messages.read() {
         () = persist_repl_history(history.as_mut(), &crate::config_paths::repl_history_path());
+        persist_session_on_exit(coding_agent.as_deref(), tokio_runtime.runtime());
         let _ = crossterm::terminal::disable_raw_mode();
     }
 }

@@ -3,7 +3,7 @@
 use bevy::ecs::resource::Resource;
 
 #[derive(Default, Resource)]
-pub(super) struct ReplSessionState {
+pub(crate) struct ReplSessionState {
     pub last_user_prompt: Option<String>,
     pub pending_clear_confirm: bool,
 }

@@ -32,6 +32,8 @@ pub(super) struct ReplDispatchCtx<'a> {
     pub dashboard: Option<SessionDashboardSnapshot>,
     /// CLI `-b` / `--bare`: project context is not loaded into the agent.
     pub bare: bool,
+    /// Focused session is mid-agent-run; blocks `/load`.
+    pub session_processing: bool,
 }
 
 pub(super) enum AgentOp {
@@ -40,6 +42,7 @@ pub(super) enum AgentOp {
     },
     Load {
         path: PathBuf,
+        config: AgentConfig,
     },
     Compact {
         keep_recent: Option<usize>,
@@ -107,6 +110,7 @@ pub(super) fn dispatch_slash_command(
     runtime: &tokio::runtime::Runtime,
     dashboard: Option<SessionDashboardSnapshot>,
     bare: bool,
+    session_processing: bool,
 ) -> DispatchResult {
     let (cmd, args) = command_name_and_args(line);
     let route = route_command(cmd);
@@ -119,6 +123,7 @@ pub(super) fn dispatch_slash_command(
         runtime,
         dashboard,
         bare,
+        session_processing,
     };
 
     match route {

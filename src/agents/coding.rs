@@ -13,12 +13,20 @@ use {
         config::{Config, McpConfig},
         config_paths::resolved_config_path,
         providers::Provider,
-        repl::startup_hints::{StartupHintInput, StartupHintPart, startup_hint_parts},
+        repl::{
+            session_ops::{
+                block_on_session, last_session_path, last_user_prompt_from_messages,
+                load_agent_from_file, LAST_SESSION_REL_PATH,
+            },
+            session_state::ReplSessionState,
+            startup_hints::{StartupHintInput, StartupHintPart, startup_hint_parts},
+        },
         session::{
             AgentId, FocusedSession, SessionContextStats, SessionId, SessionManager,
             SessionRuntimeStatus,
             context_stats::{
                 PendingContextStatsSync, apply_context_stats, request_context_stats_sync,
+                sync_context_stats_on_world,
             },
             ingest::ingest_agent_events,
             spawn_session_root, sync_session_meta, teardown_session,
@@ -55,6 +63,7 @@ use {
         env, fs,
         io::{self, IsTerminal},
         ops::{Deref, DerefMut},
+        path::PathBuf,
         sync::Arc,
     },
     tokio::sync::Mutex,
@@ -334,11 +343,66 @@ fn setup(
     let model = agent_config.model.clone();
     let provider = agent_config.provider.to_string();
 
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let continue_path = last_session_path(&cwd);
+    let runtime = tokio_runtime.runtime();
+
+    let load_result = if cli.continue_session && continue_path.exists() {
+        Some(block_on_session(
+            runtime,
+            load_agent_from_file(&agent_config, &continue_path),
+        ))
+    } else {
+        None
+    };
+
+    let (coding_agent, continue_message, restored_messages, context_max) = match load_result {
+        Some(Ok((agent, _, messages))) => {
+            let count = messages.len();
+            let message = Some(format!(
+                "(continued from {LAST_SESSION_REL_PATH}, {count} messages)"
+            ));
+            let ctx_max = u64::from(agent.context_window());
+            (agent, message, messages, ctx_max)
+        }
+        Some(Err(err)) => {
+            eprintln!("continue error: {err}");
+            let agent = block_on_session(
+                runtime,
+                CodingAgent::new_with_agent_config(&agent_config),
+            );
+            let ctx_max = u64::from(agent.context_window());
+            (agent, None, Vec::new(), ctx_max)
+        }
+        None => {
+            let agent = block_on_session(
+                runtime,
+                CodingAgent::new_with_agent_config(&agent_config),
+            );
+            let ctx_max = u64::from(agent.context_window());
+            (agent, None, Vec::new(), ctx_max)
+        }
+    };
+
+    let last_prompt = last_user_prompt_from_messages(&restored_messages);
+
     tokio_runtime.spawn_background_task(move |mut ctx| async move {
-        let agent_config = AgentConfig::from_config(&config, opts);
-        let coding_agent = CodingAgent::new_with_agent_config(&agent_config).await;
         ctx.run_on_main_thread(move |ctx| {
             () = install_coding_agent(ctx.world, coding_agent, model, provider);
+            if !restored_messages.is_empty()
+                && let Some(agent) = ctx.world.get_resource::<CodingAgent>()
+            {
+                let session_id = agent.session_id();
+                () = sync_context_stats_on_world(
+                    ctx.world,
+                    session_id,
+                    &restored_messages,
+                    context_max,
+                );
+            }
+            if let Some(mut state) = ctx.world.get_resource_mut::<ReplSessionState>() {
+                state.last_user_prompt = last_prompt;
+            }
         })
         .await;
     });
@@ -370,6 +434,7 @@ fn setup(
             mcp_len: agent_config.mcp.len(),
             hooks_len: agent_config.shell_hooks.len(),
             needs_setup: setup::needs_setup(),
+            continue_message: continue_message.clone(),
         };
         for part in startup_hint_parts(&hint_input) {
             match part {

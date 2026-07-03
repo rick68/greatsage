@@ -1,6 +1,9 @@
 use {
-    super::components::{SessionContextStats, SessionId},
-    bevy::ecs::resource::Resource,
+    super::{
+        components::{SessionContextStats, SessionId},
+        resources::SessionManager,
+    },
+    bevy::ecs::{resource::Resource, world::World},
     yoagent::{context::total_tokens, types::AgentMessage},
 };
 
@@ -24,4 +27,21 @@ pub(crate) fn request_context_stats_sync(
     session_id: SessionId,
 ) {
     pending.0 = Some(session_id);
+}
+
+/// Apply restored yoagent messages to `SessionContextStats` after `/load` or `--continue`.
+pub(crate) fn sync_context_stats_on_world(
+    world: &mut World,
+    session_id: SessionId,
+    messages: &[AgentMessage],
+    context_max: u64,
+) {
+    let Some(root) = world.resource::<SessionManager>().root_entity(session_id) else {
+        return;
+    };
+    let mut query = world.query::<&mut SessionContextStats>();
+    let Ok(mut stats) = query.get_mut(world, root) else {
+        return;
+    };
+    () = apply_context_stats(&mut stats, messages, context_max);
 }

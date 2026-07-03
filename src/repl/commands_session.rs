@@ -119,11 +119,24 @@ fn save(args: &str) -> DispatchResult {
     })
 }
 
-fn load(args: &str) -> DispatchResult {
+fn load(args: &str, ctx: &ReplDispatchCtx<'_>) -> DispatchResult {
+    if ctx.session_processing {
+        return DispatchResult::Handled {
+            output: vec![String::from(
+                "(session is processing — wait for agent to finish before /load)",
+            )],
+            detail: Vec::new(),
+            redraw_prompt: true,
+            reinstall: None,
+        };
+    }
     let path = resolve_session_path(if args.is_empty() { None } else { Some(args) });
     DispatchResult::AgentOp(AgentOpInvocation {
         preamble: Vec::new(),
-        op: AgentOp::Load { path },
+        op: AgentOp::Load {
+            path,
+            config: ctx.agent_config.clone(),
+        },
     })
 }
 
@@ -251,7 +264,7 @@ pub(super) fn dispatch(
         CommandRoute::Provider => provider(args, ctx),
         CommandRoute::Model => model(args, ctx),
         CommandRoute::Save => save(args),
-        CommandRoute::Load => load(args),
+        CommandRoute::Load => load(args, ctx),
         CommandRoute::Compact => compact(args, ctx),
         CommandRoute::Retry => retry(ctx.session),
         _ => DispatchResult::Unknown,

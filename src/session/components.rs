@@ -148,6 +148,10 @@ impl SessionRuntimeStatus {
     pub(crate) fn set_idle(&mut self) {
         self.state = AgentRuntimeState::Idle;
     }
+
+    pub(crate) fn is_processing(&self) -> bool {
+        self.state == AgentRuntimeState::Processing
+    }
 }
 
 /// Per-session ingest cursor on the session root entity (not reflected — no secrets).

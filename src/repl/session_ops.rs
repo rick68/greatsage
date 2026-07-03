@@ -5,14 +5,17 @@
 
 use {
     super::path_display::session_status_path,
-    crate::agents::CodingAgent,
+    crate::agents::{AgentConfig, CodingAgent},
     std::{
         env, fs,
         future::Future,
         path::{Path, PathBuf},
     },
     tokio::{runtime::Runtime, task},
-    yoagent::context::{ContextConfig, compact_messages, total_tokens},
+    yoagent::{
+        context::{ContextConfig, compact_messages, total_tokens},
+        types::{AgentMessage, Content, Message},
+    },
 };
 
 /// Bridge sync REPL dispatch to async yoagent locks on the app Tokio runtime.
@@ -21,11 +24,50 @@ pub fn block_on_session<T>(runtime: &Runtime, future: impl Future<Output = T>) -
 }
 
 pub const DEFAULT_SESSION_FILENAME: &str = "greatsage-session.json";
+pub const LAST_SESSION_REL_PATH: &str = ".greatsage/last-session.json";
 
 fn default_session_path() -> PathBuf {
     env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(DEFAULT_SESSION_FILENAME)
+}
+
+/// Auto-save and `--continue` target under cwd.
+pub fn last_session_path(cwd: &Path) -> PathBuf {
+    cwd.join(LAST_SESSION_REL_PATH)
+}
+
+fn load_status_line(path: &Path, count: usize) -> String {
+    format!(
+        "(session loaded from {}, {count} messages)",
+        session_status_path(path, default_session_path()),
+    )
+}
+
+fn user_prompt_from_messages(messages: &[AgentMessage]) -> Option<String> {
+    messages.iter().rev().find_map(|msg| {
+        let AgentMessage::Llm(Message::User { content, .. }) = msg else {
+            return None;
+        };
+        let text: String = content
+            .iter()
+            .filter_map(|block| match block {
+                Content::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
+        }
+    })
+}
+
+/// Last non-slash user prompt for `/retry` after `/load` or `--continue`.
+pub fn last_user_prompt_from_messages(messages: &[AgentMessage]) -> Option<String> {
+    user_prompt_from_messages(messages)
 }
 
 /// Snapshot of yoagent message stats for `/clear` confirmation.
@@ -127,19 +169,44 @@ pub(super) async fn save_messages(agent: &CodingAgent, path: &Path) -> Result<St
     ))
 }
 
-pub(super) async fn load_messages(agent: &CodingAgent, path: &Path) -> Result<String, String> {
+/// Auto-save non-empty yoagent history for `--continue` (exit paths).
+pub async fn try_auto_save_session(agent: &CodingAgent, cwd: &Path) -> Result<(), String> {
+    let guard = agent.lock().await;
+    if guard.messages().is_empty() {
+        return Ok(());
+    }
+    let json = guard
+        .save_messages()
+        .map_err(|e| format!("serialize error: {e}"))?;
+    () = drop(guard);
+
+    let path = last_session_path(cwd);
+    if let Some(parent) = path.parent() {
+        () = fs::create_dir_all(parent).map_err(|e| format!("mkdir error: {e}"))?;
+    }
+    () = fs::write(&path, json).map_err(|e| format!("write error: {e}"))?;
+    Ok(())
+}
+
+/// Restore yoagent messages into a fresh agent (reinstall path for `/load` and `--continue`).
+pub async fn load_agent_from_file(
+    agent_config: &AgentConfig,
+    path: &Path,
+) -> Result<(CodingAgent, String, Vec<AgentMessage>), String> {
     let json = fs::read_to_string(path).map_err(|e| format!("read error: {e}"))?;
-    let mut guard = agent.lock().await;
-
-    () = guard
-        .restore_messages(&json)
-        .map_err(|e| format!("parse error: {e}"))?;
-
-    let count = guard.messages().len();
-
-    Ok(format!(
-        "(session loaded from {}, {count} messages)",
-        session_status_path(path, default_session_path()),
+    let agent = CodingAgent::new_with_agent_config(agent_config).await;
+    {
+        let mut guard = agent.lock().await;
+        () = guard
+            .restore_messages(&json)
+            .map_err(|e| format!("parse error: {e}"))?;
+    }
+    let messages = agent.lock().await.messages().to_vec();
+    let count = messages.len();
+    Ok((
+        agent,
+        load_status_line(path, count),
+        messages,
     ))
 }
 
