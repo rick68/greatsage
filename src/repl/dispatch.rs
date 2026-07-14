@@ -9,7 +9,7 @@
 use {
     super::{
         commands_help, commands_hooks, commands_info, commands_lifecycle, commands_memory,
-        commands_project, commands_session, commands_session_nav,
+        commands_project, commands_session, commands_session_nav, commands_shell,
         route::{CommandRoute, route_command},
         session_dashboard::SessionDashboardSnapshot,
         session_state::ReplSessionState,
@@ -36,7 +36,7 @@ pub(super) struct ReplDispatchCtx<'a> {
     pub session_processing: bool,
 }
 
-pub(super) enum AgentOp {
+pub(crate) enum AgentOp {
     Save {
         path: PathBuf,
     },
@@ -59,12 +59,12 @@ pub(super) enum AgentOp {
     },
 }
 
-pub(super) struct AgentOpInvocation {
+pub(crate) struct AgentOpInvocation {
     pub op: AgentOp,
     pub preamble: Vec<String>,
 }
 
-pub(super) enum DispatchResult {
+pub(crate) enum DispatchResult {
     Exit,
     Handled {
         output: Vec<String>,
@@ -106,7 +106,7 @@ pub(super) fn build_unknown_slash_feedback(line: &str) -> UnknownSlashFeedback {
     }
 }
 
-pub(super) fn dispatch_slash_command(
+pub(crate) fn dispatch_slash_command(
     line: &str,
     agent_config: &mut AgentConfig,
     session: &mut ReplSessionState,
@@ -143,6 +143,11 @@ pub(super) fn dispatch_slash_command(
         CommandRoute::Memories => commands_memory::dispatch_memories(args, &ctx),
         CommandRoute::Forget => commands_memory::dispatch_forget(args, &ctx),
         CommandRoute::Hooks => commands_hooks::dispatch_hooks(&ctx),
+        route if route.is_shell() => match route {
+            CommandRoute::Run => commands_shell::dispatch_run(args, &mut ctx),
+            CommandRoute::Cd => commands_shell::dispatch_cd(args, &mut ctx),
+            _ => DispatchResult::Unknown,
+        },
         route if route.is_info() => commands_info::dispatch(route, args, &ctx),
         CommandRoute::UnknownSlash | CommandRoute::NotSlash => DispatchResult::Unknown,
         _ => DispatchResult::Unknown,

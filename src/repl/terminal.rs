@@ -66,6 +66,60 @@ fn is_history_detail_output(output: &[String]) -> bool {
     })
 }
 
+/// `/cd` success or bare pwd: path (white); optional yoyo context note (dim).
+fn is_cd_output(output: &[String]) -> bool {
+    match output.len() {
+        1 => {
+            // bare `/cd` pwd or single path line — treat absolute paths as cd output
+            let line = output[0].as_str();
+            !line.is_empty()
+                && (line.starts_with('/') || line.starts_with('~') || line.starts_with("✗ "))
+        }
+        2 => output[1].starts_with("(project context was loaded"),
+        _ => false,
+    }
+}
+
+fn style_cd_line(line: &str) -> String {
+    if line.starts_with("✗ ") {
+        format!("  {line}").red().to_string()
+    } else if line.starts_with("(project context was loaded") {
+        format!("  {line}").dimmed().to_string()
+    } else {
+        // path expression: white (yoyo uncolored / white)
+        format!("  {line}").white().to_string()
+    }
+}
+
+/// `/run` / `!` result: stdout body white; exit summary white on success, red on failure.
+fn is_run_output(output: &[String]) -> bool {
+    output
+        .iter()
+        .any(|line| line.starts_with("✓ exit ") || line.starts_with("✗ exit "))
+}
+
+fn style_run_line(line: &str) -> String {
+    if line.is_empty() {
+        String::new()
+    } else if line.starts_with("✗ exit ") {
+        // non-zero exit: red (yoyo print_run_result)
+        format!("  {line}").red().to_string()
+    } else if line.starts_with("✓ exit ") {
+        // success exit: gray
+        format!("  {line}").dimmed().to_string()
+    } else if line.starts_with("💡 Command failed.") || line.starts_with("Command failed.") {
+        // yoyo failure tip — dim, two-space indent
+        format!("  {line}").dimmed().to_string()
+    } else if line.starts_with("    ") {
+        // failure re-preview under exit (yoyo 4-space indent already in line)
+        line.dimmed().to_string()
+    } else {
+        // command stdout/stderr body: white, no indent (yoyo streams flush-left)
+        // (stderr-as-red deferred — design.md §10 full stream colors)
+        line.white().to_string()
+    }
+}
+
 const HISTORY_DETAIL_INDENT: &str = "  ";
 const HISTORY_DETAIL_BODY_INDENT: &str = "    ";
 
@@ -351,6 +405,8 @@ pub(super) fn write_repl_handled_output(
     let init_output = is_init_output(output);
     let memory_output = is_memory_output(output);
     let history_detail = is_history_detail_output(output);
+    let cd_output = is_cd_output(output);
+    let run_output = is_run_output(output);
     let context_mode = context_output_mode(output);
     let mut in_session_totals = false;
     for line in output {
@@ -367,6 +423,10 @@ pub(super) fn write_repl_handled_output(
             style_memory_line(line)
         } else if history_detail {
             style_history_detail_line(line)
+        } else if cd_output {
+            style_cd_line(line)
+        } else if run_output {
+            style_run_line(line)
         } else if let Some(mode) = context_mode {
             style_context_line(line, mode)
         } else {

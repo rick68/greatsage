@@ -11,6 +11,8 @@ use {
 pub enum Command {
     /// Interactive configuration wizard
     Setup,
+    /// Full-screen TUI (Grok-aligned scrollback + prompt; Session ECS truth)
+    Tui,
 }
 
 #[derive(Clone, Debug, Parser, Resource)]
@@ -90,6 +92,12 @@ impl Cli {
             r#"
 **Subcommands:**
   setup    Interactive configuration wizard
+  tui      Full-screen TUI (scrollback + prompt; Session ECS)
+
+**Interactive entry:**
+  greatsage           Line-oriented REPL (default on a TTY)
+  greatsage tui       Full-screen TUI
+  greatsage -p TEXT   One-shot prompt (no interactive UI)
 "#,
         );
 

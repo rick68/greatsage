@@ -1,0 +1,32 @@
+//! TUI Bevy plugin registration — **must** use `bevy_ratatui::RatatuiPlugins`.
+
+use {
+    super::{
+        draw::draw_system,
+        input::input_system,
+        scrollback::{ScrollbackView, rebuild_scrollback_view},
+        state::TuiState,
+    },
+    crate::repl::session_state::ReplSessionState,
+    bevy::app::{App, Plugin, PostUpdate, PreUpdate, Update},
+    bevy_ratatui::RatatuiPlugins,
+};
+
+pub struct TuiPlugin;
+
+impl Plugin for TuiPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(RatatuiPlugins::default())
+            .init_resource::<TuiState>()
+            .init_resource::<ScrollbackView>()
+            .init_resource::<ReplSessionState>()
+            .add_systems(PreUpdate, input_system)
+            .add_systems(Update, rebuild_scrollback_view)
+            .add_systems(PostUpdate, draw_system);
+    }
+}
+
+/// Register the full-screen TUI stack (exclusive with line REPL plugins).
+pub fn tui_plugin(app: &mut App) {
+    app.add_plugins(TuiPlugin);
+}

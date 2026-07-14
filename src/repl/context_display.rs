@@ -221,8 +221,9 @@ pub fn context_list_lines(cwd: &Path, system_prompt: &str, bare: bool) -> Vec<St
             String::from("No project context files found."),
             String::from("Create GREATSAGE.md to give greatsage project context."),
             String::from(
-                "Also supports: .greatsage/instructions.md, AGENTS.md, CLAUDE.md, YOYO.md, .cursorrules, .github/copilot-instructions.md",
+                "Also supports: CLAUDE.md (compatibility alias), .greatsage/instructions.md",
             ),
+            String::from("Run /init to create a starter GREATSAGE.md."),
         ];
     }
 
@@ -261,8 +262,12 @@ fn reinstall_hint(system_prompt: &str, cwd: &Path) -> Option<String> {
     }
 
     if stale {
+        // Plain language for general users (no "system prompt" / "install agent").
+        // Internally: AgentConfig.system_prompt is a startup snapshot; /clear does not
+        // re-scan disk — only a full process restart rebuilds it from cwd files.
         Some(String::from(
-            "hint: disk has project files not in the installed prompt — reinstall agent to pick up changes",
+            "hint: these project files are not loaded into this chat yet — \
+quit and open greatsage again to use them",
         ))
     } else {
         None

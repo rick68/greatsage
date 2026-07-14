@@ -34,6 +34,8 @@ pub(super) enum CommandRoute {
     Jump,
     Marks,
     Export,
+    Run,
+    Cd,
     UnknownSlash,
     NotSlash,
 }
@@ -66,6 +68,10 @@ impl CommandRoute {
             Self::Status | Self::Tokens | Self::Cost | Self::Context
         )
     }
+
+    pub(super) const fn is_shell(self) -> bool {
+        matches!(self, Self::Run | Self::Cd)
+    }
 }
 
 pub(super) fn route_command(cmd: &str) -> CommandRoute {
@@ -92,13 +98,15 @@ pub(super) fn route_command(cmd: &str) -> CommandRoute {
         "/export" => CommandRoute::Export,
         // Project
         "/context" => CommandRoute::Context,
+        "/cd" => CommandRoute::Cd,
         "/init" => CommandRoute::Init,
-        "/remember" => CommandRoute::Remember,
-        "/memories" => CommandRoute::Memories,
-        "/forget" => CommandRoute::Forget,
+        "/run" => CommandRoute::Run,
         // AI
         "/model" => CommandRoute::Model,
         "/provider" => CommandRoute::Provider,
+        "/remember" => CommandRoute::Remember,
+        "/memories" => CommandRoute::Memories,
+        "/forget" => CommandRoute::Forget,
         // otherwise
         _ if cmd.starts_with('/') => CommandRoute::UnknownSlash,
         _ => CommandRoute::NotSlash,

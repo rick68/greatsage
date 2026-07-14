@@ -9,7 +9,7 @@ use {
             AgentConfig, AgentConfigOptions, AgentsCancelToken,
             hooks::{build_hook_registry, wrap_tools_with_hooks},
         },
-        cli::Cli,
+        cli::{Cli, Command},
         config::{Config, McpConfig},
         config_paths::resolved_config_path,
         providers::Provider,
@@ -417,31 +417,38 @@ fn setup(
         }
     });
 
-    if let Ok(cwd) = env::current_dir() {
-        let config_path = resolved_config_path(&cwd);
-        let hint_input = StartupHintInput {
-            bare: cli.bare,
-            no_hints: cli.no_hints,
-            print_system_prompt: cli.print_system_prompt,
-            cwd: &cwd,
-            config_path: &config_path,
-            model: &agent_config.model,
-            skills_len: agent_config.skills.len(),
-            mcp_len: agent_config.mcp.len(),
-            hooks_len: agent_config.shell_hooks.len(),
-            needs_setup: setup::needs_setup(),
-            continue_message: continue_message.clone(),
-        };
-        for part in startup_hint_parts(&hint_input) {
-            match part {
-                StartupHintPart::Banner(line) => stdout.write(StdoutMessage::from(line)),
-                StartupHintPart::Dimmed(line) => stdout.write(StdoutMessage::from(line.dimmed())),
+    // Line-REPL chrome (banner + `>` prompt) is stdout-oriented and must not run under
+    // `greatsage tui` — that path owns the terminal via bevy_ratatui alternate screen.
+    let is_tui = matches!(cli.command, Some(Command::Tui));
+    if !is_tui {
+        if let Ok(cwd) = env::current_dir() {
+            let config_path = resolved_config_path(&cwd);
+            let hint_input = StartupHintInput {
+                bare: cli.bare,
+                no_hints: cli.no_hints,
+                print_system_prompt: cli.print_system_prompt,
+                cwd: &cwd,
+                config_path: &config_path,
+                model: &agent_config.model,
+                skills_len: agent_config.skills.len(),
+                mcp_len: agent_config.mcp.len(),
+                hooks_len: agent_config.shell_hooks.len(),
+                needs_setup: setup::needs_setup(),
+                continue_message: continue_message.clone(),
             };
+            for part in startup_hint_parts(&hint_input) {
+                match part {
+                    StartupHintPart::Banner(line) => stdout.write(StdoutMessage::from(line)),
+                    StartupHintPart::Dimmed(line) => {
+                        stdout.write(StdoutMessage::from(line.dimmed()))
+                    }
+                };
+            }
         }
-    }
 
-    if cli.prompt.is_none() && !cli.print_system_prompt && io::stdin().is_terminal() {
-        stdout.write(StdoutMessage::from(prompt_symbol()));
+        if cli.prompt.is_none() && !cli.print_system_prompt && io::stdin().is_terminal() {
+            stdout.write(StdoutMessage::from(prompt_symbol()));
+        }
     }
 }
 

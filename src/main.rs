@@ -18,6 +18,7 @@ mod setup;
 mod stdin;
 mod stdout;
 mod tokio;
+mod tui;
 mod utils;
 
 use {
@@ -31,6 +32,7 @@ use {
         stdin::stdin_plugin,
         stdout::stdout_plugin,
         tokio::tokio_plugin,
+        tui::tui_plugin,
     },
     bevy::{
         app::{App, AppExit, PluginGroup, ScheduleRunnerPlugin, Update},
@@ -148,7 +150,13 @@ fn main() {
     let one_shot = prompt_arg
         .as_ref()
         .is_some_and(|prompt| !prompt.trim().is_empty());
-    let interactive_repl = !one_shot && io::stdin().is_terminal();
+    let want_tui = matches!(cli.command, Some(Command::Tui));
+    let interactive_tty = !one_shot && io::stdin().is_terminal();
+
+    if want_tui && !io::stdin().is_terminal() {
+        eprintln!("greatsage tui requires an interactive terminal (TTY).");
+        std::process::exit(1);
+    }
 
     let mut app = App::new();
     app.insert_resource::<Cli>(cli.clone()).add_plugins((
@@ -192,7 +200,10 @@ fn main() {
                 )),
             ),
         );
-    } else if interactive_repl {
+    } else if interactive_tty && want_tui {
+        // Full-screen TUI only — do not register line-REPL stdin/raw-mode stack.
+        app.add_plugins(tui_plugin);
+    } else if interactive_tty {
         app.add_plugins((stdin_plugin, repl_plugin));
     } else if cfg!(feature = "dev_native") {
         if !cli.no_hints {

@@ -13,10 +13,13 @@ mod commands_memory;
 mod commands_project;
 mod commands_session;
 mod commands_session_nav;
+mod commands_shell;
 mod completion;
 mod context_display;
 mod cost;
 mod dispatch;
+/// Re-export for `tui` slash forwarding (same dispatch as line REPL).
+pub(crate) use dispatch::{DispatchResult, dispatch_slash_command};
 pub(crate) mod help_data;
 mod history;
 mod model_cmd;
@@ -29,7 +32,9 @@ mod session_dashboard;
 mod session_nav;
 pub(crate) mod session_ops;
 pub(crate) mod session_state;
+mod shell_run;
 pub(crate) mod startup_hints;
+
 mod suggest;
 mod tab;
 mod terminal;
@@ -67,10 +72,7 @@ use {
         event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     },
     bevy_tokio_tasks::TokioTasksRuntime,
-    dispatch::{
-        AgentOp, AgentOpInvocation, DispatchResult, build_unknown_slash_feedback,
-        command_name_and_args, dispatch_slash_command,
-    },
+    dispatch::{AgentOp, AgentOpInvocation, build_unknown_slash_feedback, command_name_and_args},
     history::{DEFAULT_MAX_ENTRIES, ReplInputHistory, persist_repl_history},
     output::ReplOutputChannel,
     route::{CommandRoute, route_command},
@@ -934,8 +936,21 @@ fn read_stdin_stream(
                 () = input.clear_tab_state();
                 () = input.clear_inline_hint(&mut stdout);
                 () = history.push_submitted(&input.content);
-                if input.content.trim_start().starts_with('/') {
-                    let line = input.content.trim_start();
+                // Bang `!<cmd>` is a shell shortcut (yoyo): rewrite to `/run` before slash dispatch.
+                let submitted = input.content.trim_start();
+                let slash_line: Option<String> =
+                    if let Some(body) = shell_run::parse_bang_command(submitted) {
+                        Some(if body.is_empty() {
+                            String::from("/run")
+                        } else {
+                            format!("/run {body}")
+                        })
+                    } else if submitted.starts_with('/') {
+                        Some(String::from(submitted))
+                    } else {
+                        None
+                    };
+                if let Some(line) = slash_line.as_deref() {
                     let runtime = tokio_runtime.runtime();
                     let (cmd, _) = command_name_and_args(line);
                     let route = route_command(cmd);

@@ -1,7 +1,7 @@
 mod components;
 pub(crate) use components::{
-    AgentId, SessionContextStats, SessionId, SessionMeta, SessionRuntimeStatus, TurnEntity,
-    TurnSummary,
+    AgentId, ContentBlock, ContentBlockEntity, SessionContextStats, SessionId, SessionMeta,
+    SessionRuntimeStatus, TurnEntity, TurnSummary,
 };
 
 #[cfg(feature = "dev_native")]
