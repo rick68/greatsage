@@ -193,7 +193,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
         usage: "/save [path] — Save session to file",
         detail: concat!(
             "Usage:\n",
-            "  /save\t\t\tSave to yoyo-session.json\n",
+            "  /save\t\t\tSave to greatsage-session.json\n",
             "  /save <path>\t\tSave to specified path\n",
             "\n",
             "Saves the full conversation history to a JSON file so it can\n",
@@ -216,7 +216,7 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
         usage: "/load [path] — default greatsage-session.json",
         detail: concat!(
             "Usage:\n",
-            "  /load\t\t\tLoad from yoyo-session.json\n",
+            "  /load\t\t\tLoad from greatsage-session.json\n",
             "  /load <path>\t\tLoad from specified path\n",
             "\n",
             "Restores a previously saved session, replacing the current\n",
@@ -508,11 +508,6 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
             "creates a GREATSAGE.md file with context information. This file\n",
             "is automatically loaded in future sessions to give the AI\n",
             "project awareness.\n",
-            "\n",
-            "If GREATSAGE.md already exists, /init refuses to overwrite it.\n",
-            "If only YOYO.md or CLAUDE.md is present, /init suggests renaming\n",
-            "that file to GREATSAGE.md (yoyo-aligned compat behavior).\n",
-            "Use /context to inspect loaded project files.\n",
         ),
     },
     ReplCommand {
