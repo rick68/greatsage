@@ -523,7 +523,10 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
         category: ReplCommandCategory::Project,
         args: "<cmd>",
         arg_hint: "<command>",
-        help_extra_lines: &[],
+        help_extra_lines: &[HelpUsageExtraLine {
+            label: "!<cmd>",
+            summary: "Shortcut for /run",
+        }],
         usage: "/run <command> — Run a shell command (no AI, no tokens)",
         detail: concat!(
             "Usage:\n",
