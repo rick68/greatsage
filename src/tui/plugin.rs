@@ -3,12 +3,15 @@
 use {
     super::{
         draw::draw_system,
-        input::input_system,
+        input::{input_system, poll_shell_system},
         scrollback::{ScrollbackView, rebuild_scrollback_view},
         state::TuiState,
     },
     crate::repl::session_state::ReplSessionState,
-    bevy::app::{App, Plugin, PostUpdate, PreUpdate, Update},
+    bevy::{
+        app::{App, Plugin, PostUpdate, PreUpdate, Update},
+        ecs::schedule::IntoScheduleConfigs,
+    },
     bevy_ratatui::RatatuiPlugins,
 };
 
@@ -20,7 +23,7 @@ impl Plugin for TuiPlugin {
             .init_resource::<TuiState>()
             .init_resource::<ScrollbackView>()
             .init_resource::<ReplSessionState>()
-            .add_systems(PreUpdate, input_system)
+            .add_systems(PreUpdate, (poll_shell_system, input_system).chain())
             .add_systems(Update, rebuild_scrollback_view)
             .add_systems(PostUpdate, draw_system);
     }

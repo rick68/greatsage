@@ -475,6 +475,8 @@ pub struct CodingAgentTask {
     thinking_trailing_newline: bool,
     /// Strip leading `\n` from the next non-empty text delta (after thinking divider gap).
     pending_text_after_thinking_gap: bool,
+    /// User pressed Ctrl+C: drop further stream/tool stdout (orphan deltas after `^C`).
+    pub suppress_stream: bool,
 }
 
 /// Bevy Message (buffered) — introduced as a distinct concept in Bevy 0.17.
@@ -636,7 +638,32 @@ fn extract_thinking_from_final_content(content: &[Content]) -> Option<String> {
     })
 }
 
+/// User Ctrl+C / tool cancel — no red `error: Cancelled` / aborted spam after `^C`.
+fn is_user_or_tool_cancel(message: &LlmMessage) -> bool {
+    let LlmMessage::Assistant {
+        stop_reason,
+        error_message,
+        ..
+    } = message
+    else {
+        return false;
+    };
+    if matches!(stop_reason, StopReason::Aborted) {
+        return true;
+    }
+    if !matches!(stop_reason, StopReason::Error) {
+        return false;
+    }
+    error_message.as_deref().is_some_and(|m| {
+        let lower = m.to_lowercase();
+        lower.contains("cancel") || lower.contains("abort")
+    })
+}
+
 fn assistant_error_line(message: &LlmMessage) -> Option<String> {
+    if is_user_or_tool_cancel(message) {
+        return None;
+    }
     let LlmMessage::Assistant {
         stop_reason,
         error_message,
@@ -650,7 +677,8 @@ fn assistant_error_line(message: &LlmMessage) -> Option<String> {
             let detail = error_message.as_deref().unwrap_or("unknown provider error");
             Some(format!("\n  error: {detail}\n").red().to_string())
         }
-        StopReason::Aborted => Some("\n  error: request aborted\n".red().to_string()),
+        // Aborted: silent (user already saw `^C`)
+        StopReason::Aborted => None,
         _ => None,
     }
 }
@@ -734,8 +762,28 @@ fn handle_coding_agent_events(
             tool_batch_index_by_id,
             thinking_trailing_newline,
             pending_text_after_thinking_gap,
+            suppress_stream,
             ..
         } = coding_agent_task.as_mut();
+
+        // After user Ctrl+C (`^C`): replace leftover stream with silence (blank after ^C\n).
+        if *suppress_stream {
+            match event {
+                AgentEvent::AgentEnd { .. } => {
+                    // Fall through to AgentEnd cleanup below.
+                }
+                AgentEvent::TurnEnd { message, .. } => {
+                    if let AgentMessage::Llm(llm_message) = &message
+                        && is_user_or_tool_cancel(llm_message)
+                    {
+                        continue;
+                    }
+                    // Non-cancel TurnEnd while suppressed: still skip stdout.
+                    continue;
+                }
+                _ => continue,
+            }
+        }
 
         match event {
             AgentEvent::InputRejected { reason } => {
@@ -747,6 +795,7 @@ fn handle_coding_agent_events(
             }
             AgentEvent::TurnEnd { message, .. } => {
                 if let AgentMessage::Llm(llm_message) = &message
+                    && !is_user_or_tool_cancel(llm_message)
                     && let Some(line) = assistant_error_line(llm_message)
                         .or_else(|| empty_assistant_hint(llm_message))
                 {
@@ -897,6 +946,7 @@ fn handle_coding_agent_events(
                 }
             }
             AgentEvent::AgentEnd { messages } => {
+                let was_suppressed = *suppress_stream;
                 // Reset thinking-related state at the end of a turn
                 if *in_thinking {
                     *in_thinking = false;
@@ -906,6 +956,13 @@ fn handle_coding_agent_events(
                 () = tool_batch_index_by_id.clear();
                 *thinking_trailing_newline = false;
                 *pending_text_after_thinking_gap = false;
+                *suppress_stream = false;
+                *in_text = false;
+
+                if was_suppressed {
+                    // Already printed `^C\n` — no error/usage spam.
+                    continue;
+                }
 
                 let mut usage_printed = false;
                 for msg in messages.iter().rev() {
@@ -913,6 +970,11 @@ fn handle_coding_agent_events(
                         continue;
                     };
                     if !usage_printed {
+                        // Ctrl+C / tool cancel: no error lines and no usage footer.
+                        if is_user_or_tool_cancel(llm_message) {
+                            usage_printed = true;
+                            continue;
+                        }
                         if let Some(line) = assistant_error_line(llm_message)
                             .or_else(|| empty_assistant_hint(llm_message))
                         {

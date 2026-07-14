@@ -27,6 +27,26 @@ use {
     bevy_tokio_tasks::TokioTasksRuntime,
 };
 
+/// Finish `/run` / `!` when the worker completes (shared shell path with line REPL).
+pub fn poll_shell_system(mut session: ResMut<ReplSessionState>, mut state: ResMut<TuiState>) {
+    let Some(handle) = session.active_shell.as_ref() else {
+        return;
+    };
+    let Some(result) = crate::repl::shell_run::try_recv_shell_result(handle) else {
+        return;
+    };
+    session.active_shell = None;
+    if result.success {
+        session.last_failed_run = None;
+    } else {
+        session.last_failed_run = Some(result.clone());
+    }
+    let (output, detail) = crate::repl::shell_run::format_run_output_lines(&result);
+    for line in output.into_iter().chain(detail) {
+        () = state.push_status(line);
+    }
+}
+
 pub fn input_system(
     mut keys: MessageReader<KeyMessage>,
     mut state: ResMut<TuiState>,
@@ -48,8 +68,63 @@ pub fn input_system(
         if message.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(message.code, KeyCode::Char('c') | KeyCode::Char('C'))
         {
+            // Second consecutive Ctrl+C → Leave app.
+            if session.ctrl_c_armed {
+                if let Some(handle) = session.active_shell.as_mut() {
+                    crate::repl::shell_run::request_shell_interrupt(handle);
+                    crate::repl::shell_run::request_shell_interrupt(handle);
+                }
+                session.active_shell = None;
+                session.ctrl_c_armed = false;
+                exit.write_default();
+                return;
+            }
+
+            if let Some(handle) = session.active_shell.as_mut() {
+                () = crate::repl::shell_run::request_shell_interrupt(handle);
+                session.ctrl_c_armed = true;
+                continue;
+            }
+
+            let agent_busy = runtime_status.iter().any(|s| s.is_processing());
+            if agent_busy {
+                if let Some(agent_res) = coding_agent.as_ref() {
+                    let agent: crate::agents::CodingAgent = (**agent_res).clone();
+                    tokio_runtime.runtime().spawn(async move {
+                        let guard = agent.lock().await;
+                        guard.abort();
+                    });
+                }
+                session.ctrl_c_armed = true;
+                () = state.push_status("^C");
+                continue;
+            }
+
+            // Idle first press: cancel line + arm
+            () = state.clear_prompt();
+            session.ctrl_c_armed = true;
+            continue;
+        }
+
+        if message.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(message.code, KeyCode::Char('d') | KeyCode::Char('D'))
+        {
+            if let Some(handle) = session.active_shell.as_ref() {
+                crate::repl::shell_run::request_shell_stdin_eof(handle);
+                continue;
+            }
+            session.ctrl_c_armed = false;
             exit.write_default();
             return;
+        }
+
+        if session.active_shell.is_some() {
+            continue;
+        }
+
+        // Other keys clear double-Ctrl+C arm
+        if session.ctrl_c_armed {
+            session.ctrl_c_armed = false;
         }
 
         match message.code {
@@ -131,6 +206,7 @@ pub fn input_system(
                         &prompt_channel,
                     );
                 } else {
+                    session.ctrl_c_armed = false;
                     () = prompt_channel.send_prompt(line);
                     () = state.push_status("prompt sent");
                 }
@@ -185,6 +261,7 @@ fn handle_slash(
         }
         DispatchResult::ResendPrompt { prompt, hint } => {
             () = state.push_status(hint);
+            session.ctrl_c_armed = false;
             () = prompt_channel.send_prompt(prompt);
         }
         DispatchResult::AgentOp(inv) => {

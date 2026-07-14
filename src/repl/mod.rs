@@ -32,7 +32,7 @@ mod session_dashboard;
 mod session_nav;
 pub(crate) mod session_ops;
 pub(crate) mod session_state;
-mod shell_run;
+pub(crate) mod shell_run;
 pub(crate) mod startup_hints;
 
 mod suggest;
@@ -124,28 +124,132 @@ fn persist_session_on_exit(coding_agent: Option<&CodingAgent>, runtime: &tokio::
     }
 }
 
+/// Ctrl+C: first press = interrupt/abort/cancel-line + arm; second = Leave app.
+/// Idle first-press cancel-line needs input buffer → [`read_stdin_stream`].
 fn ctrl_c(
     mut commands: Commands,
     mut stdin_key_message: MessageReader<StdinKeyMessage>,
     mut exit: MessageWriter<AppExit>,
     mut stdout: MessageWriter<StdoutMessage>,
     mut history: ResMut<ReplInputHistory>,
+    mut session_state: ResMut<ReplSessionState>,
     cli: Res<Cli>,
     coding_agent: Option<Res<CodingAgent>>,
+    mut agent_task: Option<ResMut<CodingAgentTask>>,
     tokio_runtime: Res<TokioTasksRuntime>,
 ) {
     for StdinKeyMessage(KeyEvent {
-        code, modifiers, ..
+        code,
+        modifiers,
+        kind,
+        ..
     }) in stdin_key_message.read()
     {
-        if *code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL) {
-            () = persist_repl_history(history.as_mut(), &crate::config_paths::repl_history_path());
-            persist_session_on_exit(coding_agent.as_deref(), tokio_runtime.runtime());
-            () = commands.remove_resource::<CodingAgentTask>();
-            () = write_quit_farewell_if_enabled(&mut stdout, cli.as_ref());
-            exit.write_default();
+        if *kind != KeyEventKind::Press && *kind != KeyEventKind::Repeat {
+            continue;
         }
+        if *code != KeyCode::Char('c') || !modifiers.contains(KeyModifiers::CONTROL) {
+            continue;
+        }
+
+        // Second consecutive Ctrl+C → Leave app (always).
+        if session_state.ctrl_c_armed {
+            leave_repl_app(
+                &mut commands,
+                &mut exit,
+                &mut stdout,
+                history.as_mut(),
+                cli.as_ref(),
+                coding_agent.as_deref(),
+                &tokio_runtime,
+                Some(session_state.as_mut()),
+            );
+            continue;
+        }
+
+        // First press: shell → interrupt + arm
+        if let Some(handle) = session_state.active_shell.as_mut() {
+            shell_run::request_shell_interrupt(handle);
+            session_state.ctrl_c_armed = true;
+            continue;
+        }
+
+        // First press: agent mid-turn → abort + ^C + arm
+        if agent_task.is_some() {
+            if let Some(task) = agent_task.as_mut() {
+                task.suppress_stream = true;
+            }
+            if let Some(agent_res) = coding_agent.as_ref() {
+                let agent: CodingAgent = (**agent_res).clone();
+                tokio_runtime.runtime().spawn(async move {
+                    let guard = agent.lock().await;
+                    guard.abort();
+                });
+            }
+            session_state.ctrl_c_armed = true;
+            stdout.write(StdoutMessage::from(
+                <&str as colored::Colorize>::bright_white("^C").to_string(),
+            ));
+            stdout.write(StdoutMessage::newline());
+            continue;
+        }
+
+        // Idle first press: cancel line in read_stdin_stream (sets arm there too).
     }
+}
+
+/// Shared Leave-app path (Ctrl+D idle, or second Ctrl+C).
+/// Idempotent: `ctrl_c` and `read_stdin_stream` may both see the same key.
+fn leave_repl_app(
+    commands: &mut Commands,
+    exit: &mut MessageWriter<AppExit>,
+    stdout: &mut MessageWriter<StdoutMessage>,
+    history: &mut ReplInputHistory,
+    cli: &Cli,
+    coding_agent: Option<&CodingAgent>,
+    tokio_runtime: &TokioTasksRuntime,
+    session_state: Option<&mut ReplSessionState>,
+) {
+    if let Some(state) = session_state {
+        if state.leaving {
+            return;
+        }
+        state.leaving = true;
+        if let Some(handle) = state.active_shell.as_mut() {
+            // Ensure child tree dies on way out.
+            shell_run::request_shell_interrupt(handle);
+            shell_run::request_shell_interrupt(handle); // hard if soft already sent
+        }
+        state.active_shell = None;
+        state.ctrl_c_armed = false;
+    }
+    () = persist_repl_history(history, &crate::config_paths::repl_history_path());
+    persist_session_on_exit(coding_agent, tokio_runtime.runtime());
+    () = commands.remove_resource::<CodingAgentTask>();
+    () = write_quit_farewell_if_enabled(stdout, cli);
+    exit.write_default();
+}
+
+/// Finish an in-flight `/run` / `!` when the worker posts a result.
+fn poll_active_shell_run(
+    mut session_state: ResMut<ReplSessionState>,
+    mut stdout: MessageWriter<StdoutMessage>,
+) {
+    let Some(handle) = session_state.active_shell.as_ref() else {
+        return;
+    };
+    let Some(result) = shell_run::try_recv_shell_result(handle) else {
+        return;
+    };
+    session_state.active_shell = None;
+    if result.success {
+        session_state.last_failed_run = None;
+    } else {
+        session_state.last_failed_run = Some(result.clone());
+    }
+    let (output, detail) = shell_run::format_run_output_lines(&result);
+    () = write_repl_handled_output(&mut stdout, &output, &detail);
+    stdout.write(StdoutMessage::from(prompt_symbol()));
 }
 
 fn drain_repl_output(
@@ -716,12 +820,13 @@ fn read_stdin_stream(
     ecs_dashboard: ReplEcsDashboard,
 ) {
     let agent_busy = agent_task.is_some();
-    if input.was_agent_busy && !agent_busy {
+    // Do not redraw `>` while leaving (double Ctrl+C / Ctrl+D).
+    if input.was_agent_busy && !agent_busy && !session_state.leaving {
         () = restore_prompt_with_input(&mut stdout, &mut input, agent_config.as_ref());
     }
     input.was_agent_busy = agent_busy;
 
-    if drain_repl_output(&output_channel, &mut stdout) {
+    if !session_state.leaving && drain_repl_output(&output_channel, &mut stdout) {
         stdout.write(StdoutMessage::from(prompt_symbol()));
         if input.content.is_empty() {
             () = input.reset_line();
@@ -739,6 +844,83 @@ fn read_stdin_stream(
         ..
     }) in stdin_key_messages.read()
     {
+        // Already leaving: ignore further keys (no prompt redraw).
+        if session_state.leaving {
+            continue;
+        }
+
+        // ── Ctrl+C / Ctrl+D by state ──
+        if (*kind == KeyEventKind::Press || *kind == KeyEventKind::Repeat)
+            && *code == KeyCode::Char('c')
+            && modifiers.contains(KeyModifiers::CONTROL)
+        {
+            // Shell / agent first press is owned by `ctrl_c` (sets `ctrl_c_armed` this
+            // frame). Must not treat that same key as a second press here, or we Leave
+            // app on a single Ctrl+C during LLM response.
+            if session_state.active_shell.is_some() || agent_task.is_some() {
+                continue;
+            }
+            // Idle / post-agent: second Ctrl+C while armed → Leave app.
+            if session_state.ctrl_c_armed {
+                leave_repl_app(
+                    &mut commands,
+                    &mut exit,
+                    &mut stdout,
+                    history.as_mut(),
+                    cli.as_ref(),
+                    coding_agent.as_deref(),
+                    tokio_runtime.as_ref(),
+                    Some(session_state.as_mut()),
+                );
+                return;
+            }
+            // Idle first press: cancel line + arm (second Ctrl+C leaves).
+            () = input.clear_tab_state();
+            () = input.clear_inline_hint(&mut stdout);
+            stdout.write(StdoutMessage::newline());
+            stdout.write(StdoutMessage::from(prompt_symbol()));
+            () = input.clear_line();
+            session_state.ctrl_c_armed = true;
+            continue;
+        }
+
+        if *kind == KeyEventKind::Press
+            && *code == KeyCode::Char('d')
+            && modifiers.contains(KeyModifiers::CONTROL)
+        {
+            if session_state.active_shell.is_some() {
+                if let Some(handle) = session_state.active_shell.as_ref() {
+                    shell_run::request_shell_stdin_eof(handle);
+                }
+                continue;
+            }
+            // Idle: Leave app (yoyo ReadlineError::Eof)
+            () = leave_repl_app(
+                &mut commands,
+                &mut exit,
+                &mut stdout,
+                history.as_mut(),
+                cli.as_ref(),
+                coding_agent.as_deref(),
+                tokio_runtime.as_ref(),
+                Some(session_state.as_mut()),
+            );
+            return;
+        }
+
+        // Any other key clears the double-Ctrl+C arm.
+        if session_state.ctrl_c_armed
+            && *kind == KeyEventKind::Press
+            && !(*code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL))
+        {
+            session_state.ctrl_c_armed = false;
+        }
+
+        // Active shell: ignore other line editing / Enter until run finishes.
+        if session_state.active_shell.is_some() {
+            continue;
+        }
+
         if agent_task.is_some()
             && handle_agent_busy_key(
                 *code,
@@ -1001,7 +1183,7 @@ fn read_stdin_stream(
                                 history.as_mut(),
                                 &crate::config_paths::repl_history_path(),
                             );
-                            persist_session_on_exit(coding_agent.as_deref(), runtime);
+                            () = persist_session_on_exit(coding_agent.as_deref(), runtime);
                             () = write_quit_farewell_if_enabled(&mut stdout, cli.as_ref());
                             () = commands.remove_resource::<CodingAgentTask>();
                             exit.write_default();
@@ -1024,6 +1206,9 @@ fn read_stdin_stream(
                             if redraw_prompt {
                                 stdout.write(StdoutMessage::from(prompt_symbol()));
                                 () = input.clear_line();
+                            } else if session_state.active_shell.is_some() {
+                                // `/run` started: clear the submitted line; prompt returns on poll.
+                                () = input.clear_line();
                             }
                         }
                         DispatchResult::AwaitClearConfirm { prompt } => {
@@ -1035,6 +1220,7 @@ fn read_stdin_stream(
                         DispatchResult::ResendPrompt { prompt, hint } => {
                             stdout.write(StdoutMessage::newline());
                             () = write_repl_response(&mut stdout, &hint);
+                            session_state.ctrl_c_armed = false;
                             () = prompt_channel.send_prompt(prompt);
                             stdout.write(StdoutMessage::newline());
                             () = input.clear_line();
@@ -1064,6 +1250,7 @@ fn read_stdin_stream(
                     }
                 } else {
                     session_state.last_user_prompt = Some(input.content.clone());
+                    session_state.ctrl_c_armed = false;
                     () = prompt_channel.send_prompt(input.content.clone());
                     stdout.write(StdoutMessage::newline());
                     () = input.clear_line();
@@ -1101,7 +1288,13 @@ pub(crate) fn repl_plugin(app: &mut App) {
     )
     .add_systems(
         Update,
-        (ctrl_c, echo_extern_prompt_submissions, read_stdin_stream).chain(),
+        (
+            ctrl_c,
+            poll_active_shell_run,
+            echo_extern_prompt_submissions,
+            read_stdin_stream,
+        )
+            .chain(),
     )
     .add_systems(PostUpdate, shutdown_repl);
 }

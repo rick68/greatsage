@@ -99,13 +99,26 @@ fn is_run_output(output: &[String]) -> bool {
 }
 
 fn style_run_line(line: &str) -> String {
+    use crate::repl::shell_run::RUN_STDIN_EOF_BODY_PREFIX;
+
     if line.is_empty() {
-        String::new()
-    } else if line.starts_with("✗ exit ") {
+        return String::new();
+    }
+
+    // Ctrl+D: body lines before exit are red; prefix is stripped from display.
+    if let Some(body) = line.strip_prefix(RUN_STDIN_EOF_BODY_PREFIX) {
+        return if body.is_empty() {
+            String::new()
+        } else {
+            body.red().to_string()
+        };
+    }
+
+    if line.starts_with("✗ exit ") {
         // non-zero exit: red (yoyo print_run_result)
         format!("  {line}").red().to_string()
     } else if line.starts_with("✓ exit ") {
-        // success exit: gray
+        // success exit: gray (including after Ctrl+D — body is red, exit stays dim)
         format!("  {line}").dimmed().to_string()
     } else if line.starts_with("💡 Command failed.") || line.starts_with("Command failed.") {
         // yoyo failure tip — dim, two-space indent
@@ -503,9 +516,11 @@ pub(super) fn write_repl_candidate_list_truncated(
 
 pub(super) fn write_quit_farewell_if_enabled(stdout: &mut MessageWriter<StdoutMessage>, cli: &Cli) {
     if !cli.print_system_prompt && !cli.no_hints {
-        stdout.write(StdoutMessage::newline());
-        stdout.write(StdoutMessage::newline());
-        () = write_repl_response(stdout, "bye 👋");
+        // Blank line before dim bye, one newline after — process exits (no trailing blank + `>`).
+        stdout.write(StdoutMessage::from(format!(
+            "\n\n{}\n",
+            <&str as colored::Colorize>::dimmed("  bye 👋")
+        )));
     }
 }
 

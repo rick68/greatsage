@@ -1,7 +1,7 @@
 //! Per-REPL-session state (e.g. last user prompt for `/retry`, in-memory bookmarks).
 
 use {
-    super::shell_run::LastFailedRun,
+    super::shell_run::{ActiveShellHandle, LastFailedRun},
     bevy::{ecs::resource::Resource, platform::collections::HashMap},
 };
 
@@ -15,4 +15,11 @@ pub(crate) struct ReplSessionState {
     /// Last non-zero `/run` / `!` result for a future `/fix` change.
     /// Process-scoped only — not persisted across process exit.
     pub last_failed_run: Option<LastFailedRun>,
+    /// In-flight `/run` / `!` (worker thread); Ctrl+C interrupts without AppExit.
+    pub active_shell: Option<ActiveShellHandle>,
+    /// After any first Ctrl+C (shell / agent / idle cancel-line): next Ctrl+C Leaves app.
+    /// Cleared on new prompt, normal typing, or Leave app.
+    pub ctrl_c_armed: bool,
+    /// Leave app in progress — skip duplicate farewell and post-agent `>` redraw.
+    pub leaving: bool,
 }

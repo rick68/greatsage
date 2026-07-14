@@ -21,8 +21,17 @@ use {
     tokio_util::sync::CancellationToken,
 };
 
+/// Signals that should Leave app (process exit).
+///
+/// **SIGINT is registered but must NOT AppExit**: in raw-mode REPL, Ctrl+C is
+/// also delivered as a key event and is handled by state (shell interrupt /
+/// agent abort / cancel line / second-press leave). If SIGINT always wrote
+/// `AppExit`, LLM responses would kill the whole process on first Ctrl+C.
 #[cfg(not(target_os = "windows"))]
-const SIGNALS: &[i32] = &[SIGHUP, SIGINT, SIGQUIT, SIGTERM];
+const EXIT_SIGNALS: &[i32] = &[SIGHUP, SIGQUIT, SIGTERM];
+
+#[cfg(not(target_os = "windows"))]
+const HANDLED_SIGNALS: &[i32] = &[SIGHUP, SIGINT, SIGQUIT, SIGTERM];
 
 #[derive(Default, Deref, Resource)]
 pub struct AppCancelToken(Arc<CancellationToken>);
@@ -33,11 +42,19 @@ fn setup_signal_handles(runtime: ResMut<TokioTasksRuntime>, cancel: Res<AppCance
     runtime.spawn_background_task(|mut ctx| async move {
         #[cfg(not(target_os = "windows"))]
         {
-            let mut signals = Signals::new(SIGNALS).unwrap();
+            let mut signals = Signals::new(HANDLED_SIGNALS).unwrap();
 
             loop {
                 tokio::select! {
-                    Some(_signal) = signals.next(), if cfg!(not(target_os = "windows")) => {
+                    Some(signal) = signals.next(), if cfg!(not(target_os = "windows")) => {
+                        // Swallow SIGINT so the default terminate disposition does not
+                        // kill the process; REPL/TUI key paths own Ctrl+C semantics.
+                        if signal == SIGINT {
+                            continue;
+                        }
+                        if !EXIT_SIGNALS.contains(&signal) {
+                            continue;
+                        }
                         () = ctx.run_on_main_thread(|ctx| {
                             let world = ctx.world;
                             if io::stdout().is_terminal() {
