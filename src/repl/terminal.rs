@@ -99,14 +99,22 @@ fn is_run_output(output: &[String]) -> bool {
 }
 
 fn style_run_line(line: &str) -> String {
-    use crate::repl::shell_run::RUN_STDIN_EOF_BODY_PREFIX;
+    use crate::repl::shell_run::{RUN_STDERR_BODY_PREFIX, RUN_STDIN_EOF_BODY_PREFIX};
 
     if line.is_empty() {
         return String::new();
     }
 
-    // Ctrl+D: body lines before exit are red; prefix is stripped from display.
+    // Channel / Ctrl+D markers: stripped from display; body painted red.
+    // Check EOF first, then stderr (format never stacks both).
     if let Some(body) = line.strip_prefix(RUN_STDIN_EOF_BODY_PREFIX) {
+        return if body.is_empty() {
+            String::new()
+        } else {
+            body.red().to_string()
+        };
+    }
+    if let Some(body) = line.strip_prefix(RUN_STDERR_BODY_PREFIX) {
         return if body.is_empty() {
             String::new()
         } else {
@@ -127,8 +135,7 @@ fn style_run_line(line: &str) -> String {
         // failure re-preview under exit (yoyo 4-space indent already in line)
         line.dimmed().to_string()
     } else {
-        // command stdout/stderr body: white, no indent (yoyo streams flush-left)
-        // (stderr-as-red deferred — design.md §10 full stream colors)
+        // stdout body: white, no indent (yoyo streams flush-left)
         line.white().to_string()
     }
 }
@@ -406,6 +413,15 @@ pub(super) fn write_repl_detail_line(
     } else {
         stdout.write(StdoutMessage::from(styled));
     }
+}
+
+/// Live `/run` body line (always uses run channel colors; no need for exit footer yet).
+pub(super) fn write_repl_shell_stream_line(
+    stdout: &mut MessageWriter<StdoutMessage>,
+    line: &str,
+) {
+    let styled = style_run_line(line);
+    stdout.write(StdoutMessage::from(format!("{styled}\n")));
 }
 
 pub(super) fn write_repl_handled_output(

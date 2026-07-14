@@ -27,23 +27,50 @@ use {
     bevy_tokio_tasks::TokioTasksRuntime,
 };
 
-/// Finish `/run` / `!` when the worker completes (shared shell path with line REPL).
+/// Live-stream body + finish footer for `/run` / `!` (shared path with line REPL).
 pub fn poll_shell_system(mut session: ResMut<ReplSessionState>, mut state: ResMut<TuiState>) {
-    let Some(handle) = session.active_shell.as_ref() else {
+    let Some(handle) = session.active_shell.as_mut() else {
         return;
     };
+
+    while let Some(live) = crate::repl::shell_run::try_recv_shell_live(handle) {
+        handle.body_streamed = true;
+        let line = crate::repl::shell_run::format_live_stream_line(&live);
+        // TUI status lines are plain text; strip style markers for display.
+        let display = line
+            .strip_prefix(crate::repl::shell_run::RUN_STDERR_BODY_PREFIX)
+            .or_else(|| line.strip_prefix(crate::repl::shell_run::RUN_STDIN_EOF_BODY_PREFIX))
+            .unwrap_or(line.as_str());
+        () = state.push_status(display.to_string());
+    }
+
     let Some(result) = crate::repl::shell_run::try_recv_shell_result(handle) else {
         return;
     };
+    while let Some(live) = crate::repl::shell_run::try_recv_shell_live(handle) {
+        handle.body_streamed = true;
+        let line = crate::repl::shell_run::format_live_stream_line(&live);
+        let display = line
+            .strip_prefix(crate::repl::shell_run::RUN_STDERR_BODY_PREFIX)
+            .or_else(|| line.strip_prefix(crate::repl::shell_run::RUN_STDIN_EOF_BODY_PREFIX))
+            .unwrap_or(line.as_str());
+        () = state.push_status(display.to_string());
+    }
+    let body_streamed = handle.body_streamed;
     session.active_shell = None;
     if result.success {
         session.last_failed_run = None;
     } else {
         session.last_failed_run = Some(result.clone());
     }
-    let (output, detail) = crate::repl::shell_run::format_run_output_lines(&result);
+    let (output, detail) =
+        crate::repl::shell_run::format_run_output_lines_ex(&result, body_streamed);
     for line in output.into_iter().chain(detail) {
-        () = state.push_status(line);
+        let display = line
+            .strip_prefix(crate::repl::shell_run::RUN_STDERR_BODY_PREFIX)
+            .or_else(|| line.strip_prefix(crate::repl::shell_run::RUN_STDIN_EOF_BODY_PREFIX))
+            .unwrap_or(line.as_str());
+        () = state.push_status(display.to_string());
     }
 }
 
@@ -83,6 +110,7 @@ pub fn input_system(
             if let Some(handle) = session.active_shell.as_mut() {
                 () = crate::repl::shell_run::request_shell_interrupt(handle);
                 session.ctrl_c_armed = true;
+                () = state.push_status("^C");
                 continue;
             }
 

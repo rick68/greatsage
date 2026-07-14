@@ -90,6 +90,7 @@ use {
     terminal::{
         erase_ahead_echo, redraw_input_line, replace_input_line_in_place, sync_inline_hint,
         write_quit_farewell_if_enabled, write_repl_handled_output, write_repl_response,
+        write_repl_shell_stream_line,
         write_repl_response_lines, write_unknown_slash_feedback,
     },
     unicode_width::UnicodeWidthChar,
@@ -167,10 +168,14 @@ fn ctrl_c(
             continue;
         }
 
-        // First press: shell → interrupt + arm
+        // First press: shell → interrupt + white ^C + arm (exit footer comes when child ends)
         if let Some(handle) = session_state.active_shell.as_mut() {
             shell_run::request_shell_interrupt(handle);
             session_state.ctrl_c_armed = true;
+            stdout.write(StdoutMessage::from(
+                <&str as colored::Colorize>::bright_white("^C").to_string(),
+            ));
+            stdout.write(StdoutMessage::newline());
             continue;
         }
 
@@ -230,24 +235,39 @@ fn leave_repl_app(
     exit.write_default();
 }
 
-/// Finish an in-flight `/run` / `!` when the worker posts a result.
+/// Live-stream body + finish footer for in-flight `/run` / `!` (yoyo line stream).
 fn poll_active_shell_run(
     mut session_state: ResMut<ReplSessionState>,
     mut stdout: MessageWriter<StdoutMessage>,
 ) {
-    let Some(handle) = session_state.active_shell.as_ref() else {
+    let Some(handle) = session_state.active_shell.as_mut() else {
         return;
     };
+
+    // Drain live lines every frame while the child is still running.
+    while let Some(live) = shell_run::try_recv_shell_live(handle) {
+        handle.body_streamed = true;
+        let line = shell_run::format_live_stream_line(&live);
+        () = write_repl_shell_stream_line(&mut stdout, &line);
+    }
+
     let Some(result) = shell_run::try_recv_shell_result(handle) else {
         return;
     };
+    // Drain any lines that arrived in the same tick as the result.
+    while let Some(live) = shell_run::try_recv_shell_live(handle) {
+        handle.body_streamed = true;
+        let line = shell_run::format_live_stream_line(&live);
+        () = write_repl_shell_stream_line(&mut stdout, &line);
+    }
+    let body_streamed = handle.body_streamed;
     session_state.active_shell = None;
     if result.success {
         session_state.last_failed_run = None;
     } else {
         session_state.last_failed_run = Some(result.clone());
     }
-    let (output, detail) = shell_run::format_run_output_lines(&result);
+    let (output, detail) = shell_run::format_run_output_lines_ex(&result, body_streamed);
     () = write_repl_handled_output(&mut stdout, &output, &detail);
     stdout.write(StdoutMessage::from(prompt_symbol()));
 }

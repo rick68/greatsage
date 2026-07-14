@@ -12,7 +12,7 @@ pub(crate) struct ReplSessionState {
     /// Named yoagent `save_messages()` JSON snapshots for `/mark` / `/jump` / `/marks`.
     /// Session-scoped only — not persisted across process exit.
     pub bookmarks: HashMap<String, String>,
-    /// Last non-zero `/run` / `!` result for a future `/fix` change.
+    /// Last non-zero `/run` / `!` result (for a future yoyo-aligned `/fix` / health change).
     /// Process-scoped only — not persisted across process exit.
     pub last_failed_run: Option<LastFailedRun>,
     /// In-flight `/run` / `!` (worker thread); Ctrl+C interrupts without AppExit.

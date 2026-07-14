@@ -5,7 +5,7 @@
 
 use std::{
     env,
-    io::Read,
+    io::{BufRead, BufReader, Read},
     path::PathBuf,
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
     thread::{self, JoinHandle},
@@ -15,7 +15,7 @@ use std::{
 /// Result of running a shell command via `/run` or `!`.
 #[derive(Debug, Clone)]
 pub(crate) struct RunResult {
-    /// Original command string (kept for future `/fix`).
+    /// Original command string (kept for future yoyo-aligned `/fix` / health context).
     #[allow(dead_code)]
     pub command: String,
     pub exit_code: i32,
@@ -27,7 +27,7 @@ pub(crate) struct RunResult {
     pub stdin_eof: bool,
 }
 
-/// Process-scoped snapshot stored for a future `/fix` change.
+/// Process-scoped snapshot of the last non-zero `/run` / `!` (future `/fix` / health).
 pub(crate) type LastFailedRun = RunResult;
 
 /// Control messages for an in-flight shell worker.
@@ -38,14 +38,25 @@ pub(crate) enum ShellCtrl {
     CloseStdin,
 }
 
+/// One live line from a running `/run` / `!` (yoyo streams as the child prints).
+#[derive(Debug, Clone)]
+pub(crate) struct ShellLiveLine {
+    pub is_stderr: bool,
+    pub text: String,
+}
+
 /// Handle for a non-blocking shell run (Send + Sync for `ReplSessionState`).
 pub(crate) struct ActiveShellHandle {
     #[allow(dead_code)] // kept for future status lines / `/fix` context
     pub command: String,
     pub result_rx: crossbeam_channel::Receiver<RunResult>,
+    /// Line-oriented live output (stdout/stderr) while the child is still running.
+    pub live_rx: crossbeam_channel::Receiver<ShellLiveLine>,
     pub ctrl_tx: crossbeam_channel::Sender<ShellCtrl>,
     /// True after the first soft interrupt was requested (second Ctrl+C → hard).
     pub soft_sent: bool,
+    /// True once at least one live line was drained to the operator (skip re-print body).
+    pub body_streamed: bool,
 }
 
 /// Parse a bang line after optional leading whitespace.
@@ -63,8 +74,8 @@ pub(crate) fn parse_bang_command(line: &str) -> Option<&str> {
 struct ShellChild {
     child: Child,
     stdin: Option<ChildStdin>,
-    stdout_reader: Option<JoinHandle<Vec<u8>>>,
-    stderr_reader: Option<JoinHandle<Vec<u8>>>,
+    stdout_reader: Option<JoinHandle<String>>,
+    stderr_reader: Option<JoinHandle<String>>,
     command: String,
     start: Instant,
     /// Set when the operator sent Ctrl+D (close stdin write end).
@@ -102,16 +113,46 @@ fn signal_process_group(pid: u32, soft: bool) {
     }
 }
 
-fn spawn_reader(mut pipe: impl Read + Send + 'static) -> JoinHandle<Vec<u8>> {
+/// Stream pipe line-by-line (yoyo `BufReader` parity), collect full text for `RunResult`.
+///
+/// Sends each line on `live_tx` as soon as a newline arrives so `/run top` updates
+/// while the child is still running (not only after exit).
+fn spawn_line_reader(
+    pipe: impl Read + Send + 'static,
+    live_tx: crossbeam_channel::Sender<ShellLiveLine>,
+    is_stderr: bool,
+) -> JoinHandle<String> {
     thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = pipe.read_to_end(&mut buf);
-        buf
+        let mut reader = BufReader::new(pipe);
+        let mut collected = String::new();
+        let mut line_buf = String::new();
+        loop {
+            line_buf.clear();
+            match reader.read_line(&mut line_buf) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let text = line_buf.trim_end_matches(['\r', '\n']).to_string();
+                    let _ = live_tx.send(ShellLiveLine {
+                        is_stderr,
+                        text: text.clone(),
+                    });
+                    if !collected.is_empty() {
+                        collected.push('\n');
+                    }
+                    () = collected.push_str(&text);
+                }
+                Err(_) => break,
+            }
+        }
+        collected
     })
 }
 
 /// Spawn `sh -c <cmd>` with piped stdio and (Unix) own process group.
-fn spawn_shell_child(cmd: &str) -> Result<ShellChild, String> {
+fn spawn_shell_child(
+    cmd: &str,
+    live_tx: crossbeam_channel::Sender<ShellLiveLine>,
+) -> Result<ShellChild, String> {
     let mut command = Command::new("sh");
     command
         .args(["-c", cmd])
@@ -142,8 +183,8 @@ fn spawn_shell_child(cmd: &str) -> Result<ShellChild, String> {
     Ok(ShellChild {
         child,
         stdin,
-        stdout_reader: Some(spawn_reader(stdout)),
-        stderr_reader: Some(spawn_reader(stderr)),
+        stdout_reader: Some(spawn_line_reader(stdout, live_tx.clone(), false)),
+        stderr_reader: Some(spawn_line_reader(stderr, live_tx, true)),
         command: cmd.to_string(),
         start: Instant::now(),
         stdin_eof: false,
@@ -172,19 +213,16 @@ fn apply_ctrl(shell: &mut ShellChild, ctrl: ShellCtrl) {
     }
 }
 
-fn join_pipe(handle: Option<JoinHandle<Vec<u8>>>) -> String {
-    handle
-        .and_then(|h| h.join().ok())
-        .map(|b| String::from_utf8_lossy(&b).into_owned())
-        .unwrap_or_default()
+fn join_line_reader(handle: Option<JoinHandle<String>>) -> String {
+    handle.and_then(|h| h.join().ok()).unwrap_or_default()
 }
 
 fn try_poll_shell(shell: &mut ShellChild) -> Option<RunResult> {
     match shell.child.try_wait() {
         Ok(Some(status)) => {
             shell.stdin.take();
-            let stdout = join_pipe(shell.stdout_reader.take());
-            let stderr = join_pipe(shell.stderr_reader.take());
+            let stdout = join_line_reader(shell.stdout_reader.take());
+            let stderr = join_line_reader(shell.stderr_reader.take());
             let (exit_code, success) = exit_code_from_status(status);
             Some(RunResult {
                 command: shell.command.clone(),
@@ -199,8 +237,8 @@ fn try_poll_shell(shell: &mut ShellChild) -> Option<RunResult> {
         Ok(None) => None,
         Err(e) => {
             shell.stdin.take();
-            let stdout = join_pipe(shell.stdout_reader.take());
-            let mut stderr = join_pipe(shell.stderr_reader.take());
+            let stdout = join_line_reader(shell.stdout_reader.take());
+            let mut stderr = join_line_reader(shell.stderr_reader.take());
             if stderr.is_empty() {
                 stderr = format!("error waiting for command: {e}");
             } else {
@@ -219,15 +257,16 @@ fn try_poll_shell(shell: &mut ShellChild) -> Option<RunResult> {
     }
 }
 
-/// Start a shell run on a worker thread. Returns a handle for poll / interrupt.
+/// Start a shell run on a worker thread. Returns a handle for poll / interrupt / live lines.
 pub(crate) fn start_shell_run(cmd: &str) -> Result<ActiveShellHandle, String> {
     let (result_tx, result_rx) = crossbeam_channel::bounded(1);
+    let (live_tx, live_rx) = crossbeam_channel::unbounded();
     let (ctrl_tx, ctrl_rx) = crossbeam_channel::unbounded();
     let command = cmd.to_string();
     let command_for_handle = command.clone();
 
     let _worker = thread::spawn(move || {
-        let mut shell = match spawn_shell_child(&command) {
+        let mut shell = match spawn_shell_child(&command, live_tx) {
             Ok(s) => s,
             Err(e) => {
                 let _ = result_tx.send(RunResult {
@@ -258,8 +297,10 @@ pub(crate) fn start_shell_run(cmd: &str) -> Result<ActiveShellHandle, String> {
     Ok(ActiveShellHandle {
         command: command_for_handle,
         result_rx,
+        live_rx,
         ctrl_tx,
         soft_sent: false,
+        body_streamed: false,
     })
 }
 
@@ -281,6 +322,24 @@ pub(crate) fn request_shell_stdin_eof(handle: &ActiveShellHandle) {
 /// Non-blocking: take finished result if ready.
 pub(crate) fn try_recv_shell_result(handle: &ActiveShellHandle) -> Option<RunResult> {
     handle.result_rx.try_recv().ok()
+}
+
+/// Non-blocking: drain one live stdout/stderr line (call in a loop each frame).
+pub(crate) fn try_recv_shell_live(handle: &ActiveShellHandle) -> Option<ShellLiveLine> {
+    handle.live_rx.try_recv().ok()
+}
+
+/// Format a live stream line for `style_run_line` (stderr marker when needed).
+pub(crate) fn format_live_stream_line(line: &ShellLiveLine) -> String {
+    if line.is_stderr {
+        if line.text.is_empty() {
+            String::new()
+        } else {
+            format!("{RUN_STDERR_BODY_PREFIX}{}", line.text)
+        }
+    } else {
+        line.text.clone()
+    }
 }
 
 /// Blocking convenience for unit tests and simple callers (waits until done).
@@ -390,36 +449,89 @@ fn failure_preview_lines(result: &RunResult) -> Vec<String> {
 /// Stripped in `style_run_line`; body painted red; exit stays gray/`✗` red.
 pub(crate) const RUN_STDIN_EOF_BODY_PREFIX: &str = "\u{200B}\u{200B}STDIN_EOF\u{200B}";
 
+/// Prefix on **stderr** body lines for channel-based red styling.
+/// Stripped in `style_run_line` (never shown to the operator).
+/// Not used when `stdin_eof` already marks the line red via [`RUN_STDIN_EOF_BODY_PREFIX`].
+pub(crate) const RUN_STDERR_BODY_PREFIX: &str = "\u{200B}\u{200B}STDERR\u{200B}";
+
 /// Lines to print for a completed run.
 ///
 /// Order: stdout → stderr → `✓`/`✗ exit` → (fail: re-preview ≤3) → (fail: 💡 tip).
 /// No blank line before exit. Preview uses 4-space indent (yoyo).
 ///
-/// After Ctrl+D (`stdin_eof`): body lines before exit are marked for **red**;
-/// `✓ exit` stays dim gray.
+/// When `body_already_streamed` is true (live drain while running), body lines are
+/// omitted so the operator does not see a duplicate dump after exit — only the
+/// footer (exit / re-preview / tip), matching yoyo `print_run_result`.
+///
+/// Body styling markers (stripped at paint time in `style_run_line`):
+/// - stdout: unmarked → white (or [`RUN_STDIN_EOF_BODY_PREFIX`] when Ctrl+D)
+/// - stderr: [`RUN_STDERR_BODY_PREFIX`] → red (or EOF prefix alone when Ctrl+D)
+/// - `✓ exit` dim / `✗ exit` red (no body markers)
+///
+/// The 💡 tip still names yoyo's `/fix` (health-driven); that command is **not**
+/// shipped in shell polish.
+#[allow(dead_code)] // unit tests; production uses `format_run_output_lines_ex` with stream flag
 pub(crate) fn format_run_output_lines(result: &RunResult) -> (Vec<String>, Vec<String>) {
-    let mut output: Vec<String> = result.stdout.lines().map(str::to_string).collect();
-    () = output.extend(result.stderr.lines().map(str::to_string));
+    format_run_output_lines_ex(result, false)
+}
 
-    if result.stdin_eof {
-        for line in &mut output {
-            if !line.is_empty() {
-                *line = format!("{RUN_STDIN_EOF_BODY_PREFIX}{line}");
-            }
-        }
-    }
+/// Like [`format_run_output_lines`], with control over body re-print after live stream.
+pub(crate) fn format_run_output_lines_ex(
+    result: &RunResult,
+    body_already_streamed: bool,
+) -> (Vec<String>, Vec<String>) {
+    let mut output: Vec<String> = if body_already_streamed {
+        Vec::new()
+    } else {
+        let mut body: Vec<String> = result
+            .stdout
+            .lines()
+            .map(|line| mark_stdout_body_line(line, result.stdin_eof))
+            .collect();
+        () = body.extend(
+            result
+                .stderr
+                .lines()
+                .map(|line| mark_stderr_body_line(line, result.stdin_eof)),
+        );
+        body
+    };
 
     let elapsed = format_run_duration(result.elapsed);
     if result.success {
         () = output.push(format!("✓ exit {} ({elapsed})", result.exit_code));
     } else {
         () = output.push(format!("✗ exit {} ({elapsed})", result.exit_code));
+        // yoyo still shows a short re-preview under exit even after streaming.
         () = output.extend(failure_preview_lines(result));
         () = output.push(
             "💡 Command failed. Ask me to analyze the error, or say /fix to auto-fix.".to_string(),
         );
     }
     (output, Vec::new())
+}
+
+fn mark_stdout_body_line(line: &str, stdin_eof: bool) -> String {
+    if line.is_empty() {
+        return String::new();
+    }
+    if stdin_eof {
+        format!("{RUN_STDIN_EOF_BODY_PREFIX}{line}")
+    } else {
+        line.to_string()
+    }
+}
+
+fn mark_stderr_body_line(line: &str, stdin_eof: bool) -> String {
+    if line.is_empty() {
+        return String::new();
+    }
+    // EOF alone paints red; avoid stacking markers that could leak after one strip.
+    if stdin_eof {
+        format!("{RUN_STDIN_EOF_BODY_PREFIX}{line}")
+    } else {
+        format!("{RUN_STDERR_BODY_PREFIX}{line}")
+    }
 }
 
 pub(crate) fn current_directory_display() -> String {
@@ -531,6 +643,61 @@ mod tests {
     }
 
     #[test]
+    fn live_stream_receives_lines_before_exit() {
+        // Two lines with a gap so the live channel is non-empty before join.
+        let handle = start_shell_run("printf 'live-a\\n'; sleep 0.15; printf 'live-b\\n'")
+            .expect("spawn");
+        let mut seen = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let result = loop {
+            while let Some(line) = try_recv_shell_live(&handle) {
+                seen.push(line.text);
+            }
+            if let Some(r) = try_recv_shell_result(&handle) {
+                while let Some(line) = try_recv_shell_live(&handle) {
+                    seen.push(line.text);
+                }
+                break r;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for shell; seen={seen:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
+        assert!(result.success, "stderr={}", result.stderr);
+        assert!(
+            seen.iter().any(|l| l == "live-a"),
+            "expected live-a in stream: {seen:?}"
+        );
+        assert!(
+            seen.iter().any(|l| l == "live-b"),
+            "expected live-b in stream: {seen:?}"
+        );
+    }
+
+    #[test]
+    fn format_run_skips_body_when_already_streamed() {
+        let r = RunResult {
+            command: "x".into(),
+            exit_code: 0,
+            stdout: "already shown\n".into(),
+            stderr: String::new(),
+            elapsed: Duration::from_millis(1),
+            success: true,
+            stdin_eof: false,
+        };
+        let (full, _) = format_run_output_lines_ex(&r, false);
+        let (footer, _) = format_run_output_lines_ex(&r, true);
+        assert!(full.iter().any(|l| l == "already shown"), "{full:?}");
+        assert!(
+            !footer.iter().any(|l| l.contains("already shown")),
+            "footer must not re-print body: {footer:?}"
+        );
+        assert!(footer.iter().any(|l| l.starts_with("✓ exit ")), "{footer:?}");
+    }
+
+    #[test]
     fn format_run_puts_exit_after_stdout_and_stderr() {
         let r = RunResult {
             command: "x".into(),
@@ -548,12 +715,43 @@ mod tests {
             .position(|l| l.starts_with("✗ exit "))
             .expect("exit line");
         let out_i = lines.iter().position(|l| l == "out").unwrap();
-        let err_i = lines.iter().position(|l| l == "err").unwrap();
+        let err_i = lines
+            .iter()
+            .position(|l| l == &format!("{RUN_STDERR_BODY_PREFIX}err"))
+            .unwrap();
         assert!(
             out_i < err_i && err_i < exit_i,
             "order: stdout, stderr, exit — {lines:?}"
         );
         assert_eq!(exit_i, err_i + 1, "no blank line before exit: {lines:?}");
+    }
+
+    #[test]
+    fn format_run_marks_stderr_not_stdout() {
+        let r = RunResult {
+            command: "mixed".into(),
+            exit_code: 0,
+            stdout: "ok\n".into(),
+            stderr: "warn\n".into(),
+            elapsed: Duration::from_millis(1),
+            success: true,
+            stdin_eof: false,
+        };
+        let (lines, _) = format_run_output_lines(&r);
+        assert!(
+            lines.iter().any(|l| l == "ok"),
+            "stdout unmarked: {lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == &format!("{RUN_STDERR_BODY_PREFIX}warn")),
+            "stderr marked: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.starts_with("✓ exit ")),
+            "success exit: {lines:?}"
+        );
     }
 
     #[test]
