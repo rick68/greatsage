@@ -428,8 +428,17 @@ fn complete_args(
         }
         "/help" => complete_commands(prefix),
         "/context" => complete_context_subcommands(prefix),
+        "/history" => complete_history_subcommands(prefix),
         _ => Vec::new(),
     }
+}
+
+fn complete_history_subcommands(prefix: &str) -> Vec<String> {
+    ["detail"]
+        .into_iter()
+        .filter(|s| s.starts_with(prefix))
+        .map(str::to_string)
+        .collect()
 }
 
 /// `/load` / `/save` path args: Tab extends typed characters only (no directory browsing).
@@ -522,19 +531,21 @@ pub fn inline_hint(line: &str, cursor: usize, agent_config: &AgentConfig) -> Opt
         return ghost_suffix(prefix, &complete_args(cmd, line, prefix, agent_config));
     }
 
+    // Exact match before prefix completion — otherwise `/mark` ghosts as `/marks`
+    // because "marks".starts_with("mark").
+    for cmd in KNOWN_COMMANDS {
+        let cmd_name = &cmd.name[1..];
+        if cmd_name == typed {
+            let desc = command_short_description(cmd.name)?;
+            return Some(format!(" — {desc}"));
+        }
+    }
     for cmd in KNOWN_COMMANDS {
         let cmd_name = &cmd.name[1..];
         if cmd_name.starts_with(typed) && cmd_name != typed {
             let rest = &cmd_name[typed.len()..];
             let desc = command_short_description(cmd.name)?;
             return Some(format!("{rest} — {desc}"));
-        }
-    }
-    for cmd in KNOWN_COMMANDS {
-        let cmd_name = &cmd.name[1..];
-        if cmd_name == typed {
-            let desc = command_short_description(cmd.name)?;
-            return Some(format!(" — {desc}"));
         }
     }
     None

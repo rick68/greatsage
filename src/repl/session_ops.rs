@@ -57,11 +57,7 @@ fn user_prompt_from_messages(messages: &[AgentMessage]) -> Option<String> {
             })
             .collect::<Vec<_>>()
             .join("");
-        if text.is_empty() {
-            None
-        } else {
-            Some(text)
-        }
+        if text.is_empty() { None } else { Some(text) }
     })
 }
 
@@ -188,26 +184,46 @@ pub async fn try_auto_save_session(agent: &CodingAgent, cwd: &Path) -> Result<()
     Ok(())
 }
 
+/// Restore yoagent messages from JSON into a fresh agent (shared by `/load` and `/jump`).
+pub async fn load_agent_from_json(
+    agent_config: &AgentConfig,
+    json: &str,
+) -> Result<(CodingAgent, Vec<AgentMessage>), String> {
+    let agent = CodingAgent::new_with_agent_config(agent_config).await;
+    {
+        let mut guard = agent.lock().await;
+        () = guard
+            .restore_messages(json)
+            .map_err(|e| format!("parse error: {e}"))?;
+    }
+    let messages = agent.lock().await.messages().to_vec();
+    Ok((agent, messages))
+}
+
 /// Restore yoagent messages into a fresh agent (reinstall path for `/load` and `--continue`).
 pub async fn load_agent_from_file(
     agent_config: &AgentConfig,
     path: &Path,
 ) -> Result<(CodingAgent, String, Vec<AgentMessage>), String> {
     let json = fs::read_to_string(path).map_err(|e| format!("read error: {e}"))?;
-    let agent = CodingAgent::new_with_agent_config(agent_config).await;
-    {
-        let mut guard = agent.lock().await;
-        () = guard
-            .restore_messages(&json)
-            .map_err(|e| format!("parse error: {e}"))?;
-    }
-    let messages = agent.lock().await.messages().to_vec();
+    let (agent, messages) = load_agent_from_json(agent_config, &json).await?;
     let count = messages.len();
-    Ok((
-        agent,
-        load_status_line(path, count),
-        messages,
-    ))
+    Ok((agent, load_status_line(path, count), messages))
+}
+
+fn jump_status_line(name: &str, count: usize) -> String {
+    format!("✓ jumped to bookmark '{name}' ({count} messages)")
+}
+
+/// Restore bookmark JSON into a fresh agent (reinstall path for `/jump`).
+pub async fn load_agent_from_bookmark(
+    agent_config: &AgentConfig,
+    json: &str,
+    name: &str,
+) -> Result<(CodingAgent, String, Vec<AgentMessage>), String> {
+    let (agent, messages) = load_agent_from_json(agent_config, json).await?;
+    let count = messages.len();
+    Ok((agent, jump_status_line(name, count), messages))
 }
 
 pub(super) async fn compact_agent_with_keep(

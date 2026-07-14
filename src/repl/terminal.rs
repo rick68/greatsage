@@ -58,6 +58,50 @@ fn is_memory_output(output: &[String]) -> bool {
     })
 }
 
+/// `/history detail` body: optional leading blank, then `Turn N` / `Total:` lines.
+fn is_history_detail_output(output: &[String]) -> bool {
+    output.iter().any(|line| {
+        let t = line.trim_start();
+        t.starts_with("Turn ") || t.starts_with("Total:")
+    })
+}
+
+const HISTORY_DETAIL_INDENT: &str = "  ";
+const HISTORY_DETAIL_BODY_INDENT: &str = "    ";
+
+/// yoyo-aligned colors: bold white `Turn N`, green `You:`/`Agent:`, white body.
+fn style_history_detail_line(line: &str) -> String {
+    if line.is_empty() {
+        return String::new();
+    }
+
+    if line.starts_with("Turn ") {
+        return format!("{HISTORY_DETAIL_INDENT}{}", line.bold().white().to_string());
+    }
+
+    if let Some(rest) = line.strip_prefix("Total:") {
+        return format!(
+            "{HISTORY_DETAIL_INDENT}{}{}",
+            "Total:".bold().white(),
+            rest.white()
+        );
+    }
+
+    let body = line.trim_start();
+    for label in ["You:", "Agent:"] {
+        if let Some(rest) = body.strip_prefix(label) {
+            return format!(
+                "{HISTORY_DETAIL_BODY_INDENT}{}{}",
+                label.green(),
+                rest.white()
+            );
+        }
+    }
+
+    // e.g. "(no assistant response)"
+    format!("{HISTORY_DETAIL_BODY_INDENT}{}", body.dimmed())
+}
+
 fn is_init_success_line(line: &str) -> bool {
     line.starts_with("✓ Created GREATSAGE.md")
 }
@@ -306,6 +350,7 @@ pub(super) fn write_repl_handled_output(
     let tokens_output = is_tokens_output(output);
     let init_output = is_init_output(output);
     let memory_output = is_memory_output(output);
+    let history_detail = is_history_detail_output(output);
     let context_mode = context_output_mode(output);
     let mut in_session_totals = false;
     for line in output {
@@ -320,6 +365,8 @@ pub(super) fn write_repl_handled_output(
             style_init_line(line)
         } else if memory_output {
             style_memory_line(line)
+        } else if history_detail {
+            style_history_detail_line(line)
         } else if let Some(mode) = context_mode {
             style_context_line(line, mode)
         } else {

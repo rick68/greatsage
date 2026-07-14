@@ -12,6 +12,7 @@ mod commands_lifecycle;
 mod commands_memory;
 mod commands_project;
 mod commands_session;
+mod commands_session_nav;
 mod completion;
 mod context_display;
 mod cost;
@@ -25,6 +26,7 @@ mod output;
 mod path_display;
 mod route;
 mod session_dashboard;
+mod session_nav;
 pub(crate) mod session_ops;
 pub(crate) mod session_state;
 pub(crate) mod startup_hints;
@@ -77,8 +79,8 @@ use {
     },
     session_ops::{
         agent_message_stats, block_on_session, compact_agent_with_keep,
-        last_user_prompt_from_messages, load_agent_from_file, save_messages,
-        try_auto_save_session,
+        last_user_prompt_from_messages, load_agent_from_bookmark, load_agent_from_file,
+        save_messages, try_auto_save_session,
     },
     session_state::ReplSessionState,
     std::{env, path::PathBuf},
@@ -203,8 +205,34 @@ fn spawn_agent_op(
                 Some(agent) => save_messages(&agent, &path).await,
                 None => Err(String::from("No active agent.")),
             },
-            AgentOp::Load { path, config } => {
-                match load_agent_from_file(&config, &path).await {
+            AgentOp::Load { path, config } => match load_agent_from_file(&config, &path).await {
+                Ok((new_agent, message, messages)) => {
+                    let model = config.model.clone();
+                    let provider = config.provider.to_string();
+                    let context_max = u64::from(new_agent.context_window());
+                    let last_prompt = last_user_prompt_from_messages(&messages);
+                    ctx.run_on_main_thread(move |main| {
+                        () = install_coding_agent(main.world, new_agent, model, provider);
+                        if let Some(agent) = main.world.get_resource::<CodingAgent>() {
+                            let session_id = agent.session_id();
+                            sync_context_stats_on_world(
+                                main.world,
+                                session_id,
+                                &messages,
+                                context_max,
+                            );
+                        }
+                        if let Some(mut state) = main.world.get_resource_mut::<ReplSessionState>() {
+                            state.last_user_prompt = last_prompt;
+                        }
+                    })
+                    .await;
+                    Ok(message)
+                }
+                Err(err) => Err(err),
+            },
+            AgentOp::Jump { json, config, name } => {
+                match load_agent_from_bookmark(&config, &json, &name).await {
                     Ok((new_agent, message, messages)) => {
                         let model = config.model.clone();
                         let provider = config.provider.to_string();
@@ -944,7 +972,7 @@ fn read_stdin_stream(
                     match dispatch_slash_command(
                         line,
                         agent_config.as_mut(),
-                        session_state.as_ref(),
+                        session_state.as_mut(),
                         config.as_ref(),
                         clear_stats,
                         coding_agent.as_deref(),

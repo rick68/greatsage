@@ -9,7 +9,7 @@
 use {
     super::{
         commands_help, commands_hooks, commands_info, commands_lifecycle, commands_memory,
-        commands_project, commands_session,
+        commands_project, commands_session, commands_session_nav,
         route::{CommandRoute, route_command},
         session_dashboard::SessionDashboardSnapshot,
         session_state::ReplSessionState,
@@ -22,7 +22,7 @@ use {
 /// Shared inputs for slash-command handlers (grows without touching Bevy systems).
 pub(super) struct ReplDispatchCtx<'a> {
     pub agent_config: &'a mut AgentConfig,
-    pub session: &'a ReplSessionState,
+    pub session: &'a mut ReplSessionState,
     pub config: &'a Config,
     /// `(message_count, token_count)` for `/clear` confirmation; `None` when agent unavailable.
     pub clear_stats: Option<(usize, u64)>,
@@ -32,7 +32,7 @@ pub(super) struct ReplDispatchCtx<'a> {
     pub dashboard: Option<SessionDashboardSnapshot>,
     /// CLI `-b` / `--bare`: project context is not loaded into the agent.
     pub bare: bool,
-    /// Focused session is mid-agent-run; blocks `/load`.
+    /// Focused session is mid-agent-run; blocks `/load` and `/jump`.
     pub session_processing: bool,
 }
 
@@ -43,6 +43,12 @@ pub(super) enum AgentOp {
     Load {
         path: PathBuf,
         config: AgentConfig,
+    },
+    /// Restore a bookmark JSON via the same reinstall path as [`Self::Load`].
+    Jump {
+        json: String,
+        config: AgentConfig,
+        name: String,
     },
     Compact {
         keep_recent: Option<usize>,
@@ -103,7 +109,7 @@ pub(super) fn build_unknown_slash_feedback(line: &str) -> UnknownSlashFeedback {
 pub(super) fn dispatch_slash_command(
     line: &str,
     agent_config: &mut AgentConfig,
-    session: &ReplSessionState,
+    session: &mut ReplSessionState,
     config: &Config,
     clear_stats: Option<(usize, u64)>,
     coding_agent: Option<&crate::agents::CodingAgent>,
@@ -130,6 +136,7 @@ pub(super) fn dispatch_slash_command(
         CommandRoute::Help => commands_help::help(args),
         route if route.is_lifecycle() => commands_lifecycle::dispatch(route, &mut ctx),
         route if route.is_session() => commands_session::dispatch(route, args, &mut ctx),
+        route if route.is_session_nav() => commands_session_nav::dispatch(route, args, &mut ctx),
         CommandRoute::Context => commands_project::dispatch_context(args, &ctx),
         CommandRoute::Init => commands_project::dispatch_init(args, &ctx),
         CommandRoute::Remember => commands_memory::dispatch_remember(args, &ctx),

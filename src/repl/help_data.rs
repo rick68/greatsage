@@ -36,17 +36,44 @@ impl ReplCommandCategory {
     }
 }
 
+/// Which command list is being rendered (`/help` vs CLI `--help`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HelpListAudience {
+    /// REPL `/help` grouped list (shorter primary blurbs).
+    Repl,
+    /// CLI `greatsage --help` REPL section (longer primary blurbs when set).
+    Cli,
+}
+
+/// Presentation-only extra usage line under a command in help lists.
+///
+/// Not a separate [`ReplCommand`] / route — intentional multi-line usage
+/// (e.g. yoyo `/history` + `/history detail`). No per-audience blurb: extras
+/// have no `/help <cmd>` identity; only the parent command does.
+#[derive(Debug, Clone, Copy)]
+pub struct HelpUsageExtraLine {
+    /// Left column, e.g. `/history detail`.
+    pub label: &'static str,
+    /// Right column (same for `/help` and CLI `--help` lists).
+    pub summary: &'static str,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ReplCommand {
     pub name: &'static str,
+    /// Right-column blurb for REPL `/help` list.
     pub summary: &'static str,
+    /// Optional blurb for CLI `--help` list; [`None`] uses [`Self::summary`].
+    pub cli_summary: Option<&'static str>,
     /// Inline ghost hint override; [`None`] uses [`Self::summary`].
     pub short_description: Option<&'static str>,
     pub category: ReplCommandCategory,
-    /// Argument synopsis in `/help` list (`[opt]`, `<required>`, or empty).
+    /// Argument synopsis in primary list label (`[opt]`, `<required>`, or empty).
     pub args: &'static str,
     /// Inline ghost hint after `cmd `; uses [`Self::args`] when empty.
     pub arg_hint: &'static str,
+    /// Extra usage lines after the primary entry (presentation only).
+    pub help_extra_lines: &'static [HelpUsageExtraLine],
     pub usage: &'static str,
     /// Explanatory body for `/help <cmd>` and error hints; does not repeat [`Self::usage`].
     /// Prefer [`concat!`] for multi-line text so Rust source indent does not leak into output.
@@ -57,10 +84,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/help",
         summary: "Show this help",
+        cli_summary: None,
         short_description: Some("Show help for commands"),
         category: ReplCommandCategory::Session,
         args: "[command]",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/help [command] - Show help information",
         detail: concat!(
             "Usage:\n",
@@ -76,30 +105,36 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/quit",
         summary: "Exit greatsage",
+        cli_summary: None,
         short_description: None,
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/quit  (alias: /exit)",
         detail: QUIT_EXIT_DETAIL,
     },
     ReplCommand {
         name: "/exit",
         summary: "Exit greatsage (alias for /quit)",
+        cli_summary: None,
         short_description: Some("Exit greatsage"),
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/exit  (alias: /quit)",
         detail: QUIT_EXIT_DETAIL,
     },
     ReplCommand {
         name: "/clear",
         summary: "Clear conversation history",
+        cli_summary: None,
         short_description: None,
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/clear — Clear conversation history",
         detail: concat!(
             "Resets the conversation to a fresh state, removing all messages.\n",
@@ -113,10 +148,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/clear!",
         summary: "Force-clear without confirmation",
+        cli_summary: None,
         short_description: None,
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/clear! — Force-clear conversation history",
         detail: concat!(
             "Same as /clear but skips the confirmation prompt.\n",
@@ -126,10 +163,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/compact",
         summary: "Compact conversation to save context",
+        cli_summary: None,
         short_description: None,
         category: ReplCommandCategory::Session,
         args: "[N|all|--preview]",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/compact [N|all|--preview] — Compact conversation to save context space",
         detail: concat!(
             "Usage:\n",
@@ -145,10 +184,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/save",
         summary: "Save session to file",
+        cli_summary: None,
         short_description: None,
         category: ReplCommandCategory::Session,
         args: "[path]",
         arg_hint: "<filename.json>",
+        help_extra_lines: &[],
         usage: "/save [path] — Save session to file",
         detail: concat!(
             "Usage:\n",
@@ -166,10 +207,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/load",
         summary: "Load session from file",
+        cli_summary: None,
         short_description: None,
         category: ReplCommandCategory::Session,
         args: "[path]",
         arg_hint: "<filename.json>",
+        help_extra_lines: &[],
         usage: "/load [path] — default greatsage-session.json",
         detail: concat!(
             "Usage:\n",
@@ -187,10 +230,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/retry",
         summary: "Re-send the last user input",
+        cli_summary: None,
         short_description: None,
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/retry — Re-send the last user input",
         detail: concat!(
             "Re-sends the most recent non-slash REPL input to the agent.\n",
@@ -201,10 +246,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/status",
         summary: "Show session info",
+        cli_summary: None,
         short_description: Some("Show session dashboard"),
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/status — Show session info",
         detail: concat!(
             "Displays current session information including: working directory,\n",
@@ -215,10 +262,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/tokens",
         summary: "Show token usage and context window",
+        cli_summary: None,
         short_description: None,
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/tokens — Show token usage and context window",
         detail: concat!(
             "Displays current token usage (input/output), the model's context\n",
@@ -230,10 +279,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/cost",
         summary: "Show estimated session cost",
+        cli_summary: None,
         short_description: None,
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/cost — Show estimated session cost",
         detail: concat!(
             "Displays the running cost estimate for this session based on\n",
@@ -244,10 +295,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/hooks",
         summary: "Show active hooks",
+        cli_summary: None,
         short_description: Some("Show active hooks (pre/post tool execution)"),
         category: ReplCommandCategory::Session,
         args: "",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/hooks — Show active hooks (pre/post tool execution)",
         detail: concat!(
             "Lists shell hooks from the resolved user config at\n",
@@ -273,12 +326,134 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
         ),
     },
     ReplCommand {
+        name: "/history",
+        summary: "Show summary of conversation messages",
+        cli_summary: Some("Show conversation message summary"),
+        short_description: None,
+        category: ReplCommandCategory::Session,
+        args: "",
+        arg_hint: "detail",
+        help_extra_lines: &[HelpUsageExtraLine {
+            label: "/history detail",
+            summary: "Per-turn breakdown with tools and token counts",
+        }],
+        usage: "/history — Show summary of conversation messages",
+        detail: concat!(
+            "Displays a compact list of all messages in the current\n",
+            "conversation: role and a preview of each message.\n",
+            "Useful for understanding conversation flow.\n",
+            "\n",
+            "Subcommands:\n",
+            "\n",
+            "  /history detail — Per-turn breakdown with tools used and token counts\n",
+            "\n",
+            "Note: this is conversation history (yoagent messages), not the\n",
+            "readline ↑↓ input history stored under ~/.config/greatsage/history.\n",
+        ),
+    },
+    ReplCommand {
+        name: "/search",
+        summary: "Search conversation history for matching messages",
+        cli_summary: Some("Search conversation history"),
+        short_description: None,
+        category: ReplCommandCategory::Session,
+        args: "<query>",
+        arg_hint: "<query>",
+        help_extra_lines: &[],
+        usage: "/search <query> — Search conversation history for matching messages",
+        detail: concat!(
+            "Usage:\n",
+            "  /search <query>\tFind messages containing the query\n",
+            "\n",
+            "Searches through all conversation messages for matching text\n",
+            "(case-insensitive). Shows matching message indices with previews.\n",
+            "\n",
+            "Examples:\n",
+            "  /search error handling\n",
+            "  /search TODO\n",
+        ),
+    },
+    ReplCommand {
+        name: "/mark",
+        summary: "Bookmark current conversation state",
+        cli_summary: Some("Bookmark conversation state"),
+        short_description: None,
+        category: ReplCommandCategory::Session,
+        args: "<name>",
+        arg_hint: "<name>",
+        help_extra_lines: &[],
+        usage: "/mark <name> — Bookmark current conversation state",
+        detail: concat!(
+            "Usage:\n",
+            "  /mark <name>\t\tSave an in-memory bookmark at the current point\n",
+            "\n",
+            "Stores a snapshot of the conversation messages under <name>.\n",
+            "Use /jump <name> to restore later. Overwrites an existing name.\n",
+            "Bookmarks are process-local and are lost on exit; use /save for durable checkpoints.\n",
+        ),
+    },
+    ReplCommand {
+        name: "/jump",
+        summary: "Restore conversation to a bookmark (discards messages after it)",
+        cli_summary: Some("Restore to a bookmark"),
+        short_description: None,
+        category: ReplCommandCategory::Session,
+        args: "<name>",
+        arg_hint: "<name>",
+        help_extra_lines: &[],
+        usage: "/jump <name> — Restore conversation to a bookmark",
+        detail: concat!(
+            "Usage:\n",
+            "  /jump <name>\t\tRestore the conversation to a saved bookmark\n",
+            "\n",
+            "Messages added after the bookmark are discarded.\n",
+            "Reinstalls the agent (same ECS alignment as /load) and syncs\n",
+            "SessionContextStats. Blocked while the session is processing.\n",
+        ),
+    },
+    ReplCommand {
+        name: "/marks",
+        summary: "List all saved bookmarks",
+        cli_summary: Some("List saved bookmarks"),
+        short_description: None,
+        category: ReplCommandCategory::Session,
+        args: "",
+        arg_hint: "",
+        help_extra_lines: &[],
+        usage: "/marks — List saved bookmarks",
+        detail: concat!(
+            "Lists in-memory bookmark names sorted alphabetically.\n",
+            "Bookmarks are not persisted across process exit.\n",
+        ),
+    },
+    ReplCommand {
+        name: "/export",
+        summary: "Export conversation as readable markdown (default: conversation.md)",
+        cli_summary: Some("Export conversation as markdown"),
+        short_description: None,
+        category: ReplCommandCategory::Session,
+        args: "[path]",
+        arg_hint: "[filename]",
+        help_extra_lines: &[],
+        usage: "/export [path] — Export conversation as markdown",
+        detail: concat!(
+            "Usage:\n",
+            "  /export\t\tWrite conversation.md in the current directory\n",
+            "  /export <path>\tWrite to the specified path\n",
+            "\n",
+            "Exports the current yoagent conversation as readable markdown.\n",
+            "Does nothing when the conversation is empty.\n",
+        ),
+    },
+    ReplCommand {
         name: "/context",
         summary: "Show loaded project context files",
+        cli_summary: None,
         short_description: Some("Show project context, system prompt sections, or token budget"),
         category: ReplCommandCategory::Project,
         args: "[system|files]",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/context [system|files] — Show project instruction files and system prompt",
         detail: concat!(
             "Lists project instruction files found in the working directory\n",
@@ -295,10 +470,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/init",
         summary: "Generate a GREATSAGE.md project context",
+        cli_summary: None,
         short_description: Some("Generate a GREATSAGE.md context file"),
         category: ReplCommandCategory::Project,
         args: "",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/init — Scan project and generate a GREATSAGE.md context file",
         detail: concat!(
             "Analyzes the project structure, detects the tech stack, and\n",
@@ -315,10 +492,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/model",
         summary: "Switch, list, or inspect models",
+        cli_summary: None,
         short_description: None,
         category: ReplCommandCategory::Ai,
         args: "<name>",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/model [name] — e.g. /model claude-opus-4-7",
         detail: concat!(
             "Usage:\n",
@@ -341,10 +520,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/provider",
         summary: "Switch provider (resets model to provider default)",
+        cli_summary: None,
         short_description: Some("Switch or show current provider"),
         category: ReplCommandCategory::Ai,
         args: "<name>",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/provider <name> —  Switch AI provide",
         detail: concat!(
             "Usage:\n",
@@ -367,10 +548,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/remember",
         summary: "Save a project-specific memory",
+        cli_summary: None,
         short_description: None,
         category: ReplCommandCategory::Ai,
         args: "<note>",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/remember <note> — Save a project-specific memory",
         detail: concat!(
             "Usage:\n",
@@ -388,10 +571,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/memories",
         summary: "List project memories",
+        cli_summary: None,
         short_description: Some("List or search project memories"),
         category: ReplCommandCategory::Ai,
         args: "[query]",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/memories [query] — List or search project memories",
         detail: concat!(
             "Usage:\n",
@@ -412,10 +597,12 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
     ReplCommand {
         name: "/forget",
         summary: "Remove a project memory by index",
+        cli_summary: None,
         short_description: None,
         category: ReplCommandCategory::Ai,
         args: "<n>",
         arg_hint: "",
+        help_extra_lines: &[],
         usage: "/forget <n> — Remove a project memory by index",
         detail: concat!(
             "Usage:\n",
@@ -448,29 +635,154 @@ fn command_list_label(cmd: &ReplCommand) -> String {
     }
 }
 
+fn primary_summary(cmd: &ReplCommand, audience: HelpListAudience) -> &'static str {
+    match audience {
+        HelpListAudience::Repl => cmd.summary,
+        HelpListAudience::Cli => cmd.cli_summary.unwrap_or(cmd.summary),
+    }
+}
+
+fn format_help_list_line(label: &str, summary: &str, label_width: usize) -> String {
+    format!("  {label:<label_width$}  {summary}")
+}
+
 fn command_list_label_width() -> usize {
-    KNOWN_COMMANDS
-        .iter()
-        .map(|cmd| command_list_label(cmd).chars().count())
-        .max()
-        .unwrap_or(0)
+    let mut max_w = 0usize;
+    for cmd in KNOWN_COMMANDS {
+        max_w = max_w.max(command_list_label(cmd).chars().count());
+        for extra in cmd.help_extra_lines {
+            max_w = max_w.max(extra.label.chars().count());
+        }
+    }
+    max_w
 }
 
-fn command_list_entry(cmd: &ReplCommand, label_width: usize) -> String {
-    let label = command_list_label(cmd);
-    format!("  {label:<label_width$}  {}", cmd.summary)
+/// Keep fenced CLI help under common 80-col terminals.
+///
+/// termimad pads every code-fence line to the block's widest line; if that
+/// width exceeds the terminal, each line wraps and the pad looks like a blank.
+const CLI_HELP_CODE_WIDTH: usize = 78;
+
+fn char_len(s: &str) -> usize {
+    s.chars().count()
 }
 
-fn repl_command_lines_grouped() -> String {
+fn split_at_chars(s: &str, n: usize) -> (&str, &str) {
+    match s.char_indices().nth(n) {
+        Some((i, _)) => (&s[..i], &s[i..]),
+        None => (s, ""),
+    }
+}
+
+/// Summary column for `format_help_list_line`: `"  " + label_width + "  "`.
+///
+/// Must not scan the line for `"  "` — labels like `/search <query>` contain
+/// spaces, and label padding is also spaces; a naive find mis-aligns wraps.
+fn summary_column_indent(label_width: usize) -> usize {
+    2 + label_width + 2
+}
+
+/// Wrap a single help list line so its display width is ≤ `max_width` chars.
+/// Continuation lines indent to the summary column (`label_width`).
+fn wrap_cli_help_line(line: &str, max_width: usize, label_width: usize) -> Vec<String> {
+    if line.is_empty() || char_len(line) <= max_width {
+        return vec![line.to_string()];
+    }
+
+    // Category headers (`── Session ──`) have no summary column; indent modestly.
+    let indent = if line.trim_start().starts_with('─') {
+        2usize
+    } else {
+        summary_column_indent(label_width).min(max_width.saturating_sub(8))
+    };
+    let indent_s = " ".repeat(indent);
+    let mut out = Vec::new();
+    let mut rest = line;
+    let mut first = true;
+
+    while !rest.is_empty() {
+        let budget = if first {
+            max_width
+        } else {
+            max_width.saturating_sub(indent)
+        };
+        if char_len(rest) <= budget {
+            if first {
+                out.push(rest.to_string());
+            } else {
+                out.push(format!("{indent_s}{rest}"));
+            }
+            break;
+        }
+
+        let prefix = split_at_chars(rest, budget).0;
+        // Prefer breaking on a space (not mid-word) when possible.
+        let break_at = prefix
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| c == ' ')
+            .map(|(i, _)| i)
+            .filter(|&i| i > 0)
+            .unwrap_or_else(|| prefix.len());
+
+        let (chunk, rem) = if break_at < rest.len() {
+            let (a, b) = rest.split_at(break_at);
+            (a.trim_end(), b.trim_start())
+        } else {
+            let (a, b) = split_at_chars(rest, budget);
+            (a, b)
+        };
+
+        if first {
+            out.push(chunk.to_string());
+            first = false;
+        } else {
+            out.push(format!("{indent_s}{chunk}"));
+        }
+        rest = rem;
+        if rest.is_empty() {
+            break;
+        }
+    }
+    out
+}
+
+fn wrap_cli_help_body(body: &str, max_width: usize, label_width: usize) -> String {
+    body.lines()
+        .flat_map(|line| wrap_cli_help_line(line, max_width, label_width))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn command_list_entries_for_category(
+    category: ReplCommandCategory,
+    label_width: usize,
+    audience: HelpListAudience,
+) -> Vec<String> {
+    let mut entries = Vec::new();
+    for cmd in KNOWN_COMMANDS.iter().filter(|cmd| cmd.category == category) {
+        entries.push(format_help_list_line(
+            &command_list_label(cmd),
+            primary_summary(cmd, audience),
+            label_width,
+        ));
+        for extra in cmd.help_extra_lines {
+            entries.push(format_help_list_line(
+                extra.label,
+                extra.summary,
+                label_width,
+            ));
+        }
+    }
+    entries
+}
+
+fn repl_command_lines_grouped(audience: HelpListAudience) -> String {
     let label_width = command_list_label_width();
     ReplCommandCategory::ALL
         .iter()
         .filter_map(|category| {
-            let entries: Vec<_> = KNOWN_COMMANDS
-                .iter()
-                .filter(|cmd| cmd.category == *category)
-                .map(|cmd| command_list_entry(cmd, label_width))
-                .collect();
+            let entries = command_list_entries_for_category(*category, label_width, audience);
             if entries.is_empty() {
                 return None;
             }
@@ -518,20 +830,22 @@ pub fn command_short_description(cmd_name: &str) -> Option<&'static str> {
 }
 
 /// Argument hint for inline ghost text after `cmd ` (name with or without `/`).
+/// Prefer explicit [`ReplCommand::arg_hint`] so list labels can stay bare
+/// (`args: ""`) while still showing a ghost (e.g. `/history ` → `detail`).
 pub(super) fn command_arg_hint(cmd_name: &str) -> Option<&'static str> {
     let normalized = normalize_command_name(cmd_name);
     let cmd = KNOWN_COMMANDS.iter().find(|c| c.name == normalized)?;
-    if cmd.args.is_empty() {
-        return None;
-    }
     // yoyo omits ghost hints for optional-flag commands (e.g. bare `/compact `).
     if normalized == "/compact" {
         return None;
     }
-    if cmd.arg_hint.is_empty() {
-        Some(cmd.args)
+    if !cmd.arg_hint.is_empty() {
+        return Some(cmd.arg_hint);
+    }
+    if cmd.args.is_empty() {
+        None
     } else {
-        Some(cmd.arg_hint)
+        Some(cmd.args)
     }
 }
 
@@ -586,10 +900,15 @@ pub(super) fn push_usage_and_body(lines: &mut Vec<String>, command: &str) {
 }
 
 pub(super) fn help_text() -> String {
-    format!(
-        "REPL commands (try /help <command> for details):\n{}",
-        repl_command_lines_grouped()
-    )
+    // Same wrap as CLI: long summaries break mid-line on 80-col terminals and
+    // look misaligned; continuation lines indent to the summary column.
+    let label_width = command_list_label_width();
+    let body = wrap_cli_help_body(
+        &repl_command_lines_grouped(HelpListAudience::Repl),
+        CLI_HELP_CODE_WIDTH,
+        label_width,
+    );
+    format!("REPL commands (try /help <command> for details):\n{body}")
 }
 
 pub(super) fn help_text_lines() -> Vec<String> {
@@ -597,11 +916,19 @@ pub(super) fn help_text_lines() -> Vec<String> {
 }
 
 pub(crate) fn cli_repl_commands_section() -> String {
-    // Fenced block preserves category/command indentation through clap_help markdown.
-    format!(
-        "\n**Commands (in REPL):**\n\n```\n{}\n```\n",
-        repl_command_lines_grouped()
-    )
+    // Use a ``` fence so termimad applies code_block colors (the grey panel).
+    // Pre-wrap long lines to CLI_HELP_CODE_WIDTH so CodeBlock::justify pads to a
+    // width that fits common 80-col terminals — otherwise every line wraps and
+    // the pad looks like a blank row after each command.
+    // Continuation indent uses the same summary column as format_help_list_line
+    // (`2 + label_width + 2`), not a scan for `"  "` (labels contain spaces).
+    let label_width = command_list_label_width();
+    let body = wrap_cli_help_body(
+        &repl_command_lines_grouped(HelpListAudience::Cli),
+        CLI_HELP_CODE_WIDTH,
+        label_width,
+    );
+    format!("\n**Commands (in REPL):**\n\n```\n{body}\n```\n")
 }
 
 /// Status line, usage, detail body, and pointer to full help.

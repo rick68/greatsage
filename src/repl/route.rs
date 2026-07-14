@@ -28,6 +28,12 @@ pub(super) enum CommandRoute {
     Memories,
     Forget,
     Hooks,
+    History,
+    Search,
+    Mark,
+    Jump,
+    Marks,
+    Export,
     UnknownSlash,
     NotSlash,
 }
@@ -37,6 +43,13 @@ impl CommandRoute {
         matches!(
             self,
             Self::Provider | Self::Model | Self::Save | Self::Load | Self::Compact | Self::Retry
+        )
+    }
+
+    pub(super) const fn is_session_nav(self) -> bool {
+        matches!(
+            self,
+            Self::History | Self::Search | Self::Mark | Self::Jump | Self::Marks | Self::Export
         )
     }
 
@@ -71,6 +84,12 @@ pub(super) fn route_command(cmd: &str) -> CommandRoute {
         "/tokens" => CommandRoute::Tokens,
         "/cost" => CommandRoute::Cost,
         "/hooks" => CommandRoute::Hooks,
+        "/history" => CommandRoute::History,
+        "/search" => CommandRoute::Search,
+        "/mark" => CommandRoute::Mark,
+        "/jump" => CommandRoute::Jump,
+        "/marks" => CommandRoute::Marks,
+        "/export" => CommandRoute::Export,
         // Project
         "/context" => CommandRoute::Context,
         "/init" => CommandRoute::Init,

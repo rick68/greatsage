@@ -15,8 +15,8 @@ use {
         providers::Provider,
         repl::{
             session_ops::{
-                block_on_session, last_session_path, last_user_prompt_from_messages,
-                load_agent_from_file, LAST_SESSION_REL_PATH,
+                LAST_SESSION_REL_PATH, block_on_session, last_session_path,
+                last_user_prompt_from_messages, load_agent_from_file,
             },
             session_state::ReplSessionState,
             startup_hints::{StartupHintInput, StartupHintPart, startup_hint_parts},
@@ -367,18 +367,14 @@ fn setup(
         }
         Some(Err(err)) => {
             eprintln!("continue error: {err}");
-            let agent = block_on_session(
-                runtime,
-                CodingAgent::new_with_agent_config(&agent_config),
-            );
+            let agent =
+                block_on_session(runtime, CodingAgent::new_with_agent_config(&agent_config));
             let ctx_max = u64::from(agent.context_window());
             (agent, None, Vec::new(), ctx_max)
         }
         None => {
-            let agent = block_on_session(
-                runtime,
-                CodingAgent::new_with_agent_config(&agent_config),
-            );
+            let agent =
+                block_on_session(runtime, CodingAgent::new_with_agent_config(&agent_config));
             let ctx_max = u64::from(agent.context_window());
             (agent, None, Vec::new(), ctx_max)
         }
