@@ -1,4 +1,4 @@
-//! Split layout: scrollback (top) + prompt (bottom).
+//! Split layout: scrollback (top) + single-line status + prompt (bottom).
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
@@ -9,7 +9,10 @@ pub struct TuiAreas {
     pub prompt: Rect,
 }
 
-/// Compute Grok-like scrollback + thin status + prompt row.
+/// Compute Grok-like scrollback + 1-row status + prompt.
+///
+/// Multi-line slash / shell output lives **inside scrollback** (operator log),
+/// not in an intermediate uncontrolled pane.
 pub fn split_frame(area: Rect) -> TuiAreas {
     let rows = Layout::default()
         .direction(Direction::Vertical)

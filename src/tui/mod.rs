@@ -10,8 +10,11 @@ mod commands;
 mod draw;
 mod input;
 mod layout;
+mod nav;
+mod slash_complete;
+
 mod plugin;
+pub use plugin::tui_plugin;
+
 mod scrollback;
 mod state;
-
-pub use plugin::tui_plugin;

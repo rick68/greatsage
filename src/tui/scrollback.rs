@@ -1,4 +1,6 @@
 //! Session ECS → scrollback view model (pure helpers + systems).
+//!
+//! Operator `/help` / shell output lives in `TuiState::operator_panel`, **not** here.
 
 use {
     crate::session::{ContentBlock, ContentBlockEntity},
@@ -9,17 +11,29 @@ use {
     },
 };
 
-/// One renderable scrollback line (foundation: plain text).
+/// One renderable scrollback line (conversation only).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScrollbackLine {
     pub text: String,
+    /// Turn this line belongs to.
+    pub turn_seq: Option<u64>,
+    /// True for the `── turn N ──` boundary line (user-turn jump targets).
+    pub is_turn_start: bool,
 }
 
 /// View model rebuilt from Session ECS for the focused session.
 #[derive(Clone, Debug, Default, Resource)]
 pub struct ScrollbackView {
     pub lines: Vec<ScrollbackLine>,
+    /// Indices into `lines` where `is_turn_start` is true (ascending).
+    pub turn_starts: Vec<usize>,
     pub empty_placeholder: bool,
+}
+
+impl ScrollbackView {
+    pub fn line_count(&self) -> usize {
+        self.lines.len()
+    }
 }
 
 /// Build ordered lines from content blocks (sorted by turn_seq, then block_index, then seq).
@@ -37,6 +51,8 @@ pub fn lines_from_blocks(mut blocks: Vec<&ContentBlock>) -> Vec<ScrollbackLine> 
         if last_turn != Some(block.turn_seq) {
             lines.push(ScrollbackLine {
                 text: format!("── turn {} ──", block.turn_seq),
+                turn_seq: Some(block.turn_seq),
+                is_turn_start: true,
             });
             last_turn = Some(block.turn_seq);
         }
@@ -51,9 +67,21 @@ pub fn lines_from_blocks(mut blocks: Vec<&ContentBlock>) -> Vec<ScrollbackLine> 
         } else {
             format!("[{kind}] {body}")
         };
-        () = lines.push(ScrollbackLine { text });
+        () = lines.push(ScrollbackLine {
+            text,
+            turn_seq: Some(block.turn_seq),
+            is_turn_start: false,
+        });
     }
     lines
+}
+
+pub fn turn_starts_from_lines(lines: &[ScrollbackLine]) -> Vec<usize> {
+    lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, l)| l.is_turn_start.then_some(i))
+        .collect()
 }
 
 pub fn rebuild_scrollback_view(
@@ -63,10 +91,12 @@ pub fn rebuild_scrollback_view(
     let refs: Vec<&ContentBlock> = blocks_q.iter().collect();
     if refs.is_empty() {
         view.lines.clear();
+        view.turn_starts.clear();
         view.empty_placeholder = true;
         return;
     }
     view.lines = lines_from_blocks(refs);
+    view.turn_starts = turn_starts_from_lines(&view.lines);
     view.empty_placeholder = false;
 }
 
@@ -98,10 +128,13 @@ mod tests {
         let c = block(1, 0, 1, "text", "first turn a");
         let lines = lines_from_blocks(vec![&a, &b, &c]);
         assert_eq!(lines[0].text, "── turn 1 ──");
+        assert!(lines[0].is_turn_start);
         assert!(lines[1].text.contains("first turn a"));
         assert!(lines[2].text.contains("first turn b"));
         assert_eq!(lines[3].text, "── turn 2 ──");
+        assert!(lines[3].is_turn_start);
         assert!(lines[4].text.contains("second turn"));
+        assert_eq!(turn_starts_from_lines(&lines), vec![0, 3]);
     }
 
     #[test]

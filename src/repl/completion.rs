@@ -45,7 +45,7 @@ fn path_filename_component(partial: &str) -> String {
 }
 
 /// Character index bounds `[start, end)` of the token being completed at `cursor` (in chars).
-pub(super) fn token_bounds(line: &str, cursor: usize) -> (usize, usize) {
+pub fn token_bounds(line: &str, cursor: usize) -> (usize, usize) {
     let cursor = cursor.min(line.chars().count());
     let end_byte = line
         .char_indices()

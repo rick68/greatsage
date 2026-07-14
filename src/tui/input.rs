@@ -1,9 +1,15 @@
-//! Keyboard input via `bevy_ratatui::event::KeyMessage`.
+//! Keyboard + mouse input via `bevy_ratatui` messages.
 
 use {
     super::{
         commands::is_ui_quit_line,
-        state::{TuiFocus, TuiState},
+        nav::{jump_end, jump_home, jump_turn, move_selection_by, ratatui_scroll_y, scroll_page},
+        scrollback::ScrollbackView,
+        slash_complete::{
+            TabSlashResult, enter_should_accept_menu, handle_prompt_tab, move_menu_highlight,
+            refresh_slash_completion, try_dismiss_slash_menu,
+        },
+        state::{ESC_CLEAR_WINDOW, TuiFocus, TuiState, rect_contains},
     },
     crate::{
         agents::{AgentConfig, CodingAgent, CodingAgentPromptChannel},
@@ -21,10 +27,11 @@ use {
         },
     },
     bevy_ratatui::{
-        crossterm::event::{KeyCode, KeyEventKind, KeyModifiers},
-        event::KeyMessage,
+        crossterm::event::{KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind},
+        event::{KeyMessage, MouseMessage},
     },
     bevy_tokio_tasks::TokioTasksRuntime,
+    std::time::Instant,
 };
 
 /// Live-stream body + finish footer for `/run` / `!` (shared path with line REPL).
@@ -36,12 +43,8 @@ pub fn poll_shell_system(mut session: ResMut<ReplSessionState>, mut state: ResMu
     while let Some(live) = crate::repl::shell_run::try_recv_shell_live(handle) {
         handle.body_streamed = true;
         let line = crate::repl::shell_run::format_live_stream_line(&live);
-        // TUI status lines are plain text; strip style markers for display.
-        let display = line
-            .strip_prefix(crate::repl::shell_run::RUN_STDERR_BODY_PREFIX)
-            .or_else(|| line.strip_prefix(crate::repl::shell_run::RUN_STDIN_EOF_BODY_PREFIX))
-            .unwrap_or(line.as_str());
-        () = state.push_status(display.to_string());
+        let display = strip_shell_prefix(&line);
+        () = state.push_operator_line(display.to_string());
     }
 
     let Some(result) = crate::repl::shell_run::try_recv_shell_result(handle) else {
@@ -50,11 +53,8 @@ pub fn poll_shell_system(mut session: ResMut<ReplSessionState>, mut state: ResMu
     while let Some(live) = crate::repl::shell_run::try_recv_shell_live(handle) {
         handle.body_streamed = true;
         let line = crate::repl::shell_run::format_live_stream_line(&live);
-        let display = line
-            .strip_prefix(crate::repl::shell_run::RUN_STDERR_BODY_PREFIX)
-            .or_else(|| line.strip_prefix(crate::repl::shell_run::RUN_STDIN_EOF_BODY_PREFIX))
-            .unwrap_or(line.as_str());
-        () = state.push_status(display.to_string());
+        let display = strip_shell_prefix(&line);
+        () = state.push_operator_line(display.to_string());
     }
     let body_streamed = handle.body_streamed;
     session.active_shell = None;
@@ -66,17 +66,91 @@ pub fn poll_shell_system(mut session: ResMut<ReplSessionState>, mut state: ResMu
     let (output, detail) =
         crate::repl::shell_run::format_run_output_lines_ex(&result, body_streamed);
     for line in output.into_iter().chain(detail) {
-        let display = line
-            .strip_prefix(crate::repl::shell_run::RUN_STDERR_BODY_PREFIX)
-            .or_else(|| line.strip_prefix(crate::repl::shell_run::RUN_STDIN_EOF_BODY_PREFIX))
-            .unwrap_or(line.as_str());
-        () = state.push_status(display.to_string());
+        let display = strip_shell_prefix(&line);
+        () = state.push_operator_line(display.to_string());
+    }
+}
+
+fn strip_shell_prefix(line: &str) -> &str {
+    line.strip_prefix(crate::repl::shell_run::RUN_STDERR_BODY_PREFIX)
+        .or_else(|| line.strip_prefix(crate::repl::shell_run::RUN_STDIN_EOF_BODY_PREFIX))
+        .unwrap_or(line)
+}
+
+/// Mouse: left-click focuses panes; wheel scrolls panel or scrollback.
+pub fn mouse_input_system(
+    mut mice: MessageReader<MouseMessage>,
+    mut state: ResMut<TuiState>,
+    scrollback: Res<ScrollbackView>,
+) {
+    let line_count = scrollback.line_count();
+    for message in mice.read() {
+        let ev = message.0;
+        match ev.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if state.operator_panel.open
+                    && rect_contains(state.operator_panel.last_rect, ev.column, ev.row)
+                {
+                    let rect = state.operator_panel.last_rect;
+                    if rect.width > 2 && rect.height > 2 && !state.operator_panel.lines.is_empty() {
+                        let inner_row = ev.row.saturating_sub(rect.y.saturating_add(1));
+                        let n = state.operator_panel.lines.len();
+                        let hi = state.operator_panel.selected.min(n.saturating_sub(1));
+                        let max_vis = (rect.height.saturating_sub(2) as usize).max(1);
+                        let start = if n <= max_vis {
+                            0
+                        } else {
+                            hi.saturating_sub(max_vis / 2).min(n - max_vis)
+                        };
+                        let idx = start.saturating_add(inner_row as usize).min(n - 1);
+                        state.operator_panel.selected = idx;
+                        state.sync_prompt_from_operator_selection();
+                    }
+                    continue;
+                }
+                if rect_contains(state.last_prompt_rect, ev.column, ev.row) {
+                    state.focus = TuiFocus::Prompt;
+                    state.clear_esc_arm();
+                } else if rect_contains(state.last_scrollback_rect, ev.column, ev.row) {
+                    state.focus = TuiFocus::Scrollback;
+                    state.clear_esc_arm();
+                    let rect = state.last_scrollback_rect;
+                    if rect.width > 2 && rect.height > 2 && line_count > 0 {
+                        let inner_row = ev.row.saturating_sub(rect.y.saturating_add(1));
+                        let inner_h = rect.height.saturating_sub(2).max(1);
+                        let top = ratatui_scroll_y(line_count, inner_h, state.scroll_from_bottom)
+                            as usize;
+                        let idx = top.saturating_add(inner_row as usize);
+                        state.selected_line = idx.min(line_count - 1);
+                    }
+                }
+            }
+            // Wheel: panel steals when open; else scrollback.
+            MouseEventKind::ScrollUp => {
+                if state.operator_panel.open {
+                    state.operator_panel.move_selection(1);
+                    state.sync_prompt_from_operator_selection();
+                } else {
+                    () = move_selection_by(&mut state, line_count, 1);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if state.operator_panel.open {
+                    state.operator_panel.move_selection(-1);
+                    state.sync_prompt_from_operator_selection();
+                } else {
+                    () = move_selection_by(&mut state, line_count, -1);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
 pub fn input_system(
     mut keys: MessageReader<KeyMessage>,
     mut state: ResMut<TuiState>,
+    scrollback: Res<ScrollbackView>,
     mut exit: MessageWriter<AppExit>,
     prompt_channel: Res<CodingAgentPromptChannel>,
     mut agent_config: ResMut<AgentConfig>,
@@ -87,15 +161,20 @@ pub fn input_system(
     tokio_runtime: Res<TokioTasksRuntime>,
     runtime_status: Query<&SessionRuntimeStatus>,
 ) {
+    let line_count = scrollback.line_count();
+    let turn_starts = scrollback.turn_starts.clone();
+    let agent_busy = runtime_status.iter().any(|s| s.is_processing());
+
     for message in keys.read() {
         if message.kind != KeyEventKind::Press && message.kind != KeyEventKind::Repeat {
             continue;
         }
 
+        // ── Ctrl+C / Ctrl+D (foundation) ──────────────────────────────────
         if message.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(message.code, KeyCode::Char('c') | KeyCode::Char('C'))
         {
-            // Second consecutive Ctrl+C → Leave app.
+            state.clear_esc_arm();
             if session.ctrl_c_armed {
                 if let Some(handle) = session.active_shell.as_mut() {
                     crate::repl::shell_run::request_shell_interrupt(handle);
@@ -108,13 +187,12 @@ pub fn input_system(
             }
 
             if let Some(handle) = session.active_shell.as_mut() {
-                () = crate::repl::shell_run::request_shell_interrupt(handle);
+                crate::repl::shell_run::request_shell_interrupt(handle);
                 session.ctrl_c_armed = true;
-                () = state.push_status("^C");
+                () = state.set_status_hint("^C");
                 continue;
             }
 
-            let agent_busy = runtime_status.iter().any(|s| s.is_processing());
             if agent_busy {
                 if let Some(agent_res) = coding_agent.as_ref() {
                     let agent: crate::agents::CodingAgent = (**agent_res).clone();
@@ -124,11 +202,10 @@ pub fn input_system(
                     });
                 }
                 session.ctrl_c_armed = true;
-                () = state.push_status("^C");
+                () = state.set_status_hint("^C");
                 continue;
             }
 
-            // Idle first press: cancel line + arm
             () = state.clear_prompt();
             session.ctrl_c_armed = true;
             continue;
@@ -137,6 +214,7 @@ pub fn input_system(
         if message.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(message.code, KeyCode::Char('d') | KeyCode::Char('D'))
         {
+            state.clear_esc_arm();
             if let Some(handle) = session.active_shell.as_ref() {
                 crate::repl::shell_run::request_shell_stdin_eof(handle);
                 continue;
@@ -150,65 +228,192 @@ pub fn input_system(
             continue;
         }
 
-        // Other keys clear double-Ctrl+C arm
         if session.ctrl_c_armed {
             session.ctrl_c_armed = false;
         }
 
+        // ── Esc steal: operator panel → slash menu → clear contract ───────
+        if message.code == KeyCode::Esc {
+            if state.operator_panel.open {
+                state.close_operator_panel();
+                continue;
+            }
+            if try_dismiss_slash_menu(&mut state) {
+                refresh_slash_completion(&mut state, &agent_config, false);
+                continue;
+            }
+            handle_esc(
+                &mut state,
+                agent_busy || session.active_shell.is_some(),
+                Instant::now(),
+            );
+            continue;
+        }
+
+        // ── Operator panel navigation (separate window; not scrollback) ───
+        if state.operator_panel.open {
+            match message.code {
+                KeyCode::Up => {
+                    state.operator_panel.move_selection(-1);
+                    state.sync_prompt_from_operator_selection();
+                }
+                KeyCode::Down => {
+                    state.operator_panel.move_selection(1);
+                    state.sync_prompt_from_operator_selection();
+                }
+                KeyCode::PageUp => {
+                    state.operator_panel.move_selection(-10);
+                    state.sync_prompt_from_operator_selection();
+                }
+                KeyCode::PageDown => {
+                    state.operator_panel.move_selection(10);
+                    state.sync_prompt_from_operator_selection();
+                }
+                KeyCode::Home => {
+                    state.operator_panel.selected = 0;
+                    state.sync_prompt_from_operator_selection();
+                }
+                KeyCode::End => {
+                    let n = state.operator_panel.lines.len();
+                    state.operator_panel.selected = n.saturating_sub(1);
+                    state.sync_prompt_from_operator_selection();
+                }
+                KeyCode::Enter => {
+                    // Fill prompt from selection; close panel; stay ready to run.
+                    state.sync_prompt_from_operator_selection();
+                    state.close_operator_panel();
+                    state.focus = TuiFocus::Prompt;
+                    refresh_slash_completion(&mut state, &agent_config, false);
+                }
+                KeyCode::Tab => {
+                    state.focus = TuiFocus::Prompt;
+                    state.clear_esc_arm();
+                    refresh_slash_completion(&mut state, &agent_config, false);
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        // ── Page keys: both foci ──────────────────────────────────────────
+        if matches!(message.code, KeyCode::PageUp | KeyCode::PageDown)
+            && !message.modifiers.contains(KeyModifiers::SHIFT)
+        {
+            let up = message.code == KeyCode::PageUp;
+            () = scroll_page(&mut state, line_count, up);
+            continue;
+        }
+
+        // ── Scrollback-focused navigation ─────────────────────────────────
+        if state.focus == TuiFocus::Scrollback {
+            match message.code {
+                KeyCode::Tab => {
+                    state.focus = TuiFocus::Prompt;
+                    state.clear_esc_arm();
+                    refresh_slash_completion(&mut state, &agent_config, false);
+                }
+                KeyCode::Char(' ')
+                    if !message
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                {
+                    state.focus = TuiFocus::Prompt;
+                    state.clear_esc_arm();
+                    refresh_slash_completion(&mut state, &agent_config, false);
+                }
+                KeyCode::Up => move_selection_by(&mut state, line_count, -1),
+                KeyCode::Down => move_selection_by(&mut state, line_count, 1),
+                KeyCode::Left if message.modifiers.contains(KeyModifiers::SHIFT) => {
+                    jump_turn(&mut state, &turn_starts, line_count, false);
+                }
+                KeyCode::Right if message.modifiers.contains(KeyModifiers::SHIFT) => {
+                    jump_turn(&mut state, &turn_starts, line_count, true);
+                }
+                KeyCode::Home => jump_home(&mut state, line_count),
+                KeyCode::End => jump_end(&mut state, line_count),
+                KeyCode::Char(c)
+                    if !message.modifiers.contains(KeyModifiers::CONTROL)
+                        && !message.modifiers.contains(KeyModifiers::ALT)
+                        && !c.is_control() =>
+                {
+                    state.focus = TuiFocus::Prompt;
+                    () = state.clear_esc_arm();
+                    insert_char(&mut state, c);
+                    refresh_slash_completion(&mut state, &agent_config, false);
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        // ── Prompt-focused: menu arrows before edit keys ──────────────────
+        if state.slash_menu.open {
+            match message.code {
+                KeyCode::Up => {
+                    move_menu_highlight(&mut state, -1);
+                    continue;
+                }
+                KeyCode::Down => {
+                    move_menu_highlight(&mut state, 1);
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
+        // ── Prompt-focused edit ───────────────────────────────────────────
         match message.code {
             KeyCode::Tab => {
-                state.focus = match state.focus {
-                    TuiFocus::Prompt => TuiFocus::Scrollback,
-                    TuiFocus::Scrollback => TuiFocus::Prompt,
-                };
-            }
-            KeyCode::Esc => {
-                state.focus = TuiFocus::Prompt;
-            }
-            KeyCode::PageUp if state.focus == TuiFocus::Scrollback => {
-                state.scroll_from_bottom = state.scroll_from_bottom.saturating_add(5);
-            }
-            KeyCode::PageDown if state.focus == TuiFocus::Scrollback => {
-                state.scroll_from_bottom = state.scroll_from_bottom.saturating_sub(5);
-            }
-            KeyCode::Char(c) if state.focus == TuiFocus::Prompt => {
-                let idx = state.cursor.min(state.prompt.len());
-                () = state.prompt.insert(idx, c);
-                state.cursor = idx + c.len_utf8();
-            }
-            KeyCode::Backspace if state.focus == TuiFocus::Prompt => {
-                if state.cursor > 0 {
-                    let idx = state.cursor;
-                    let prev = state.prompt[..idx]
-                        .char_indices()
-                        .next_back()
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                    () = state.prompt.replace_range(prev..idx, "");
-                    state.cursor = prev;
+                state.clear_esc_arm();
+                match handle_prompt_tab(&mut state, &agent_config) {
+                    TabSlashResult::Completing => {}
+                    TabSlashResult::FocusScrollback => {
+                        state.focus = TuiFocus::Scrollback;
+                    }
                 }
             }
-            KeyCode::Left if state.focus == TuiFocus::Prompt => {
-                if state.cursor > 0 {
-                    let prev = state.prompt[..state.cursor]
-                        .char_indices()
-                        .next_back()
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                    state.cursor = prev;
-                }
+            KeyCode::Char(c)
+                if !message.modifiers.contains(KeyModifiers::CONTROL)
+                    && !message.modifiers.contains(KeyModifiers::ALT)
+                    && !c.is_control() =>
+            {
+                state.clear_esc_arm();
+                () = insert_char(&mut state, c);
+                refresh_slash_completion(&mut state, &agent_config, false);
             }
-            KeyCode::Right if state.focus == TuiFocus::Prompt => {
-                if state.cursor < state.prompt.len() {
-                    let next = state.prompt[state.cursor..]
-                        .chars()
-                        .next()
-                        .map(|c| state.cursor + c.len_utf8())
-                        .unwrap_or(state.prompt.len());
-                    state.cursor = next;
-                }
+            KeyCode::Backspace => {
+                state.clear_esc_arm();
+                () = backspace(&mut state);
+                refresh_slash_completion(&mut state, &agent_config, false);
             }
-            KeyCode::Enter if state.focus == TuiFocus::Prompt => {
+            KeyCode::Left if !message.modifiers.contains(KeyModifiers::SHIFT) => {
+                state.clear_esc_arm();
+                () = move_cursor_left(&mut state);
+                refresh_slash_completion(&mut state, &agent_config, false);
+            }
+            KeyCode::Right if !message.modifiers.contains(KeyModifiers::SHIFT) => {
+                state.clear_esc_arm();
+                () = move_cursor_right(&mut state);
+                refresh_slash_completion(&mut state, &agent_config, false);
+            }
+            KeyCode::Home => {
+                () = state.clear_esc_arm();
+                state.cursor = 0;
+                refresh_slash_completion(&mut state, &agent_config, false);
+            }
+            KeyCode::End => {
+                state.clear_esc_arm();
+                state.cursor = state.prompt.len();
+                refresh_slash_completion(&mut state, &agent_config, false);
+            }
+            KeyCode::Enter => {
+                state.clear_esc_arm();
+                // Menu open → accept only (no dispatch / no agent submit).
+                if enter_should_accept_menu(&state) {
+                    let _ =
+                        super::slash_complete::accept_slash_candidate(&mut state, &agent_config);
+                    continue;
+                }
                 let line = state.prompt.trim().to_string();
                 if line.is_empty() {
                     continue;
@@ -219,7 +424,7 @@ pub fn input_system(
                     return;
                 }
                 if line.starts_with('/') {
-                    let session_processing = runtime_status.iter().any(|s| s.is_processing());
+                    let session_processing = agent_busy;
                     () = handle_slash(
                         &line,
                         &mut state,
@@ -236,12 +441,82 @@ pub fn input_system(
                 } else {
                     session.ctrl_c_armed = false;
                     () = prompt_channel.send_prompt(line);
-                    () = state.push_status("prompt sent");
+                    () = state.set_status_hint("prompt sent");
                 }
             }
             _ => {}
         }
     }
+}
+
+/// Pure Esc handling for tests + `input_system` (menu already dismissed by caller).
+pub fn handle_esc(state: &mut TuiState, busy: bool, now: Instant) {
+    if busy {
+        // Grok: Esc does not cancel mid-turn
+        return;
+    }
+    if state.focus != TuiFocus::Prompt {
+        // Clear is prompt-pane only; scrollback Esc is no-op
+        return;
+    }
+    if state.prompt.is_empty() {
+        return;
+    }
+    match state.esc_armed_at {
+        Some(armed) if now.duration_since(armed) <= ESC_CLEAR_WINDOW => {
+            () = state.clear_prompt();
+            () = state.clear_esc_arm();
+            () = state.set_status_hint("prompt cleared");
+        }
+        _ => {
+            state.esc_armed_at = Some(now);
+            () = state.set_status_hint("press Esc again to clear");
+        }
+    }
+}
+
+fn insert_char(state: &mut TuiState, c: char) {
+    let idx = state.cursor.min(state.prompt.len());
+    () = state.prompt.insert(idx, c);
+    state.cursor = idx + c.len_utf8();
+}
+
+fn backspace(state: &mut TuiState) {
+    if state.cursor == 0 {
+        return;
+    }
+    let idx = state.cursor;
+    let prev = state.prompt[..idx]
+        .char_indices()
+        .next_back()
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    () = state.prompt.replace_range(prev..idx, "");
+    state.cursor = prev;
+}
+
+fn move_cursor_left(state: &mut TuiState) {
+    if state.cursor == 0 {
+        return;
+    }
+    let prev = state.prompt[..state.cursor]
+        .char_indices()
+        .next_back()
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    state.cursor = prev;
+}
+
+fn move_cursor_right(state: &mut TuiState) {
+    if state.cursor >= state.prompt.len() {
+        return;
+    }
+    let next = state.prompt[state.cursor..]
+        .chars()
+        .next()
+        .map(|c| state.cursor + c.len_utf8())
+        .unwrap_or(state.prompt.len());
+    state.cursor = next;
 }
 
 fn handle_slash(
@@ -278,35 +553,110 @@ fn handle_slash(
             redraw_prompt: _,
             reinstall,
         } => {
-            for line in output.into_iter().chain(detail) {
-                () = state.push_status(line);
-            }
+            // Multi-line slash output → operator panel (not Session ECS scrollback).
+            let mut lines: Vec<String> = output.into_iter().chain(detail).collect();
             if reinstall.is_some() {
-                () = state.push_status(
-                    "(reinstall requested — use line REPL for full agent reinstall in foundation)",
+                lines.push(
+                    "(reinstall requested — use line REPL for full agent reinstall in foundation)"
+                        .into(),
                 );
             }
+            let title = line
+                .split_whitespace()
+                .next()
+                .unwrap_or("output")
+                .trim_start_matches('/')
+                .to_string();
+            () = state.open_operator_panel(title, lines);
         }
         DispatchResult::ResendPrompt { prompt, hint } => {
-            () = state.push_status(hint);
+            () = state.set_status_hint(hint);
             session.ctrl_c_armed = false;
             () = prompt_channel.send_prompt(prompt);
         }
         DispatchResult::AgentOp(inv) => {
-            for line in inv.preamble {
-                () = state.push_status(line);
-            }
-            () = state.push_status(
-                "(agent file ops simplified in TUI foundation — use line REPL for /save /load /jump)",
+            let mut lines = inv.preamble;
+            () = lines.push(
+                "(agent file ops simplified in TUI foundation — use line REPL for /save /load /jump)"
+                    .into(),
             );
+            () = state.open_operator_panel("agent", lines);
         }
         DispatchResult::AwaitClearConfirm { prompt } => {
-            () = state.push_status(prompt);
-            () = state
-                .push_status("clear confirm: use line REPL for multi-step confirm in foundation");
+            () = state.open_operator_panel(
+                "confirm",
+                [
+                    prompt,
+                    "clear confirm: use line REPL for multi-step confirm in foundation".into(),
+                ],
+            );
         }
         DispatchResult::Unknown => {
-            () = state.push_status(format!("unknown command: {line}"));
+            () = state.open_operator_panel("unknown", [format!("unknown command: {line}")]);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn esc_does_not_clear_when_busy() {
+        let mut s = TuiState::default();
+        s.prompt = "hello".into();
+        s.cursor = 5;
+        handle_esc(&mut s, true, Instant::now());
+        assert_eq!(s.prompt, "hello");
+        assert!(s.esc_armed_at.is_none());
+    }
+
+    #[test]
+    fn double_esc_clears_prompt() {
+        let mut s = TuiState::default();
+        s.focus = TuiFocus::Prompt;
+        s.prompt = "draft".into();
+        s.cursor = 5;
+        let t0 = Instant::now();
+        handle_esc(&mut s, false, t0);
+        assert_eq!(s.prompt, "draft");
+        assert!(s.esc_armed_at.is_some());
+        handle_esc(&mut s, false, t0 + Duration::from_millis(100));
+        assert!(s.prompt.is_empty());
+        assert_eq!(s.cursor, 0);
+    }
+
+    #[test]
+    fn esc_on_scrollback_noops() {
+        let mut s = TuiState::default();
+        s.focus = TuiFocus::Scrollback;
+        s.prompt = "x".into();
+        handle_esc(&mut s, false, Instant::now());
+        assert_eq!(s.prompt, "x");
+        assert_eq!(s.focus, TuiFocus::Scrollback);
+    }
+
+    #[test]
+    fn esc_empty_prompt_noop() {
+        let mut s = TuiState::default();
+        s.focus = TuiFocus::Prompt;
+        handle_esc(&mut s, false, Instant::now());
+        assert!(s.esc_armed_at.is_none());
+    }
+
+    #[test]
+    fn rect_contains_hit_test() {
+        use ratatui::layout::Rect;
+        let r = Rect {
+            x: 0,
+            y: 10,
+            width: 80,
+            height: 3,
+        };
+        assert!(rect_contains(r, 0, 10));
+        assert!(rect_contains(r, 79, 12));
+        assert!(!rect_contains(r, 80, 10));
+        assert!(!rect_contains(r, 0, 9));
     }
 }

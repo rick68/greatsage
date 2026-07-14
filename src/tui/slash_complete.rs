@@ -1,0 +1,356 @@
+//! Slash autocomplete helpers for TUI (shared engine: `repl::completion`).
+
+use {
+    super::state::{SlashMenuState, TuiFocus, TuiState},
+    crate::{
+        agents::AgentConfig,
+        repl::{
+            apply_replacement, common_prefix, completions, inline_hint, token_bounds, token_prefix,
+        },
+    },
+};
+
+/// Max candidate rows drawn in the TUI menu.
+pub const SLASH_MENU_MAX_ROWS: usize = 8;
+
+/// Result of Tab while prompt-focused.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TabSlashResult {
+    /// Accepted or expanded a slash candidate (stay on prompt).
+    Completing,
+    /// Not slash-completing — caller should toggle focus to scrollback.
+    FocusScrollback,
+}
+
+fn cursor_char_index(prompt: &str, cursor_byte: usize) -> usize {
+    let byte = cursor_byte.min(prompt.len());
+    prompt[..byte].chars().count()
+}
+
+fn char_index_to_byte(prompt: &str, char_idx: usize) -> usize {
+    prompt
+        .char_indices()
+        .nth(char_idx)
+        .map(|(i, _)| i)
+        .unwrap_or(prompt.len())
+}
+
+/// Close menu and drop cached candidates (ghost cleared separately by refresh).
+pub fn close_slash_menu(state: &mut TuiState) {
+    state.slash_menu = SlashMenuState::default();
+}
+
+/// Recompute ghost + candidates. Opens menu when eligible (not bare `/` unless `force_open`).
+pub fn refresh_slash_completion(
+    state: &mut TuiState,
+    agent_config: &AgentConfig,
+    force_open: bool,
+) {
+    let prompt = state.prompt.as_str();
+    if !prompt.starts_with('/') {
+        state.ghost_hint = None;
+        close_slash_menu(state);
+        return;
+    }
+
+    let cursor_chars = cursor_char_index(prompt, state.cursor);
+    let at_end = cursor_chars == prompt.chars().count();
+    state.ghost_hint = if at_end {
+        inline_hint(prompt, cursor_chars, agent_config)
+    } else {
+        None
+    };
+
+    let candidates = completions(prompt, cursor_chars, agent_config);
+    if candidates.is_empty() {
+        () = close_slash_menu(state);
+        return;
+    }
+
+    // Sole exact token match (e.g. draft `/status`, candidates `["/status"]`):
+    // keep ghost, **close menu** so the next Enter dispatches/submits instead of
+    // re-accepting forever. Args still incomplete (`/model ` → models) keep the menu.
+    let token = token_prefix(prompt, cursor_chars);
+    if candidates.len() == 1 && candidates[0] == token {
+        () = close_slash_menu(state);
+        return;
+    }
+
+    // Grok pin (foo2.png): typing `/` opens the command list immediately.
+    let prev = state.slash_menu.highlight;
+    let highlight = prev.min(candidates.len().saturating_sub(1));
+    let _ = force_open; // retained for Tab-force API; bare `/` now always opens
+    state.slash_menu = SlashMenuState {
+        open: true,
+        highlight,
+        candidates,
+    };
+}
+
+/// Accept the highlighted candidate into the draft; refresh afterward.
+/// Returns `true` if a candidate was applied.
+pub fn accept_slash_candidate(state: &mut TuiState, agent_config: &AgentConfig) -> bool {
+    if !state.slash_menu.open || state.slash_menu.candidates.is_empty() {
+        return false;
+    }
+    let idx = state
+        .slash_menu
+        .highlight
+        .min(state.slash_menu.candidates.len() - 1);
+    let replacement = state.slash_menu.candidates[idx].clone();
+    () = apply_token_to_prompt(state, &replacement);
+    // After accept, re-open only if further completions remain (args etc.).
+    () = refresh_slash_completion(state, agent_config, false);
+    true
+}
+
+fn apply_token_to_prompt(state: &mut TuiState, replacement: &str) {
+    let cursor_chars = cursor_char_index(&state.prompt, state.cursor);
+    let (start, end) = token_bounds(&state.prompt, cursor_chars);
+    state.prompt = apply_replacement(&state.prompt, start, end, replacement);
+    let new_end_chars = start + replacement.chars().count();
+    state.cursor = char_index_to_byte(&state.prompt, new_end_chars);
+}
+
+/// Tab on prompt: complete when slash-active; otherwise focus scrollback.
+pub fn handle_prompt_tab(state: &mut TuiState, agent_config: &AgentConfig) -> TabSlashResult {
+    if !state.prompt.starts_with('/') {
+        () = close_slash_menu(state);
+        state.ghost_hint = None;
+        return TabSlashResult::FocusScrollback;
+    }
+
+    // Menu open → accept highlight.
+    if state.slash_menu.open && !state.slash_menu.candidates.is_empty() {
+        let _ = accept_slash_candidate(state, agent_config);
+        return TabSlashResult::Completing;
+    }
+
+    let cursor_chars = cursor_char_index(&state.prompt, state.cursor);
+    let candidates = completions(&state.prompt, cursor_chars, agent_config);
+
+    if candidates.is_empty() {
+        // Slash line but no hits → still "completing" context? Spec: non-slash focus toggle.
+        // Bare unknown `/xyz` with no candidates: fall through to focus toggle is OK.
+        () = close_slash_menu(state);
+        state.ghost_hint = None;
+        return TabSlashResult::FocusScrollback;
+    }
+
+    if candidates.len() == 1 {
+        () = apply_token_to_prompt(state, &candidates[0]);
+        () = refresh_slash_completion(state, agent_config, false);
+        return TabSlashResult::Completing;
+    }
+
+    // Multi: expand common prefix if longer than token, then open menu.
+    let prefix = {
+        let (start, end) = token_bounds(&state.prompt, cursor_chars);
+        state
+            .prompt
+            .chars()
+            .skip(start)
+            .take(end.saturating_sub(start))
+            .collect::<String>()
+    };
+    let shared = common_prefix(&candidates);
+    if shared.len() > prefix.len() && shared.starts_with(&prefix) {
+        () = apply_token_to_prompt(state, &shared);
+    }
+    // Force open menu (including bare `/`).
+    () = refresh_slash_completion(state, agent_config, true);
+    TabSlashResult::Completing
+}
+
+/// Move menu highlight by `delta` (±1); wraps.
+pub fn move_menu_highlight(state: &mut TuiState, delta: i32) {
+    if !state.slash_menu.open || state.slash_menu.candidates.is_empty() {
+        return;
+    }
+    let n = state.slash_menu.candidates.len() as i32;
+    let cur = state.slash_menu.highlight as i32;
+    let next = (cur + delta).rem_euclid(n) as usize;
+    state.slash_menu.highlight = next;
+}
+
+/// Esc with menu open: dismiss only. Returns `true` if consumed.
+pub fn try_dismiss_slash_menu(state: &mut TuiState) -> bool {
+    if state.slash_menu.open {
+        () = close_slash_menu(state);
+        // Keep ghost if still slash; refresh without force (may stay closed on bare `/`)
+        // Caller supplies AgentConfig for full refresh; here only dismiss menu.
+        state.ghost_hint = None;
+        return true;
+    }
+    false
+}
+
+/// Whether prompt Enter should accept menu instead of submit/dispatch.
+pub fn enter_should_accept_menu(state: &TuiState) -> bool {
+    state.focus == TuiFocus::Prompt
+        && state.slash_menu.open
+        && !state.slash_menu.candidates.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{agents::AgentConfig, providers::Provider};
+
+    fn test_config() -> AgentConfig {
+        AgentConfig {
+            model: Provider::Anthropic.default_model().to_string(),
+            provider: Provider::Anthropic,
+            api_key: String::new(),
+            base_url: String::new(),
+            skills: Default::default(),
+            system_prompt: String::new(),
+            mcp: Vec::new(),
+            shell_hooks: Vec::new(),
+        }
+    }
+
+    fn state_with(prompt: &str) -> TuiState {
+        let mut s = TuiState::default();
+        s.focus = TuiFocus::Prompt;
+        s.prompt = prompt.to_string();
+        s.cursor = s.prompt.len();
+        s
+    }
+
+    #[test]
+    fn bare_slash_opens_menu_like_grok() {
+        let cfg = test_config();
+        let mut s = state_with("/");
+        () = refresh_slash_completion(&mut s, &cfg, false);
+        assert!(s.slash_menu.open);
+        assert!(
+            s.slash_menu.candidates.iter().any(|c| c == "/help"),
+            "candidates: {:?}",
+            s.slash_menu.candidates
+        );
+    }
+
+    #[test]
+    fn prefix_opens_menu_with_shared_completions() {
+        let cfg = test_config();
+        let mut s = state_with("/pr");
+        () = refresh_slash_completion(&mut s, &cfg, false);
+        assert!(s.slash_menu.open);
+        assert!(
+            s.slash_menu.candidates.iter().any(|c| c == "/provider"),
+            "candidates: {:?}",
+            s.slash_menu.candidates
+        );
+        assert!(s.ghost_hint.is_some());
+    }
+
+    #[test]
+    fn accept_replaces_token() {
+        let cfg = test_config();
+        let mut s = state_with("/pr");
+        () = refresh_slash_completion(&mut s, &cfg, false);
+        // Prefer /provider if present
+        if let Some(i) = s
+            .slash_menu
+            .candidates
+            .iter()
+            .position(|c| c == "/provider")
+        {
+            s.slash_menu.highlight = i;
+        }
+        assert!(accept_slash_candidate(&mut s, &cfg));
+        assert!(s.prompt.starts_with("/provider") || s.prompt == "/provider");
+    }
+
+    #[test]
+    fn exact_sole_command_closes_menu_so_enter_can_run() {
+        let cfg = test_config();
+        let mut s = state_with("/pr");
+        () = refresh_slash_completion(&mut s, &cfg, false);
+        if let Some(i) = s
+            .slash_menu
+            .candidates
+            .iter()
+            .position(|c| c == "/provider")
+        {
+            s.slash_menu.highlight = i;
+        }
+        assert!(accept_slash_candidate(&mut s, &cfg));
+        // After accepting a full unique command, menu must close so Enter dispatches.
+        assert!(
+            !s.slash_menu.open,
+            "menu still open after exact accept: {:?}",
+            s.slash_menu.candidates
+        );
+        assert!(!enter_should_accept_menu(&s));
+        assert_eq!(s.prompt, "/provider");
+    }
+
+    #[test]
+    fn typed_exact_command_does_not_trap_enter() {
+        let cfg = test_config();
+        let mut s = state_with("/status");
+        () = refresh_slash_completion(&mut s, &cfg, false);
+        assert!(
+            !s.slash_menu.open,
+            "exact /status must not keep sole-candidate menu open"
+        );
+        assert!(!enter_should_accept_menu(&s));
+    }
+
+    #[test]
+    fn tab_non_slash_focuses_scrollback() {
+        let cfg = test_config();
+        let mut s = state_with("hello");
+        assert_eq!(
+            handle_prompt_tab(&mut s, &cfg),
+            TabSlashResult::FocusScrollback
+        );
+    }
+
+    #[test]
+    fn tab_on_slash_completes() {
+        let cfg = test_config();
+        let mut s = state_with("/pr");
+        assert_eq!(handle_prompt_tab(&mut s, &cfg), TabSlashResult::Completing);
+        assert!(s.prompt.starts_with("/pr") || s.prompt.starts_with("/provider"));
+    }
+
+    #[test]
+    fn dismiss_menu_keeps_draft() {
+        let cfg = test_config();
+        let mut s = state_with("/pr");
+        () = refresh_slash_completion(&mut s, &cfg, false);
+        assert!(s.slash_menu.open);
+        assert!(try_dismiss_slash_menu(&mut s));
+        assert!(!s.slash_menu.open);
+        assert_eq!(s.prompt, "/pr");
+    }
+
+    #[test]
+    fn enter_should_accept_when_menu_open() {
+        let cfg = test_config();
+        let mut s = state_with("/pr");
+        () = refresh_slash_completion(&mut s, &cfg, false);
+        assert!(enter_should_accept_menu(&s));
+        () = close_slash_menu(&mut s);
+        assert!(!enter_should_accept_menu(&s));
+    }
+
+    #[test]
+    fn menu_highlight_wraps() {
+        let cfg = test_config();
+        let mut s = state_with("/c"); // several /c* commands
+        () = refresh_slash_completion(&mut s, &cfg, false);
+        if s.slash_menu.candidates.len() < 2 {
+            return;
+        }
+        let n = s.slash_menu.candidates.len();
+        s.slash_menu.highlight = n - 1;
+        () = move_menu_highlight(&mut s, 1);
+        assert_eq!(s.slash_menu.highlight, 0);
+        () = move_menu_highlight(&mut s, -1);
+        assert_eq!(s.slash_menu.highlight, n - 1);
+    }
+}

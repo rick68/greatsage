@@ -18,6 +18,10 @@ mod completion;
 mod context_display;
 mod cost;
 mod dispatch;
+/// Re-export for TUI slash autocomplete (same catalog engine as line REPL).
+pub(crate) use completion::{
+    apply_replacement, common_prefix, completions, inline_hint, token_bounds, token_prefix,
+};
 /// Re-export for `tui` slash forwarding (same dispatch as line REPL).
 pub(crate) use dispatch::{DispatchResult, dispatch_slash_command};
 pub(crate) mod help_data;

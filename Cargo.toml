@@ -12,9 +12,10 @@ bevy_brp_extras = { version = "0.20.1", optional = true }
 # crates.io 0.11.1 is Bevy 0.18-only; pin PR #98 (Bevy 0.19) until published.
 # https://github.com/ratatui/bevy_ratatui/pull/98
 bevy_ratatui = { git = "https://github.com/apekros/bevy_ratatui", rev = "556ac6b7bb896fdd91722b01e651dfc4a8ddc5a2", default-features = false, features = [
-    "std",
     "async_executor",
     "crossterm",
+    "mouse", # EnableMouseCapture + MousePlugin (click focus / wheel scroll in tui)
+    "std",
 ] }
 ratatui = "0.30"
 cfg-if = "1.0.4"

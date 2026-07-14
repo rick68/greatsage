@@ -1,7 +1,11 @@
 use {
+    crate::cli::{Cli, Command},
     bevy::{
         app::{App, PostUpdate},
-        ecs::message::{Message, MessageReader},
+        ecs::{
+            change_detection::Res,
+            message::{Message, MessageReader},
+        },
     },
     colored::{ColoredString, Colorize},
     std::io::{self, Write},
@@ -72,20 +76,47 @@ impl From<ColoredString> for StdoutMessage {
     }
 }
 
-fn print_stdout_message(mut messages: MessageReader<StdoutMessage>) {
-    if !messages.is_empty() {
-        let mut lock = io::stdout().lock();
+/// `greatsage tui` owns the terminal via bevy_ratatui alternate screen.
+/// Writing REPL/agent stream bytes to stdout would scramble the full-screen UI.
+fn stdout_print_enabled(cli: &Cli) -> bool {
+    !matches!(cli.command, Some(Command::Tui))
+}
 
-        for StdoutMessage(text) in messages.read() {
-            let _ = lock.write(text.replace('\n', "\r\n").as_bytes());
-        }
-
-        let _ = lock.flush();
+fn print_stdout_message(cli: Res<Cli>, mut messages: MessageReader<StdoutMessage>) {
+    if messages.is_empty() {
+        return;
     }
+
+    if !stdout_print_enabled(&cli) {
+        // Drain so the buffer does not grow forever; do not touch the TTY.
+        for _ in messages.read() {}
+        return;
+    }
+
+    let mut lock = io::stdout().lock();
+
+    for StdoutMessage(text) in messages.read() {
+        let _ = lock.write(text.replace('\n', "\r\n").as_bytes());
+    }
+
+    let _ = lock.flush();
 }
 
 pub(crate) fn stdout_plugin(app: &mut App) {
     app.add_message::<StdoutMessage>()
         .add_message::<ExternPromptSubmitted>()
         .add_systems(PostUpdate, print_stdout_message);
+}
+
+#[cfg(test)]
+mod tests {
+    use {super::*, clap::Parser};
+
+    #[test]
+    fn tui_disables_stdout_print() {
+        let mut cli = Cli::parse_from(["greatsage", "tui"]);
+        assert!(!stdout_print_enabled(&cli));
+        cli.command = None;
+        assert!(stdout_print_enabled(&cli));
+    }
 }
