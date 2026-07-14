@@ -32,6 +32,7 @@ mod session_dashboard;
 mod session_nav;
 pub(crate) mod session_ops;
 pub(crate) mod session_state;
+pub(crate) mod shell_bg;
 pub(crate) mod shell_run;
 pub(crate) mod startup_hints;
 
@@ -90,14 +91,13 @@ use {
     terminal::{
         erase_ahead_echo, redraw_input_line, replace_input_line_in_place, sync_inline_hint,
         write_quit_farewell_if_enabled, write_repl_handled_output, write_repl_response,
-        write_repl_shell_stream_line,
-        write_repl_response_lines, write_unknown_slash_feedback,
+        write_repl_response_lines, write_repl_shell_stream_line, write_unknown_slash_feedback,
     },
     unicode_width::UnicodeWidthChar,
 };
 
 fn setup(_app_cancel: Res<AppCancelToken>, _tokio_runtime: ResMut<TokioTasksRuntime>) {
-    crossterm::terminal::enable_raw_mode().expect("Failed to enable raw mode");
+    () = crossterm::terminal::enable_raw_mode().expect("Failed to enable raw mode");
 }
 
 fn print_system_prompt(
@@ -229,7 +229,7 @@ fn leave_repl_app(
         state.ctrl_c_armed = false;
     }
     () = persist_repl_history(history, &crate::config_paths::repl_history_path());
-    persist_session_on_exit(coding_agent, tokio_runtime.runtime());
+    () = persist_session_on_exit(coding_agent, tokio_runtime.runtime());
     () = commands.remove_resource::<CodingAgentTask>();
     () = write_quit_farewell_if_enabled(stdout, cli);
     exit.write_default();

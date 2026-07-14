@@ -92,10 +92,192 @@ fn style_cd_line(line: &str) -> String {
 }
 
 /// `/run` / `!` result: stdout body white; exit summary white on success, red on failure.
+/// Must not match `/bg list` rows (those contain `✗ exit` mid-line after `[id]`).
+/// Must not match `/bg output` (job body may contain exit-looking lines).
 fn is_run_output(output: &[String]) -> bool {
+    if is_bg_list_output(output) || is_bg_output_output(output) {
+        return false;
+    }
     output
         .iter()
         .any(|line| line.starts_with("✓ exit ") || line.starts_with("✗ exit "))
+}
+
+/// `/bg output`: every content line is tagged with [`crate::repl::shell_bg::BG_OUTPUT_BODY_PREFIX`].
+fn is_bg_output_output(output: &[String]) -> bool {
+    use crate::repl::shell_bg::BG_OUTPUT_BODY_PREFIX;
+    output
+        .iter()
+        .any(|line| line.starts_with(BG_OUTPUT_BODY_PREFIX))
+}
+
+/// Flush-left white (job capture body; omit header and empty notice included).
+fn style_bg_output_line(line: &str) -> String {
+    use crate::repl::shell_bg::BG_OUTPUT_BODY_PREFIX;
+    let body = line.strip_prefix(BG_OUTPUT_BODY_PREFIX).unwrap_or(line);
+    body.white().to_string()
+}
+
+/// `/bg list` (and bare `/bg`): header or empty message — flush-left, no REPL 2-space indent.
+fn is_bg_list_output(output: &[String]) -> bool {
+    output.first().is_some_and(|line| {
+        line == "No background jobs"
+            || line == "Background Jobs"
+            // tolerate accidental leading spaces
+            || line.trim() == "No background jobs"
+            || line.trim() == "Background Jobs"
+    })
+}
+
+fn style_bg_list_line(line: &str) -> String {
+    // Flush-left (no extra REPL indent). Row table indent `  [id] …` kept as-is.
+    // Use explicit `.to_string()` on each Colorize segment so ANSI is baked in
+    // before `format!` (colored 3 + multi-segment).
+    let trimmed = line.trim();
+    if trimmed == "Background Jobs" {
+        // bold green (not bright)
+        return "Background Jobs".bold().green().to_string();
+    }
+    if trimmed == "No background jobs" {
+        return "No background jobs".dimmed().to_string();
+    }
+
+    // Row: `  [id]  {status}  {elapsed}  {cmd}` (fields separated by two spaces).
+    let indent = if line.starts_with("  ") { "  " } else { "" };
+    let body = line.trim_start();
+    let Some(close) = body.find(']') else {
+        return line.dimmed().to_string();
+    };
+    if !body.starts_with('[') {
+        return line.dimmed().to_string();
+    }
+    let id_part = &body[..=close];
+    let after = body[close + 1..].trim_start();
+    let mut parts = after.splitn(3, "  ");
+    let status = parts.next().unwrap_or("");
+    let elapsed = parts.next().unwrap_or("");
+    let cmd = parts.next().unwrap_or("");
+
+    let status_styled = if status.contains('✓') {
+        // ✓ done — green
+        status.green().to_string()
+    } else if status.contains('✗') {
+        // ✗ exit N / ✗ done — red
+        status.red().to_string()
+    } else if status.contains('●') {
+        // ● running — yellow (yoyo)
+        status.yellow().to_string()
+    } else {
+        String::from(status)
+    };
+
+    format!(
+        "{indent}{}  {}  {}  {}",
+        id_part.bright_white().to_string(),
+        status_styled,
+        elapsed.dimmed().to_string(),
+        cmd.white().to_string()
+    )
+}
+
+#[cfg(test)]
+mod bg_list_style_tests {
+    use super::{style_bg_list_line, style_bg_output_line};
+    use crate::repl::shell_bg::BG_OUTPUT_BODY_PREFIX;
+    use colored::control;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// `colored::control::set_override` is process-global; parallel tests race.
+    fn force_color() -> MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        control::set_override(true);
+        guard
+    }
+
+    struct ClearColorOverride;
+    impl Drop for ClearColorOverride {
+        fn drop(&mut self) {
+            control::unset_override();
+        }
+    }
+
+    #[test]
+    fn exit_row_contains_red_ansi() {
+        let _lock = force_color();
+        let _clear = ClearColorOverride;
+        let s = style_bg_list_line("  [1]  ✗ exit 1  20s  ld");
+        assert!(s.contains('\u{1b}'), "no ansi: {s:?}");
+        assert!(s.contains("exit 1"), "styled={s:?}");
+        assert!(
+            s.contains("31") || s.contains("91"),
+            "expected red ANSI in {s:?}"
+        );
+    }
+
+    #[test]
+    fn header_bold_green() {
+        let _lock = force_color();
+        let _clear = ClearColorOverride;
+        let s = style_bg_list_line("Background Jobs");
+        assert!(s.contains("Background Jobs"), "{s:?}");
+        assert!(s.contains('\u{1b}'), "no ansi: {s:?}");
+        // bold is typically 1; green 32
+        assert!(
+            s.contains("1") && (s.contains("32") || s.contains("92")),
+            "expected bold green ANSI in {s:?}"
+        );
+    }
+
+    #[test]
+    fn bg_output_white_strips_prefix() {
+        let _lock = force_color();
+        let _clear = ClearColorOverride;
+        let s = style_bg_output_line(&format!("{BG_OUTPUT_BODY_PREFIX}hello"));
+        assert!(s.contains("hello"), "{s:?}");
+        assert!(!s.contains("BGOUT"), "prefix must not display: {s:?}");
+        assert!(s.contains('\u{1b}'), "no ansi: {s:?}");
+        // white is typically 37
+        assert!(
+            s.contains("37") || s.contains("97"),
+            "expected white ANSI in {s:?}"
+        );
+    }
+}
+
+/// `/bg run` started: `⚡ Background job [id] started: <cmd>` — flush-left.
+/// After ⚡ and before `:`: green; `[…]` bright green; command after `:` dim.
+fn is_bg_started_line(line: &str) -> bool {
+    line.starts_with("⚡ Background job")
+}
+
+fn style_bg_started_line(line: &str) -> String {
+    let Some(after_bolt) = line.strip_prefix('⚡') else {
+        return line.to_string();
+    };
+    let (before_colon, after_colon) = match after_bolt.split_once(':') {
+        Some((before, after)) => (before, Some(after)),
+        None => (after_bolt, None),
+    };
+
+    let mid = if let Some(open) = before_colon.find('[') {
+        if let Some(close_rel) = before_colon[open..].find(']') {
+            let close = open + close_rel;
+            let pre = &before_colon[..open];
+            let bracket = &before_colon[open..=close];
+            let post = &before_colon[close + 1..];
+            format!("{}{}{}", pre.green(), bracket.bright_green(), post.green())
+        } else {
+            before_colon.green().to_string()
+        }
+    } else {
+        before_colon.green().to_string()
+    };
+
+    match after_colon {
+        Some(cmd) => format!("⚡{mid}:{}", cmd.dimmed()),
+        None => format!("⚡{mid}"),
+    }
 }
 
 fn style_run_line(line: &str) -> String {
@@ -370,6 +552,10 @@ fn style_memory_line(line: &str) -> String {
 }
 
 fn style_repl_output_line(line: &str) -> String {
+    // `/bg` usage errors: flush-left red (no two-space REPL indent).
+    if line.starts_with("Usage: /bg") {
+        return line.red().to_string();
+    }
     if line.starts_with("unknown provider:") || line.starts_with("No models match") {
         format!("  {line}").yellow().to_string()
     } else {
@@ -416,10 +602,7 @@ pub(super) fn write_repl_detail_line(
 }
 
 /// Live `/run` body line (always uses run channel colors; no need for exit footer yet).
-pub(super) fn write_repl_shell_stream_line(
-    stdout: &mut MessageWriter<StdoutMessage>,
-    line: &str,
-) {
+pub(super) fn write_repl_shell_stream_line(stdout: &mut MessageWriter<StdoutMessage>, line: &str) {
     let styled = style_run_line(line);
     stdout.write(StdoutMessage::from(format!("{styled}\n")));
 }
@@ -435,6 +618,9 @@ pub(super) fn write_repl_handled_output(
     let memory_output = is_memory_output(output);
     let history_detail = is_history_detail_output(output);
     let cd_output = is_cd_output(output);
+    // bg list / bg output before run: list rows embed `✗ exit`; output body may too.
+    let bg_list_output = is_bg_list_output(output);
+    let bg_output_output = is_bg_output_output(output);
     let run_output = is_run_output(output);
     let context_mode = context_output_mode(output);
     let mut in_session_totals = false;
@@ -454,8 +640,14 @@ pub(super) fn write_repl_handled_output(
             style_history_detail_line(line)
         } else if cd_output {
             style_cd_line(line)
+        } else if bg_list_output {
+            style_bg_list_line(line)
+        } else if bg_output_output {
+            style_bg_output_line(line)
         } else if run_output {
             style_run_line(line)
+        } else if is_bg_started_line(line) {
+            style_bg_started_line(line)
         } else if let Some(mode) = context_mode {
             style_context_line(line, mode)
         } else {

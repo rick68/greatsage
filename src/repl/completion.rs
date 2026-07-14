@@ -429,6 +429,7 @@ fn complete_args(
         "/help" => complete_commands(prefix),
         "/context" => complete_context_subcommands(prefix),
         "/history" => complete_history_subcommands(prefix),
+        "/bg" => complete_bg_subcommands(prefix),
         _ => Vec::new(),
     }
 }
@@ -438,6 +439,16 @@ fn complete_history_subcommands(prefix: &str) -> Vec<String> {
         .into_iter()
         .filter(|s| s.starts_with(prefix))
         .map(str::to_string)
+        .collect()
+}
+
+fn complete_bg_subcommands(prefix: &str) -> Vec<String> {
+    // Keep in sync with `/bg` subcommands in shell_bg / yoyo (not imported — devenv completion shim).
+    let lower = prefix.to_lowercase();
+    ["run", "list", "output", "kill"]
+        .iter()
+        .filter(|sub| sub.starts_with(&lower))
+        .map(|sub| (*sub).to_string())
         .collect()
 }
 

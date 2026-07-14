@@ -146,6 +146,7 @@ pub(crate) fn dispatch_slash_command(
         route if route.is_shell() => match route {
             CommandRoute::Run => commands_shell::dispatch_run(args, &mut ctx),
             CommandRoute::Cd => commands_shell::dispatch_cd(args, &mut ctx),
+            CommandRoute::Bg => commands_shell::dispatch_bg(args, &mut ctx),
             _ => DispatchResult::Unknown,
         },
         route if route.is_info() => commands_info::dispatch(route, args, &ctx),

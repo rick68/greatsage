@@ -1,15 +1,27 @@
 //! Shell helpers for `/run`, `!`, and `/cd` (yoyo parity; no LLM).
 //!
-//! Active runs use a worker thread so the Bevy schedule is not frozen on
-//! `Command::output()`. Unix children run in their own process group for SIGINT.
+//! Active runs use `tokio::process` on the **app** Tokio runtime owned by
+//! [`bevy_tokio_tasks::TokioTasksRuntime`] (via `dispatch` / `runtime()`).
+//! Production code must not build a second Runtime — that conflicts with the
+//! plugin (which owns the reactor and may `block_on` on the main thread each
+//! tick). Nested I/O tasks use a cloned [`Handle`], never free `tokio::spawn`
+//! from a sync Bevy system.
+//!
+//! Live lines and completion cross the Bevy boundary via crossbeam `try_recv`
+//! (sync poll each frame). Unix children use their own process group for kill.
 
 use std::{
     env,
-    io::{BufRead, BufReader, Read},
     path::PathBuf,
-    process::{Child, ChildStdin, Command, ExitStatus, Stdio},
-    thread::{self, JoinHandle},
+    process::{ExitStatus, Stdio},
     time::{Duration, Instant},
+};
+
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    process::{Child, ChildStdin, Command},
+    runtime::Runtime,
+    sync::mpsc,
 };
 
 /// Result of running a shell command via `/run` or `!`.
@@ -52,7 +64,7 @@ pub(crate) struct ActiveShellHandle {
     pub result_rx: crossbeam_channel::Receiver<RunResult>,
     /// Line-oriented live output (stdout/stderr) while the child is still running.
     pub live_rx: crossbeam_channel::Receiver<ShellLiveLine>,
-    pub ctrl_tx: crossbeam_channel::Sender<ShellCtrl>,
+    pub ctrl_tx: mpsc::UnboundedSender<ShellCtrl>,
     /// True after the first soft interrupt was requested (second Ctrl+C → hard).
     pub soft_sent: bool,
     /// True once at least one live line was drained to the operator (skip re-print body).
@@ -68,18 +80,6 @@ pub(crate) fn parse_bang_command(line: &str) -> Option<&str> {
     let trimmed = line.trim_start();
     let rest = trimmed.strip_prefix('!')?;
     Some(rest.trim())
-}
-
-/// Live child for `/run` / `!` (owned by the worker thread).
-struct ShellChild {
-    child: Child,
-    stdin: Option<ChildStdin>,
-    stdout_reader: Option<JoinHandle<String>>,
-    stderr_reader: Option<JoinHandle<String>>,
-    command: String,
-    start: Instant,
-    /// Set when the operator sent Ctrl+D (close stdin write end).
-    stdin_eof: bool,
 }
 
 fn exit_code_from_status(status: ExitStatus) -> (i32, bool) {
@@ -100,8 +100,9 @@ fn signal_process_group(pid: u32, soft: bool) {
     #[cfg(unix)]
     {
         // process_group(0) ⇒ child's pid is the process-group id.
+        // Short-lived `kill` helper (std Command is fine; not the shell job itself).
         let arg = if soft { "-INT" } else { "-KILL" };
-        let _ = Command::new("kill")
+        let _ = std::process::Command::new("kill")
             .args([arg, &format!("-{pid}")])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -114,45 +115,28 @@ fn signal_process_group(pid: u32, soft: bool) {
 }
 
 /// Stream pipe line-by-line (yoyo `BufReader` parity), collect full text for `RunResult`.
-///
-/// Sends each line on `live_tx` as soon as a newline arrives so `/run top` updates
-/// while the child is still running (not only after exit).
-fn spawn_line_reader(
-    pipe: impl Read + Send + 'static,
+async fn read_lines_live(
+    pipe: impl tokio::io::AsyncRead + Unpin + Send + 'static,
     live_tx: crossbeam_channel::Sender<ShellLiveLine>,
     is_stderr: bool,
-) -> JoinHandle<String> {
-    thread::spawn(move || {
-        let mut reader = BufReader::new(pipe);
-        let mut collected = String::new();
-        let mut line_buf = String::new();
-        loop {
-            line_buf.clear();
-            match reader.read_line(&mut line_buf) {
-                Ok(0) => break,
-                Ok(_) => {
-                    let text = line_buf.trim_end_matches(['\r', '\n']).to_string();
-                    let _ = live_tx.send(ShellLiveLine {
-                        is_stderr,
-                        text: text.clone(),
-                    });
-                    if !collected.is_empty() {
-                        collected.push('\n');
-                    }
-                    () = collected.push_str(&text);
-                }
-                Err(_) => break,
-            }
+) -> String {
+    let mut reader = BufReader::new(pipe).lines();
+    let mut collected = String::new();
+    while let Ok(Some(text)) = reader.next_line().await {
+        let _ = live_tx.send(ShellLiveLine {
+            is_stderr,
+            text: text.clone(),
+        });
+        if !collected.is_empty() {
+            collected.push('\n');
         }
-        collected
-    })
+        collected.push_str(&text);
+    }
+    collected
 }
 
 /// Spawn `sh -c <cmd>` with piped stdio and (Unix) own process group.
-fn spawn_shell_child(
-    cmd: &str,
-    live_tx: crossbeam_channel::Sender<ShellLiveLine>,
-) -> Result<ShellChild, String> {
+fn spawn_shell_child(cmd: &str) -> Result<(Child, Option<ChildStdin>), String> {
     let mut command = Command::new("sh");
     command
         .args(["-c", cmd])
@@ -163,111 +147,63 @@ fn spawn_shell_child(
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        command.process_group(0);
+        command.as_std_mut().process_group(0);
     }
 
     let mut child = command
         .spawn()
         .map_err(|e| format!("error running command: {e}"))?;
-
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "missing stdout pipe".to_string())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "missing stderr pipe".to_string())?;
     let stdin = child.stdin.take();
-
-    Ok(ShellChild {
-        child,
-        stdin,
-        stdout_reader: Some(spawn_line_reader(stdout, live_tx.clone(), false)),
-        stderr_reader: Some(spawn_line_reader(stderr, live_tx, true)),
-        command: cmd.to_string(),
-        start: Instant::now(),
-        stdin_eof: false,
-    })
+    Ok((child, stdin))
 }
 
-fn apply_ctrl(shell: &mut ShellChild, ctrl: ShellCtrl) {
+async fn apply_ctrl(
+    child: &mut Child,
+    stdin: &mut Option<ChildStdin>,
+    stdin_eof: &mut bool,
+    ctrl: ShellCtrl,
+) {
     match ctrl {
         ShellCtrl::SoftInterrupt => {
-            let pid = shell.child.id();
-            signal_process_group(pid, true);
+            if let Some(pid) = child.id() {
+                signal_process_group(pid, true);
+            }
             #[cfg(not(unix))]
             {
-                let _ = shell.child.kill();
+                let _ = child.start_kill();
             }
         }
         ShellCtrl::HardInterrupt => {
-            let pid = shell.child.id();
-            signal_process_group(pid, false);
-            let _ = shell.child.kill();
+            if let Some(pid) = child.id() {
+                signal_process_group(pid, false);
+            }
+            let _ = child.start_kill();
         }
         ShellCtrl::CloseStdin => {
-            shell.stdin.take();
-            shell.stdin_eof = true;
+            *stdin = None;
+            *stdin_eof = true;
         }
     }
 }
 
-fn join_line_reader(handle: Option<JoinHandle<String>>) -> String {
-    handle.and_then(|h| h.join().ok()).unwrap_or_default()
-}
-
-fn try_poll_shell(shell: &mut ShellChild) -> Option<RunResult> {
-    match shell.child.try_wait() {
-        Ok(Some(status)) => {
-            shell.stdin.take();
-            let stdout = join_line_reader(shell.stdout_reader.take());
-            let stderr = join_line_reader(shell.stderr_reader.take());
-            let (exit_code, success) = exit_code_from_status(status);
-            Some(RunResult {
-                command: shell.command.clone(),
-                exit_code,
-                stdout,
-                stderr,
-                elapsed: shell.start.elapsed(),
-                success,
-                stdin_eof: shell.stdin_eof,
-            })
-        }
-        Ok(None) => None,
-        Err(e) => {
-            shell.stdin.take();
-            let stdout = join_line_reader(shell.stdout_reader.take());
-            let mut stderr = join_line_reader(shell.stderr_reader.take());
-            if stderr.is_empty() {
-                stderr = format!("error waiting for command: {e}");
-            } else {
-                stderr = format!("{stderr}\nerror waiting for command: {e}");
-            }
-            Some(RunResult {
-                command: shell.command.clone(),
-                exit_code: -1,
-                stdout,
-                stderr,
-                elapsed: shell.start.elapsed(),
-                success: false,
-                stdin_eof: shell.stdin_eof,
-            })
-        }
-    }
-}
-
-/// Start a shell run on a worker thread. Returns a handle for poll / interrupt / live lines.
-pub(crate) fn start_shell_run(cmd: &str) -> Result<ActiveShellHandle, String> {
+/// Start a shell run on the **app** Tokio runtime (`TokioTasksRuntime::runtime()`).
+/// Returns a handle for poll / interrupt / live lines.
+///
+/// `Command::spawn` and pipe reads run only inside the spawned task (reactor
+/// required). Nested pipe tasks use the same cloned [`Handle`].
+pub(crate) fn start_shell_run(cmd: &str, runtime: &Runtime) -> Result<ActiveShellHandle, String> {
     let (result_tx, result_rx) = crossbeam_channel::bounded(1);
     let (live_tx, live_rx) = crossbeam_channel::unbounded();
-    let (ctrl_tx, ctrl_rx) = crossbeam_channel::unbounded();
+    let (ctrl_tx, mut ctrl_rx) = mpsc::unbounded_channel();
     let command = cmd.to_string();
     let command_for_handle = command.clone();
 
-    let _worker = thread::spawn(move || {
-        let mut shell = match spawn_shell_child(&command, live_tx) {
-            Ok(s) => s,
+    // Spawn on the app Runtime (owned by bevy_tokio_tasks). Clone Handle only
+    // for nested pipe tasks — do not Runtime::new() in production.
+    let handle = runtime.handle().clone();
+    runtime.spawn(async move {
+        let (mut child, mut stdin) = match spawn_shell_child(&command) {
+            Ok(pair) => pair,
             Err(e) => {
                 let _ = result_tx.send(RunResult {
                     command,
@@ -282,16 +218,79 @@ pub(crate) fn start_shell_run(cmd: &str) -> Result<ActiveShellHandle, String> {
             }
         };
 
-        loop {
-            while let Ok(ctrl) = ctrl_rx.try_recv() {
-                apply_ctrl(&mut shell, ctrl);
+        let start = Instant::now();
+        let mut stdin_eof = false;
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let live_out = live_tx.clone();
+        let live_err = live_tx;
+        let stdout_task = handle.spawn(async move {
+            match stdout {
+                Some(pipe) => read_lines_live(pipe, live_out, false).await,
+                None => String::new(),
             }
-            if let Some(result) = try_poll_shell(&mut shell) {
-                let _ = result_tx.send(result);
-                return;
+        });
+        let stderr_task = handle.spawn(async move {
+            match stderr {
+                Some(pipe) => read_lines_live(pipe, live_err, true).await,
+                None => String::new(),
             }
-            thread::sleep(Duration::from_millis(10));
-        }
+        });
+
+        let status = loop {
+            tokio::select! {
+                ctrl = ctrl_rx.recv() => {
+                    match ctrl {
+                        Some(c) => apply_ctrl(&mut child, &mut stdin, &mut stdin_eof, c).await,
+                        None => {
+                            // Handle dropped; keep waiting for the child.
+                        }
+                    }
+                }
+                status = child.wait() => {
+                    break status;
+                }
+            }
+        };
+
+        // Drop stdin write end so readers can finish if still open.
+        drop(stdin);
+
+        let stdout = stdout_task.await.unwrap_or_default();
+        let stderr = stderr_task.await.unwrap_or_default();
+
+        let result = match status {
+            Ok(status) => {
+                let (exit_code, success) = exit_code_from_status(status);
+                RunResult {
+                    command,
+                    exit_code,
+                    stdout,
+                    stderr,
+                    elapsed: start.elapsed(),
+                    success,
+                    stdin_eof,
+                }
+            }
+            Err(e) => {
+                let stderr = if stderr.is_empty() {
+                    format!("error waiting for command: {e}")
+                } else {
+                    format!("{stderr}\nerror waiting for command: {e}")
+                };
+                RunResult {
+                    command,
+                    exit_code: -1,
+                    stdout,
+                    stderr,
+                    elapsed: start.elapsed(),
+                    success: false,
+                    stdin_eof,
+                }
+            }
+        };
+        let _ = result_tx.send(result);
     });
 
     Ok(ActiveShellHandle {
@@ -343,14 +342,18 @@ pub(crate) fn format_live_stream_line(line: &ShellLiveLine) -> String {
 }
 
 /// Blocking convenience for unit tests and simple callers (waits until done).
+///
+/// Uses a **test-only** Runtime. Production must pass
+/// `TokioTasksRuntime::runtime()` from the Bevy app.
 #[allow(dead_code)] // used by `#[cfg(test)]` and devenv structural parity
 pub(crate) fn run_shell_command(cmd: &str) -> RunResult {
-    match start_shell_run(cmd) {
+    let runtime = shell_test_runtime();
+    match start_shell_run(cmd, runtime) {
         Ok(handle) => loop {
             if let Some(r) = try_recv_shell_result(&handle) {
                 return r;
             }
-            thread::sleep(Duration::from_millis(5));
+            std::thread::sleep(Duration::from_millis(5));
         },
         Err(e) => RunResult {
             command: cmd.to_string(),
@@ -364,11 +367,25 @@ pub(crate) fn run_shell_command(cmd: &str) -> RunResult {
     }
 }
 
+/// Isolated multi-thread runtime for unit tests only (not the Bevy app runtime).
+fn shell_test_runtime() -> &'static Runtime {
+    use std::sync::OnceLock;
+    static RT: OnceLock<Runtime> = OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("shell test runtime")
+    })
+}
+
 /// Run + interrupt after a short delay (unit tests).
 #[cfg(test)]
 pub(crate) fn run_shell_command_interrupt_after(cmd: &str, delay: Duration) -> RunResult {
-    let mut handle = start_shell_run(cmd).expect("spawn");
-    thread::sleep(delay);
+    let runtime = shell_test_runtime();
+    let mut handle = start_shell_run(cmd, runtime).expect("spawn");
+    std::thread::sleep(delay);
     request_shell_interrupt(&mut handle);
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -389,7 +406,7 @@ pub(crate) fn run_shell_command_interrupt_after(cmd: &str, delay: Duration) -> R
                 stdin_eof: false,
             };
         }
-        thread::sleep(Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -645,8 +662,11 @@ mod tests {
     #[test]
     fn live_stream_receives_lines_before_exit() {
         // Two lines with a gap so the live channel is non-empty before join.
-        let handle = start_shell_run("printf 'live-a\\n'; sleep 0.15; printf 'live-b\\n'")
-            .expect("spawn");
+        let handle = start_shell_run(
+            "printf 'live-a\\n'; sleep 0.15; printf 'live-b\\n'",
+            shell_test_runtime(),
+        )
+        .expect("spawn");
         let mut seen = Vec::new();
         let deadline = Instant::now() + Duration::from_secs(5);
         let result = loop {
@@ -663,7 +683,7 @@ mod tests {
                 Instant::now() < deadline,
                 "timed out waiting for shell; seen={seen:?}"
             );
-            thread::sleep(Duration::from_millis(10));
+            std::thread::sleep(Duration::from_millis(10));
         };
         assert!(result.success, "stderr={}", result.stderr);
         assert!(
@@ -694,7 +714,10 @@ mod tests {
             !footer.iter().any(|l| l.contains("already shown")),
             "footer must not re-print body: {footer:?}"
         );
-        assert!(footer.iter().any(|l| l.starts_with("✓ exit ")), "{footer:?}");
+        assert!(
+            footer.iter().any(|l| l.starts_with("✓ exit ")),
+            "{footer:?}"
+        );
     }
 
     #[test]

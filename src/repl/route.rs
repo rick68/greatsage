@@ -36,6 +36,7 @@ pub(super) enum CommandRoute {
     Export,
     Run,
     Cd,
+    Bg,
     UnknownSlash,
     NotSlash,
 }
@@ -70,7 +71,7 @@ impl CommandRoute {
     }
 
     pub(super) const fn is_shell(self) -> bool {
-        matches!(self, Self::Run | Self::Cd)
+        matches!(self, Self::Run | Self::Cd | Self::Bg)
     }
 }
 
@@ -101,6 +102,7 @@ pub(super) fn route_command(cmd: &str) -> CommandRoute {
         "/cd" => CommandRoute::Cd,
         "/init" => CommandRoute::Init,
         "/run" => CommandRoute::Run,
+        "/bg" => CommandRoute::Bg,
         // AI
         "/model" => CommandRoute::Model,
         "/provider" => CommandRoute::Provider,
