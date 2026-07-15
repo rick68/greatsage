@@ -307,6 +307,8 @@ fn content_block_tokens(content: &[Content]) -> usize {
             Content::ToolCall {
                 name, arguments, ..
             } => estimate_tokens(name) + estimate_tokens(&arguments.to_string()) + 8,
+            // Content is #[non_exhaustive] in yoagent 0.13+
+            _ => 0,
         })
         .sum()
 }
@@ -347,6 +349,7 @@ pub fn context_breakdown(messages: &[AgentMessage], system_prompt: &str) -> Cont
                                 let raw_bytes = data.len() * 3 / 4;
                                 assistant_messages += (raw_bytes / 750).clamp(85, 16_000);
                             }
+                            _ => {}
                         }
                     }
                     assistant_messages += 4;

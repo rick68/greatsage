@@ -2,9 +2,14 @@
 //!
 //! Maintain pricing in two places:
 //! - [`rates`] — dollar amounts (per MTok)
-//! - [`classify`] — model id → [`PriceTier`]
+//! - classify helpers — model id → [`PriceTier`]
 //!
 //! yoyo-evolve rules for core vendors; extra tiers for greatsage / OpenRouter catalog.
+//!
+//! **Dual source:** UI paths (`/cost`, `/model info`) read this book. At agent install,
+//! `ModelConfig.cost` MUST stay aligned for known models (`coding::model_config_for`
+//! fills zero costs from here, and yoagent named presets carry the same rates). Unknown
+//! models intentionally stay unpriced (`None` / all-zero cost) — never invent free.
 
 use super::model_id::canonical_model_name;
 
@@ -14,9 +19,12 @@ pub type PerMTok = (f64, f64, f64, f64);
 /// Canonical price tier — one row in the rate book.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PriceTier {
-    // Anthropic
+    // Anthropic (current-gen tiers align with yoagent 0.13 ModelConfig presets)
+    AnthropicFable5,
+    AnthropicOpus48,
     AnthropicOpus45,
     AnthropicOpusLegacy,
+    AnthropicSonnet5,
     AnthropicSonnet,
     AnthropicHaiku45,
     AnthropicHaikuLegacy,
@@ -125,9 +133,16 @@ mod rates {
         (input, 0.0, 0.0, output)
     }
 
+    /// yoagent `claude_fable_5` CostConfig
+    pub const ANTHROPIC_FABLE_5: PerMTok = (10.0, 12.5, 1.0, 50.0);
+    /// yoagent `claude_opus_4_8` CostConfig
+    pub const ANTHROPIC_OPUS_48: PerMTok = (5.0, 6.25, 0.50, 25.0);
     pub const ANTHROPIC_OPUS_45: PerMTok = (5.0, 6.25, 0.50, 25.0);
     pub const ANTHROPIC_OPUS_LEGACY: PerMTok = (15.0, 18.75, 1.50, 75.0);
+    /// yoagent `claude_sonnet_5` CostConfig
+    pub const ANTHROPIC_SONNET_5: PerMTok = (3.0, 3.75, 0.30, 15.0);
     pub const ANTHROPIC_SONNET: PerMTok = (3.0, 3.75, 0.30, 15.0);
+    /// yoagent `claude_haiku_4_5` CostConfig
     pub const ANTHROPIC_HAIKU_45: PerMTok = (1.0, 1.25, 0.10, 5.0);
     pub const ANTHROPIC_HAIKU_LEGACY: PerMTok = (0.80, 1.0, 0.08, 4.0);
 }
@@ -137,8 +152,11 @@ fn tier_rates(tier: PriceTier) -> PerMTok {
     use rates::{nc, *};
 
     match tier {
+        AnthropicFable5 => ANTHROPIC_FABLE_5,
+        AnthropicOpus48 => ANTHROPIC_OPUS_48,
         AnthropicOpus45 => ANTHROPIC_OPUS_45,
         AnthropicOpusLegacy => ANTHROPIC_OPUS_LEGACY,
+        AnthropicSonnet5 => ANTHROPIC_SONNET_5,
         AnthropicSonnet => ANTHROPIC_SONNET,
         AnthropicHaiku45 => ANTHROPIC_HAIKU_45,
         AnthropicHaikuLegacy => ANTHROPIC_HAIKU_LEGACY,
@@ -264,21 +282,33 @@ const EXACT_TIERS: &[(&str, PriceTier)] = &[
 
 fn classify_anthropic(model: &str) -> Option<PriceTier> {
     use PriceTier::*;
+    // Fable before sonnet — must not fall through to AnthropicSonnet rates.
+    if model.contains("fable") {
+        return Some(AnthropicFable5);
+    }
     if model.contains("opus") {
+        if model.contains("4-8") || model.contains("4.8") {
+            return Some(AnthropicOpus48);
+        }
         if model.contains("4-5")
             || model.contains("4-6")
             || model.contains("4-7")
-            || model.contains("4-8")
             || model.contains("4.5")
             || model.contains("4.6")
             || model.contains("4.7")
-            || model.contains("4.8")
         {
             return Some(AnthropicOpus45);
         }
         return Some(AnthropicOpusLegacy);
     }
-    if model.contains("sonnet") || model.contains("fable") {
+    if model.contains("sonnet") {
+        // Sonnet 5 (not 3.5 / 4.x)
+        if (model.contains("sonnet-5") || model.contains("sonnet_5") || model.contains("sonnet5"))
+            && !model.contains("3-5")
+            && !model.contains("3.5")
+        {
+            return Some(AnthropicSonnet5);
+        }
         return Some(AnthropicSonnet);
     }
     if model.contains("haiku") {

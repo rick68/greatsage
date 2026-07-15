@@ -60,9 +60,7 @@ fn search_query_style() -> Style {
 
 /// Dim cyan placeholder after the caret cell (`type to search`).
 fn search_placeholder_style() -> Style {
-    Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::DIM)
+    Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM)
 }
 
 /// Longest-first tokens highlighted as hotkeys in status / titles.
@@ -388,11 +386,7 @@ pub fn draw_system(
         if palette_open {
             // Open: vertically centered. While typing: same top edge (height shrinks
             // from the bottom) so `search: ` does not jump as matches drop.
-            let rect = palette_overlay_rect(
-                areas.scrollback,
-                &palette_filter,
-                palette_rows.len(),
-            );
+            let rect = palette_overlay_rect(areas.scrollback, &palette_filter, palette_rows.len());
             () = render_command_palette(frame, rect, &palette_filter, &palette_rows, palette_hi);
         }
 
@@ -461,9 +455,7 @@ fn palette_overlay_rect(scrollback: Rect, filter: &str, filtered_count: usize) -
     } else {
         // At least one list row for "(no matches)"; never taller than open box.
         let list_rows = (filtered_count as u16).clamp(1, MAX_LIST);
-        (SEARCH_AND_SEP + list_rows + 2)
-            .min(open_height)
-            .max(5)
+        (SEARCH_AND_SEP + list_rows + 2).min(open_height).max(5)
     };
 
     Rect {
@@ -576,12 +568,20 @@ fn render_command_palette(
 
     // White caret only on the reserved cell (after label + query).
     let caret_cols = (label_w + query_w) as u16;
-    paint_white_caret_at(frame, search_area.x, search_area.y, caret_cols, 1, search_area);
-    let hx = search_area
-        .x
-        .saturating_add(caret_cols)
-        .min(search_area.x.saturating_add(search_area.width.saturating_sub(1)));
-    frame.set_cursor_position(Position {
+    paint_white_caret_at(
+        frame,
+        search_area.x,
+        search_area.y,
+        caret_cols,
+        1,
+        search_area,
+    );
+    let hx = search_area.x.saturating_add(caret_cols).min(
+        search_area
+            .x
+            .saturating_add(search_area.width.saturating_sub(1)),
+    );
+    () = frame.set_cursor_position(Position {
         x: hx,
         y: search_area.y,
     });

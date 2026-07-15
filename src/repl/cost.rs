@@ -110,6 +110,19 @@ pub fn extract_turn_costs(
     turns
 }
 
+/// Fixed-width columns for the per-turn cost table (header / rows / Total must match).
+///
+/// ```text
+///  Turn   Input   Output       Cost
+///     1    8.0k       43    $0.0016
+/// ─────────────────────────────────
+/// Total    8.0k       43    $0.0016
+/// ```
+fn format_turn_cost_row(label: &str, input: &str, output: &str, cost: &str) -> String {
+    // label: 5 (right) · input: 7 · output: 7 · cost: 10 (right-aligned $ amounts)
+    format!("    {label:>5} {input:>7} {output:>7}  {cost:>10}")
+}
+
 pub fn format_turn_costs(costs: &[TurnCost]) -> String {
     if costs.is_empty() {
         return String::new();
@@ -117,7 +130,7 @@ pub fn format_turn_costs(costs: &[TurnCost]) -> String {
 
     let mut lines = Vec::new();
     lines.push("  Per-turn breakdown:".to_string());
-    lines.push("    Turn   Input    Output   Cost".to_string());
+    lines.push(format_turn_cost_row("Turn", "Input", "Output", "Cost"));
 
     let mut total_input: u64 = 0;
     let mut total_output: u64 = 0;
@@ -135,26 +148,25 @@ pub fn format_turn_costs(costs: &[TurnCost]) -> String {
             }
             None => "—".to_string(),
         };
-        lines.push(format!(
-            "    {:>4}   {:>7}  {:>7}  {}",
-            tc.turn_number,
-            format_token_count(tc.usage.input),
-            format_token_count(tc.usage.output),
-            cost_str,
+        lines.push(format_turn_cost_row(
+            &tc.turn_number.to_string(),
+            &format_token_count(tc.usage.input),
+            &format_token_count(tc.usage.output),
+            &cost_str,
         ));
     }
 
-    lines.push("    ─────────────────────────────────".to_string());
+    lines.push(String::from("    ─────────────────────────────────"));
     let total_cost_str = if has_cost {
         format_cost(total_cost)
     } else {
-        "—".to_string()
+        String::from("—")
     };
-    lines.push(format!(
-        "    Total  {:>7}  {:>7}  {}",
-        format_token_count(total_input),
-        format_token_count(total_output),
-        total_cost_str,
+    () = lines.push(format_turn_cost_row(
+        "Total",
+        &format_token_count(total_input),
+        &format_token_count(total_output),
+        &total_cost_str,
     ));
 
     lines.join("\n")
@@ -287,30 +299,52 @@ pub fn cost_output_lines(
     if let Some((input_cost, cw_cost, cr_cost, output_cost)) =
         cost_breakdown(usage, provider, model)
     {
-        lines.push(String::new());
-        lines.push("  Breakdown:".to_string());
-        lines.push(format!("    input:       {}", format_cost(input_cost)));
-        lines.push(format!("    output:      {}", format_cost(output_cost)));
+        () = lines.push(String::new());
+        () = lines.push("  Breakdown:".to_string());
+        // Labels padded to same width so `$` amounts share one column.
+        const BREAKDOWN_LABEL_W: usize = 12;
+        () = lines.push(format!(
+            "    {:width$} {}",
+            "input:",
+            format_cost(input_cost),
+            width = BREAKDOWN_LABEL_W
+        ));
+        () = lines.push(format!(
+            "    {:width$} {}",
+            "output:",
+            format_cost(output_cost),
+            width = BREAKDOWN_LABEL_W
+        ));
         if cw_cost > 0.0 {
-            lines.push(format!("    cache write: {}", format_cost(cw_cost)));
+            () = lines.push(format!(
+                "    {:width$} {}",
+                "cache write:",
+                format_cost(cw_cost),
+                width = BREAKDOWN_LABEL_W
+            ));
         }
         if cr_cost > 0.0 {
-            lines.push(format!("    cache read:  {}", format_cost(cr_cost)));
+            () = lines.push(format!(
+                "    {:width$} {}",
+                "cache read:",
+                format_cost(cr_cost),
+                width = BREAKDOWN_LABEL_W
+            ));
         }
     }
 
     let turn_costs = extract_turn_costs(messages, provider, model);
     let turn_table = format_turn_costs(&turn_costs);
     if !turn_table.is_empty() {
-        lines.push(String::new());
-        lines.extend(turn_table.lines().map(str::to_owned));
+        () = lines.push(String::new());
+        () = lines.extend(turn_table.lines().map(str::to_owned));
     }
 
     let tool_summary = extract_tool_call_summary(messages);
     let tool_table = format_tool_call_summary(&tool_summary);
     if !tool_table.is_empty() {
-        lines.push(String::new());
-        lines.extend(tool_table.lines().map(str::to_owned));
+        () = lines.push(String::new());
+        () = lines.extend(tool_table.lines().map(str::to_owned));
     }
 
     lines

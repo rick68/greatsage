@@ -27,8 +27,9 @@ pub(crate) use dispatch::{DispatchResult, dispatch_slash_command};
 pub(crate) mod help_data;
 mod history;
 mod model_cmd;
-mod model_id;
-mod native_pricing;
+pub(crate) mod model_id;
+/// Static rate book for `/cost` / `/model info`; also fills `ModelConfig.cost` at agent install.
+pub(crate) mod native_pricing;
 mod output;
 mod path_display;
 mod route;

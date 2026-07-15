@@ -68,8 +68,8 @@ use {
     },
     tokio::sync::Mutex,
     yoagent::{
-        agent::Agent,
-        provider::{AnthropicProvider, GoogleProvider, ModelConfig, OpenAiCompatProvider},
+        Agent,
+        provider::{AnthropicCompat, CostConfig, ModelConfig},
         tools::default_tools,
         types::{
             AgentEvent, AgentMessage, Content, Message as LlmMessage, StopReason, StreamDelta,
@@ -128,7 +128,6 @@ impl CodingAgent {
 
     pub async fn new_with_agent_config(agent_config: &AgentConfig) -> Self {
         let AgentConfig {
-            model,
             skills,
             system_prompt,
             api_key,
@@ -138,21 +137,8 @@ impl CodingAgent {
 
         let model_config = model_config_for(agent_config);
         let context_window = model_config.context_window;
-        let agent = match agent_config.provider {
-            Provider::Anthropic => Agent::new(AnthropicProvider),
-            Provider::Cerebras
-            | Provider::DeepSeek
-            | Provider::Groq
-            | Provider::MiniMax
-            | Provider::Mistral
-            | Provider::OpenAi
-            | Provider::OpenRouter
-            | Provider::Xai
-            | Provider::Zai
-            | Provider::Custom => Agent::new(OpenAiCompatProvider),
-            Provider::Google => Agent::new(GoogleProvider),
-        };
 
+        // yoagent 0.10+: config-first construct (from_config selects provider from config.api).
         let tools = {
             let base = default_tools();
             if agent_config.shell_hooks.is_empty() {
@@ -163,10 +149,8 @@ impl CodingAgent {
             }
         };
 
-        let mut agent = agent
-            .with_model_config(model_config)
+        let mut agent = Agent::from_config(model_config)
             .with_system_prompt(system_prompt)
-            .with_model(model)
             .with_api_key(api_key)
             .with_tools(tools);
 
@@ -217,7 +201,9 @@ impl CodingAgent {
     }
 }
 
-/// yoagent `ModelConfig` for the active provider — single source for context window at install.
+/// yoagent `ModelConfig` for the active provider — context window + cost at install.
+///
+/// Built only via constructors/presets + field mutation (`ModelConfig` is `#[non_exhaustive]`).
 pub(crate) fn model_config_for(agent_config: &AgentConfig) -> ModelConfig {
     let AgentConfig {
         model,
@@ -226,20 +212,112 @@ pub(crate) fn model_config_for(agent_config: &AgentConfig) -> ModelConfig {
         ..
     } = agent_config;
 
-    match provider {
-        Provider::Anthropic => ModelConfig::anthropic(model, model),
-        Provider::Cerebras => ModelConfig::openai(model, model),
-        Provider::Custom => ModelConfig::local(base_url, model),
-        Provider::DeepSeek => ModelConfig::deepseek(model, model),
-        Provider::Google => ModelConfig::google(model, model),
-        Provider::Groq => ModelConfig::groq(model, model),
-        Provider::MiniMax => ModelConfig::minimax(model, model),
-        Provider::Mistral => ModelConfig::mistral(model, model),
-        Provider::OpenAi => ModelConfig::openai(model, model),
-        Provider::OpenRouter => ModelConfig::openai(model, model),
-        Provider::Xai => ModelConfig::xai(model, model),
-        Provider::Zai => ModelConfig::zai(model, model),
+    let mut config = match anthropic_preset_for_model(model) {
+        Some(preset) => preset,
+        None => match provider {
+            Provider::Anthropic => ModelConfig::anthropic(model, model),
+            Provider::Cerebras => ModelConfig::openai(model, model),
+            Provider::Custom => ModelConfig::local(base_url, model),
+            Provider::DeepSeek => ModelConfig::deepseek(model, model),
+            Provider::Google => ModelConfig::google(model, model),
+            Provider::Groq => ModelConfig::groq(model, model),
+            Provider::MiniMax => ModelConfig::minimax(model, model),
+            Provider::Mistral => ModelConfig::mistral(model, model),
+            Provider::OpenAi => ModelConfig::openai(model, model),
+            Provider::OpenRouter => ModelConfig::openai(model, model),
+            Provider::Xai => ModelConfig::xai(model, model),
+            Provider::Zai => ModelConfig::zai(model, model),
+        },
+    };
+
+    // Presets already pin the catalog id; keep agent_config.model as the wire id when
+    // the user selected a non-preset or vendor-prefixed id on a generic constructor.
+    if anthropic_preset_for_model(model).is_none() {
+        config.id = model.clone();
+        config.name = model.clone();
+    } else if !model_ids_match_preset(model, &config.id) {
+        // e.g. openrouter-style anthropic/claude-fable-5 → keep user's id for the API.
+        config.id = model.clone();
+        config.name = model.clone();
     }
+
+    if matches!(provider, Provider::Anthropic) && anthropic_needs_legacy_compat(model) {
+        config.anthropic = Some(AnthropicCompat::legacy());
+    }
+
+    if !config.cost.is_configured() {
+        if let Some(cost) = cost_config_from_native_pricing(model) {
+            config.cost = cost;
+        }
+    }
+
+    config
+}
+
+/// Map well-known Anthropic catalog ids to yoagent 0.13 presets (window + pricing).
+fn anthropic_preset_for_model(model: &str) -> Option<ModelConfig> {
+    let id = crate::repl::model_id::canonical_model_name(model).to_ascii_lowercase();
+    if id.contains("fable") || id == "claude-fable-5" {
+        return Some(ModelConfig::claude_fable_5());
+    }
+    if id.contains("opus-4-8") || id.contains("opus-4.8") || id.contains("opus_4_8") {
+        return Some(ModelConfig::claude_opus_4_8());
+    }
+    if id.contains("sonnet-5") || id.contains("sonnet-5.") || id == "claude-sonnet-5" {
+        // Avoid matching older sonnet-3.5 / 3-5.
+        if !id.contains("3-5") && !id.contains("3.5") && !id.contains("4-") && !id.contains("4.") {
+            return Some(ModelConfig::claude_sonnet_5());
+        }
+    }
+    if id.contains("haiku-4-5") || id.contains("haiku-4.5") || id.contains("haiku_4_5") {
+        return Some(ModelConfig::claude_haiku_4_5());
+    }
+    None
+}
+
+fn model_ids_match_preset(requested: &str, preset_id: &str) -> bool {
+    let a = crate::repl::model_id::canonical_model_name(requested).to_ascii_lowercase();
+    let b = preset_id.to_ascii_lowercase();
+    a == b || a.contains(&b) || b.contains(&a)
+}
+
+/// Pre-4.6 Claude models need budget-based extended thinking, not adaptive.
+fn anthropic_needs_legacy_compat(model: &str) -> bool {
+    let id = crate::repl::model_id::canonical_model_name(model).to_ascii_lowercase();
+    if id.contains("fable")
+        || id.contains("sonnet-5")
+        || id.contains("opus-4-7")
+        || id.contains("opus-4-8")
+        || id.contains("opus-4.7")
+        || id.contains("opus-4.8")
+        || id.contains("4-6")
+        || id.contains("4.6")
+    {
+        return false;
+    }
+    // Haiku 4.5 and older opus/sonnet/haiku generations.
+    id.contains("claude")
+        && (id.contains("3-")
+            || id.contains("3.")
+            || id.contains("haiku")
+            || id.contains("opus-4-5")
+            || id.contains("opus-4.5")
+            || id.contains("sonnet-4")
+            || id.contains("opus-4-0")
+            || id.contains("opus-4-1"))
+}
+
+fn cost_config_from_native_pricing(model: &str) -> Option<CostConfig> {
+    // PerMTok = (input, cache_write, cache_read, output) per MTok.
+    let (input, cache_write, cache_read, output) =
+        crate::repl::native_pricing::native_model_pricing(model)?;
+    let cost = CostConfig {
+        input_per_million: input,
+        output_per_million: output,
+        cache_read_per_million: cache_read,
+        cache_write_per_million: cache_write,
+    };
+    cost.is_configured().then_some(cost)
 }
 
 /// Build a replacement agent with the same yoagent messages as `existing`.

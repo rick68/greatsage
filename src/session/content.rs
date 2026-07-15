@@ -65,12 +65,7 @@ pub(crate) fn indexed_content_from_tool_start(
 ) -> IndexedContent {
     IndexedContent {
         block_index: 0,
-        content: Content::ToolCall {
-            id: tool_call_id.clone(),
-            name: tool_name.clone(),
-            arguments: args.clone(),
-            provider_metadata: None,
-        },
+        content: Content::tool_call(tool_call_id.clone(), tool_name.clone(), args.clone()),
         provenance: ContentProvenance::ToolExecutionStart {
             tool_call_id,
             tool_name,
@@ -112,6 +107,8 @@ pub(crate) fn content_kind_label(content: &Content) -> &'static str {
         Content::Image { .. } => "image",
         Content::Thinking { .. } => "thinking",
         Content::ToolCall { .. } => "toolCall",
+        // Content is #[non_exhaustive] in yoagent 0.13+
+        _ => "unknown",
     }
 }
 
@@ -122,5 +119,6 @@ pub(crate) fn content_primary_text(content: &Content) -> String {
         Content::Thinking { thinking, .. } => thinking.clone(),
         Content::ToolCall { arguments, .. } => arguments.to_string(),
         Content::Image { .. } => String::new(),
+        _ => String::new(),
     }
 }
