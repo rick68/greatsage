@@ -398,26 +398,3 @@ fn render_slash_menu(
     () = frame.render_stateful_widget(list, menu_area, &mut list_state);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn menu_row_includes_description_for_known_command() {
-        let line = format_slash_menu_row("/provider", 12, 60);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("/provider"), "{text}");
-        // Registry summary / short_description should appear.
-        assert!(
-            text.to_lowercase().contains("provider") && text.chars().count() > "/provider".len(),
-            "expected description beside name, got: {text}"
-        );
-    }
-
-    #[test]
-    fn menu_row_path_candidate_name_only() {
-        let line = format_slash_menu_row("./session.json", 8, 40);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("session.json"));
-    }
-}

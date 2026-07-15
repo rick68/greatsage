@@ -108,15 +108,3 @@ pub(crate) fn stdout_plugin(app: &mut App) {
         .add_systems(PostUpdate, print_stdout_message);
 }
 
-#[cfg(test)]
-mod tests {
-    use {super::*, clap::Parser};
-
-    #[test]
-    fn tui_disables_stdout_print() {
-        let mut cli = Cli::parse_from(["greatsage", "tui"]);
-        assert!(!stdout_print_enabled(&cli));
-        cli.command = None;
-        assert!(stdout_print_enabled(&cli));
-    }
-}

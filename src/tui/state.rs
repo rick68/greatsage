@@ -244,25 +244,3 @@ impl TuiState {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn draft_from_help_line() {
-        assert_eq!(
-            draft_from_operator_line("  /export [path]  Write session").as_deref(),
-            Some("/export")
-        );
-    }
-
-    #[test]
-    fn panel_open_does_not_touch_scrollback_fields() {
-        let mut s = TuiState::default();
-        s.selected_line = 3;
-        s.open_operator_panel("help", vec!["  /status  Show".into(), "  /export".into()]);
-        assert!(s.operator_panel.open);
-        assert_eq!(s.selected_line, 3); // scrollback selection unchanged
-        assert_eq!(s.prompt, "/status"); // first selectable slash filled
-    }
-}

@@ -15,14 +15,14 @@ const HOOK_TIMEOUT_SECS: u64 = 5;
 const HOOK_REAP_TIMEOUT_SECS: u64 = 2;
 
 fn hook_run_timeout() -> Duration {
-    #[cfg(test)]
+    // Override for devenv tests: `GREATSAGE_HOOK_TIMEOUT_MS=200 cargo test …`
+    // (no `#[cfg(test)]` in greatsage/src — external-test-harness).
+    if let Ok(ms) = std::env::var("GREATSAGE_HOOK_TIMEOUT_MS")
+        && let Ok(ms) = ms.parse::<u64>()
     {
-        Duration::from_millis(200)
+        return Duration::from_millis(ms);
     }
-    #[cfg(not(test))]
-    {
-        Duration::from_secs(HOOK_TIMEOUT_SECS)
-    }
+    Duration::from_secs(HOOK_TIMEOUT_SECS)
 }
 
 /// Hook that runs before/after tool execution.
