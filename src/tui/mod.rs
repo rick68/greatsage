@@ -12,6 +12,7 @@ mod input;
 mod layout;
 mod nav;
 mod slash_complete;
+mod text_width;
 
 mod plugin;
 pub use plugin::tui_plugin;

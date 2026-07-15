@@ -7,6 +7,7 @@ use {
         scrollback::ScrollbackView,
         slash_complete::SLASH_MENU_MAX_ROWS,
         state::{TuiFocus, TuiState},
+        text_width::{caret_width_for_after, str_display_width, truncate_to_width},
     },
     crate::repl::help_data::command_short_description,
     bevy::ecs::change_detection::{Res, ResMut},
@@ -44,9 +45,15 @@ fn white_caret_style() -> Style {
 ///
 /// Full-block glyphs use **foreground** in some terminals; a space + white **background**
 /// is the reliable Grok-style block. Named `Color::White` avoids truecolor fallbacks to black.
-fn paint_white_caret(frame: &mut ratatui::Frame, prompt_area: Rect, cols_before_caret: u16) {
+/// `width` is display columns (1 for ASCII insert point, 2 when covering a wide glyph).
+fn paint_white_caret(
+    frame: &mut ratatui::Frame,
+    prompt_area: Rect,
+    cols_before_caret: u16,
+    width: usize,
+) {
     // Inner content (inside border).
-    if prompt_area.width < 3 || prompt_area.height < 3 {
+    if prompt_area.width < 3 || prompt_area.height < 3 || width == 0 {
         return;
     }
     let inner_x = prompt_area.x.saturating_add(1);
@@ -54,44 +61,39 @@ fn paint_white_caret(frame: &mut ratatui::Frame, prompt_area: Rect, cols_before_
     let max_x = prompt_area
         .x
         .saturating_add(prompt_area.width.saturating_sub(2));
-    let x = inner_x.saturating_add(cols_before_caret).min(max_x);
+    let x0 = inner_x.saturating_add(cols_before_caret).min(max_x);
     let buf = frame.buffer_mut();
-    // One cell wide (Grok-style block caret).
-    if let Some(cell) = buf.cell_mut(Position { x, y: inner_y }) {
-        // Space + white bg = solid bar (█ often ignores bg / uses only fg).
-        cell.set_char(' ');
-        cell.set_style(white_caret_style());
+    for dx in 0..width {
+        let cx = x0.saturating_add(dx as u16);
+        if cx > max_x {
+            break;
+        }
+        if let Some(cell) = buf.cell_mut(Position { x: cx, y: inner_y }) {
+            // Space + white bg = solid bar (█ often ignores bg / uses only fg).
+            cell.set_char(' ');
+            cell.set_style(white_caret_style());
+        }
     }
 }
 
-/// Truncate for a single terminal row (avoid status/prompt blowout).
+/// Truncate for a single terminal row using **display width** (CJK = 2 cols).
 fn one_line(s: &str, max_cols: u16) -> String {
-    let max = max_cols.max(1) as usize;
-    let mut out = String::new();
-    let mut cols = 0usize;
-    for ch in s.chars() {
-        // Treat all as width 1 for simplicity (status is ASCII-heavy).
-        if cols + 1 > max {
-            break;
-        }
-        () = out.push(ch);
-        cols += 1;
-    }
-    out
+    truncate_to_width(s, max_cols.max(1) as usize)
 }
 
 /// Format a slash menu row: `/cmd` left-aligned, short description on the right (when known).
 ///
 /// Arg / path candidates without a registry description stay name-only.
+/// Column padding uses display width so wide glyphs align.
 pub fn format_slash_menu_row(candidate: &str, name_col: usize, max_cols: usize) -> Line<'static> {
     let name = candidate.to_string();
-    let name_w = name.chars().count().max(name_col);
+    let name_disp = str_display_width(&name).max(name_col);
     let desc = command_short_description(candidate).unwrap_or("");
-    if desc.is_empty() || max_cols <= name_w + 2 {
+    if desc.is_empty() || max_cols <= name_disp + 2 {
         return Line::from(Span::raw(one_line(&name, max_cols as u16)));
     }
-    let pad = " ".repeat(name_w.saturating_sub(name.chars().count()));
-    let rest = max_cols.saturating_sub(name_w + 2);
+    let pad = " ".repeat(name_disp.saturating_sub(str_display_width(&name)));
+    let rest = max_cols.saturating_sub(name_disp + 2);
     let desc_clip = one_line(desc, rest as u16);
     Line::from(vec![
         Span::raw(format!("{name}{pad}")),
@@ -200,28 +202,60 @@ pub fn draw_system(
         };
         let before = &prompt[..cursor_byte];
         let after = &prompt[cursor_byte..];
-        // Leave a 1-cell hole for the caret; overwritten by paint_white_caret.
+        let ime_preedit = state.ime_preedit.clone();
+        // Display columns before caret; caret width matches glyph under insertion point.
+        let caret_cols =
+            (str_display_width(PROMPT_PREFIX) + str_display_width(before)) as u16;
+        // While IME preedit is active, use a 1-col insert bar so the terminal can
+        // draw composition at the hardware cursor without fighting a wide cover.
+        let caret_w = if ime_preedit.is_empty() {
+            caret_width_for_after(after)
+        } else {
+            1
+        };
+        // When covering a wide glyph (no preedit), omit it so the white bar replaces it.
+        let after_rest: String = if focus == TuiFocus::Prompt
+            && ime_preedit.is_empty()
+            && !after.is_empty()
+        {
+            after.chars().skip(1).collect()
+        } else {
+            after.to_string()
+        };
         let mut spans = vec![
             Span::raw(PROMPT_PREFIX.to_string()),
             Span::raw(before.to_string()),
         ];
         if focus == TuiFocus::Prompt {
-            spans.push(Span::raw(" ".to_string()));
-            spans.push(Span::raw(after.to_string()));
+            // Placeholder cells (= caret display width); painted white after.
+            spans.push(Span::raw(" ".repeat(caret_w)));
+            // IME composition (underlined) between caret and committed tail.
+            if !ime_preedit.is_empty() {
+                spans.push(Span::styled(
+                    ime_preedit.clone(),
+                    Style::default()
+                        .add_modifier(Modifier::UNDERLINED)
+                        .fg(Color::Yellow),
+                ));
+            }
+            spans.push(Span::raw(after_rest));
         } else {
             spans.push(Span::raw(after.to_string()));
         }
         if let Some(ref g) = ghost {
-            spans.push(Span::styled(
-                g.clone(),
-                Style::default().add_modifier(Modifier::DIM),
-            ));
+            // Ghost only when not composing (IME preedit owns that slot).
+            if ime_preedit.is_empty() {
+                spans.push(Span::styled(
+                    g.clone(),
+                    Style::default().add_modifier(Modifier::DIM),
+                ));
+            }
         }
         let prompt_display = Paragraph::new(Line::from(spans))
             .block(Block::default().borders(Borders::ALL).title(prompt_title));
         () = frame.render_widget(prompt_display, areas.prompt);
 
-        if menu_open && !menu_cands.is_empty() {
+        if menu_open && !menu_cands.is_empty() && ime_preedit.is_empty() {
             render_slash_menu(frame, areas.prompt, &menu_cands, menu_hi);
         }
 
@@ -232,10 +266,18 @@ pub fn draw_system(
             render_operator_panel(frame, panel_rect, &panel_title, &panel_lines, panel_sel);
         }
 
-        // LAST: buffer-paint white caret so no later widget can cover it.
+        // White caret + hardware cursor at the same display column so OS IME
+        // preedit anchors correctly (wrong cursor → layout corruption).
         if focus == TuiFocus::Prompt {
-            let cols = (PROMPT_PREFIX.chars().count() + before.chars().count()) as u16;
-            paint_white_caret(frame, areas.prompt, cols);
+            paint_white_caret(frame, areas.prompt, caret_cols, caret_w);
+            let inner_x = areas.prompt.x.saturating_add(1);
+            let inner_y = areas.prompt.y.saturating_add(1);
+            let max_x = areas
+                .prompt
+                .x
+                .saturating_add(areas.prompt.width.saturating_sub(2));
+            let hx = inner_x.saturating_add(caret_cols).min(max_x);
+            frame.set_cursor_position(Position { x: hx, y: inner_y });
         }
     })?;
 
@@ -333,7 +375,11 @@ fn render_slash_menu(
     };
     let end = (start + SLASH_MENU_MAX_ROWS).min(total);
     let visible = &candidates[start..end];
-    let name_col = visible.iter().map(|c| c.chars().count()).max().unwrap_or(0);
+    let name_col = visible
+        .iter()
+        .map(|c| str_display_width(c))
+        .max()
+        .unwrap_or(0);
     // Inner width minus borders and highlight symbol (~2 cols for "▸ ").
     let inner_w = menu_area.width.saturating_sub(4).max(8) as usize;
     let items: Vec<ListItem> = visible
@@ -344,7 +390,7 @@ fn render_slash_menu(
     list_state.select(Some(hi.saturating_sub(start)));
 
     () = frame.render_widget(Clear, menu_area);
-    // Match Grok foo2.png: `>` marker + light solid selection row.
+    // Grok slash menu: marker + solid selection row.
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(" slash "))
         .highlight_symbol("❯ ")

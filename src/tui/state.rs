@@ -118,6 +118,9 @@ pub struct TuiState {
     pub slash_menu: SlashMenuState,
     /// Dim ghost suffix after draft (from `inline_hint`); independent of menu open.
     pub ghost_hint: Option<String>,
+    /// IME / composition preedit text (not yet committed into `prompt`).
+    /// Shown after the caret; terminal IME also anchors to the hardware cursor we set.
+    pub ime_preedit: String,
 }
 
 impl Default for TuiState {
@@ -136,6 +139,7 @@ impl Default for TuiState {
             operator_panel: OperatorPanel::default(),
             slash_menu: SlashMenuState::default(),
             ghost_hint: None,
+            ime_preedit: String::new(),
         }
     }
 }
@@ -224,6 +228,11 @@ impl TuiState {
         self.cursor = 0;
         self.slash_menu = SlashMenuState::default();
         self.ghost_hint = None;
+        self.ime_preedit.clear();
+    }
+
+    pub fn clear_ime_preedit(&mut self) {
+        self.ime_preedit.clear();
     }
 
     pub fn clear_esc_arm(&mut self) {

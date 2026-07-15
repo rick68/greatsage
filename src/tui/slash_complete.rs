@@ -76,7 +76,7 @@ pub fn refresh_slash_completion(
         return;
     }
 
-    // Grok pin (foo2.png): typing `/` opens the command list immediately.
+    // Grok slash menu: typing `/` opens the command list immediately.
     let prev = state.slash_menu.highlight;
     let highlight = prev.min(candidates.len().saturating_sub(1));
     let _ = force_open; // retained for Tab-force API; bare `/` now always opens

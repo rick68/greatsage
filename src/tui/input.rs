@@ -28,7 +28,7 @@ use {
     },
     bevy_ratatui::{
         crossterm::event::{KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind},
-        event::{KeyMessage, MouseMessage},
+        event::{KeyMessage, MouseMessage, PasteMessage},
     },
     bevy_tokio_tasks::TokioTasksRuntime,
     std::time::Instant,
@@ -147,6 +147,23 @@ pub fn mouse_input_system(
     }
 }
 
+/// Bracketed paste / multi-char IME commit → insert at prompt cursor.
+pub fn paste_system(
+    mut pastes: MessageReader<PasteMessage>,
+    mut state: ResMut<TuiState>,
+    agent_config: Res<AgentConfig>,
+) {
+    for paste in pastes.read() {
+        if state.focus != TuiFocus::Prompt || state.operator_panel.open {
+            continue;
+        }
+        state.clear_esc_arm();
+        state.clear_ime_preedit();
+        insert_str(&mut state, &paste.0);
+        refresh_slash_completion(&mut state, &agent_config, false);
+    }
+}
+
 pub fn input_system(
     mut keys: MessageReader<KeyMessage>,
     mut state: ResMut<TuiState>,
@@ -166,6 +183,10 @@ pub fn input_system(
     let agent_busy = runtime_status.iter().any(|s| s.is_processing());
 
     for message in keys.read() {
+        // Ignore Null (some IME/control sequences) and non-press kinds.
+        if matches!(message.code, KeyCode::Null) {
+            continue;
+        }
         if message.kind != KeyEventKind::Press && message.kind != KeyEventKind::Repeat {
             continue;
         }
@@ -232,8 +253,13 @@ pub fn input_system(
             session.ctrl_c_armed = false;
         }
 
-        // ── Esc steal: operator panel → slash menu → clear contract ───────
+        // ── Esc steal: IME preedit → operator panel → slash menu → clear ──
         if message.code == KeyCode::Esc {
+            if !state.ime_preedit.is_empty() {
+                // Cancel composition first (do not clear the committed prompt).
+                state.clear_ime_preedit();
+                continue;
+            }
             if state.operator_panel.open {
                 state.close_operator_panel();
                 continue;
@@ -378,36 +404,48 @@ pub fn input_system(
                     && !c.is_control() =>
             {
                 state.clear_esc_arm();
+                // Committed text clears any stale preedit slot.
+                state.clear_ime_preedit();
                 () = insert_char(&mut state, c);
                 refresh_slash_completion(&mut state, &agent_config, false);
             }
             KeyCode::Backspace => {
                 state.clear_esc_arm();
+                // If we were showing app-side preedit, drop it first (IME cancel).
+                if !state.ime_preedit.is_empty() {
+                    state.clear_ime_preedit();
+                    continue;
+                }
                 () = backspace(&mut state);
                 refresh_slash_completion(&mut state, &agent_config, false);
             }
             KeyCode::Left if !message.modifiers.contains(KeyModifiers::SHIFT) => {
                 state.clear_esc_arm();
+                state.clear_ime_preedit();
                 () = move_cursor_left(&mut state);
                 refresh_slash_completion(&mut state, &agent_config, false);
             }
             KeyCode::Right if !message.modifiers.contains(KeyModifiers::SHIFT) => {
                 state.clear_esc_arm();
+                state.clear_ime_preedit();
                 () = move_cursor_right(&mut state);
                 refresh_slash_completion(&mut state, &agent_config, false);
             }
             KeyCode::Home => {
                 () = state.clear_esc_arm();
+                state.clear_ime_preedit();
                 state.cursor = 0;
                 refresh_slash_completion(&mut state, &agent_config, false);
             }
             KeyCode::End => {
                 state.clear_esc_arm();
+                state.clear_ime_preedit();
                 state.cursor = state.prompt.len();
                 refresh_slash_completion(&mut state, &agent_config, false);
             }
             KeyCode::Enter => {
                 state.clear_esc_arm();
+                state.clear_ime_preedit();
                 // Menu open → accept only (no dispatch / no agent submit).
                 if enter_should_accept_menu(&state) {
                     let _ =
@@ -479,6 +517,16 @@ fn insert_char(state: &mut TuiState, c: char) {
     let idx = state.cursor.min(state.prompt.len());
     () = state.prompt.insert(idx, c);
     state.cursor = idx + c.len_utf8();
+}
+
+/// Insert a UTF-8 string at the prompt cursor (paste / multi-char IME commit).
+fn insert_str(state: &mut TuiState, s: &str) {
+    if s.is_empty() {
+        return;
+    }
+    let idx = state.cursor.min(state.prompt.len());
+    () = state.prompt.insert_str(idx, s);
+    state.cursor = idx + s.len();
 }
 
 fn backspace(state: &mut TuiState) {
