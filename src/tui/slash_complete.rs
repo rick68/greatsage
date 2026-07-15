@@ -191,4 +191,3 @@ pub fn enter_should_accept_menu(state: &TuiState) -> bool {
         && state.slash_menu.open
         && !state.slash_menu.candidates.is_empty()
 }
-

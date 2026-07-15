@@ -11,6 +11,7 @@ mod draw;
 mod input;
 mod layout;
 mod nav;
+mod palette;
 mod slash_complete;
 mod text_width;
 

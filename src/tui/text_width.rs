@@ -47,4 +47,3 @@ pub fn truncate_to_width(s: &str, max_cols: usize) -> String {
     }
     out
 }
-

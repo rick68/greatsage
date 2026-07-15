@@ -1,6 +1,7 @@
 //! Mutable TUI interaction state.
 
 use {
+    super::palette::{CommandPaletteState, ShortcutsCheatsheetState},
     bevy::ecs::resource::Resource,
     ratatui::layout::Rect,
     std::time::{Duration, Instant},
@@ -116,6 +117,10 @@ pub struct TuiState {
     pub operator_panel: OperatorPanel,
     /// Slash candidate menu (Grok-style overlay; catalog from REPL completion).
     pub slash_menu: SlashMenuState,
+    /// Global command palette (`Ctrl+P` / `?`) — ephemeral; not Session ECS.
+    pub command_palette: CommandPaletteState,
+    /// Shortcuts cheatsheet (`Ctrl+X` / `Ctrl+.`) — ephemeral.
+    pub shortcuts_cheatsheet: ShortcutsCheatsheetState,
     /// Dim ghost suffix after draft (from `inline_hint`); independent of menu open.
     pub ghost_hint: Option<String>,
     /// IME / composition preedit text (not yet committed into `prompt`).
@@ -138,6 +143,8 @@ impl Default for TuiState {
             status_hint: None,
             operator_panel: OperatorPanel::default(),
             slash_menu: SlashMenuState::default(),
+            command_palette: CommandPaletteState::default(),
+            shortcuts_cheatsheet: ShortcutsCheatsheetState::default(),
             ghost_hint: None,
             ime_preedit: String::new(),
         }
@@ -193,13 +200,13 @@ impl TuiState {
         () = self.clear_esc_arm();
         // Sync first selectable line into prompt if it is a slash command.
         () = self.sync_prompt_from_operator_selection();
-        self.status_hint = Some("panel · ↑↓ · Enter fill · Esc close".into());
+        self.status_hint = Some("panel · ↑↓:nav · Enter:fill · Esc:close".into());
     }
 
     /// Stream one shell/live line into the open operator panel (or open it).
     pub fn push_operator_line(&mut self, line: impl Into<String>) {
         () = self.operator_panel.append_line(line);
-        self.status_hint = Some("panel · ↑↓ · Esc close".into());
+        self.status_hint = Some("panel · ↑↓:nav · Esc:close".into());
     }
 
     /// Copy panel selection → prompt when the line encodes a slash command.
@@ -223,6 +230,51 @@ impl TuiState {
         self.status_hint = None;
     }
 
+    /// Open command palette (refreshes catalog rows). Closes cheatsheet if open.
+    pub fn open_command_palette(&mut self) {
+        self.shortcuts_cheatsheet.close();
+        self.command_palette.open_fresh();
+        () = self.clear_esc_arm();
+        self.status_hint = Some("Ctrl+P:filter · Enter:fill · Esc:close".into());
+    }
+
+    pub fn close_command_palette(&mut self) {
+        self.command_palette.close();
+        if self
+            .status_hint
+            .as_deref()
+            .is_some_and(|h| h.starts_with("Ctrl+P:filter") || h.starts_with("palette"))
+        {
+            self.status_hint = None;
+        }
+    }
+
+    /// Toggle palette: open if closed, close if open.
+    pub fn toggle_command_palette(&mut self) {
+        if self.command_palette.open {
+            self.close_command_palette();
+        } else {
+            self.open_command_palette();
+        }
+    }
+
+    pub fn open_shortcuts_cheatsheet(&mut self) {
+        self.shortcuts_cheatsheet.open_it();
+        () = self.clear_esc_arm();
+        self.status_hint = Some("Ctrl+X:keys · Esc:close".into());
+    }
+
+    pub fn close_shortcuts_cheatsheet(&mut self) {
+        self.shortcuts_cheatsheet.close();
+        if self
+            .status_hint
+            .as_deref()
+            .is_some_and(|h| h.starts_with("Ctrl+X:keys") || h.starts_with("keys"))
+        {
+            self.status_hint = None;
+        }
+    }
+
     pub fn clear_prompt(&mut self) {
         () = self.prompt.clear();
         self.cursor = 0;
@@ -243,4 +295,3 @@ impl TuiState {
         self.last_scrollback_height.saturating_sub(1).max(1)
     }
 }
-

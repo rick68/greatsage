@@ -138,4 +138,3 @@ pub fn jump_turn(state: &mut TuiState, turn_starts: &[usize], line_count: usize,
     }
     () = ensure_selected_visible(state, line_count);
 }
-

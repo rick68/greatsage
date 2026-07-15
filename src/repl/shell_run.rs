@@ -539,4 +539,3 @@ pub(crate) fn change_directory(raw: &str) -> Result<PathBuf, String> {
 fn home_dir() -> Option<PathBuf> {
     dirs::home_dir().or_else(|| env::var_os("HOME").map(PathBuf::from))
 }
-

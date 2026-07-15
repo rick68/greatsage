@@ -467,4 +467,3 @@ pub(crate) fn format_output_lines(output: &str, show_all: bool) -> Vec<String> {
     }
     lines
 }
-

@@ -107,4 +107,3 @@ pub(crate) fn stdout_plugin(app: &mut App) {
         .add_message::<ExternPromptSubmitted>()
         .add_systems(PostUpdate, print_stdout_message);
 }
-

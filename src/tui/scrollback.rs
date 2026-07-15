@@ -38,7 +38,7 @@ impl ScrollbackView {
 
 /// Build ordered lines from content blocks (sorted by turn_seq, then block_index, then seq).
 pub fn lines_from_blocks(mut blocks: Vec<&ContentBlock>) -> Vec<ScrollbackLine> {
-    blocks.sort_by(|a, b| {
+    () =blocks.sort_by(|a, b| {
         a.turn_seq
             .cmp(&b.turn_seq)
             .then(a.block_index.cmp(&b.block_index))
@@ -99,4 +99,3 @@ pub fn rebuild_scrollback_view(
     view.turn_starts = turn_starts_from_lines(&view.lines);
     view.empty_placeholder = false;
 }
-

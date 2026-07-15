@@ -2,7 +2,7 @@
 
 use {
     super::{
-        commands::is_ui_quit_line,
+        commands::{accept_palette_selection, is_ui_quit_line},
         nav::{jump_end, jump_home, jump_turn, move_selection_by, ratatui_scroll_y, scroll_page},
         scrollback::ScrollbackView,
         slash_complete::{
@@ -125,11 +125,13 @@ pub fn mouse_input_system(
                     }
                 }
             }
-            // Wheel: panel steals when open; else scrollback.
+            // Wheel: panel → palette → scrollback.
             MouseEventKind::ScrollUp => {
                 if state.operator_panel.open {
                     state.operator_panel.move_selection(1);
                     state.sync_prompt_from_operator_selection();
+                } else if state.command_palette.open {
+                    state.command_palette.move_highlight(1);
                 } else {
                     () = move_selection_by(&mut state, line_count, 1);
                 }
@@ -138,6 +140,8 @@ pub fn mouse_input_system(
                 if state.operator_panel.open {
                     state.operator_panel.move_selection(-1);
                     state.sync_prompt_from_operator_selection();
+                } else if state.command_palette.open {
+                    state.command_palette.move_highlight(-1);
                 } else {
                     () = move_selection_by(&mut state, line_count, -1);
                 }
@@ -154,7 +158,13 @@ pub fn paste_system(
     agent_config: Res<AgentConfig>,
 ) {
     for paste in pastes.read() {
-        if state.focus != TuiFocus::Prompt || state.operator_panel.open {
+        if state.operator_panel.open
+            || state.command_palette.open
+            || state.shortcuts_cheatsheet.open
+        {
+            continue;
+        }
+        if state.focus != TuiFocus::Prompt {
             continue;
         }
         state.clear_esc_arm();
@@ -188,6 +198,33 @@ pub fn input_system(
             continue;
         }
         if message.kind != KeyEventKind::Press && message.kind != KeyEventKind::Repeat {
+            continue;
+        }
+
+        // ── Ctrl+P palette toggle · Ctrl+X / Ctrl+. cheatsheet ───────────
+        if message.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(message.code, KeyCode::Char('p') | KeyCode::Char('P'))
+        {
+            state.clear_esc_arm();
+            state.clear_ime_preedit();
+            // Operator panel stays above palette in Esc order; still allow open
+            // so discover works, but panel remains on top until Esc.
+            state.toggle_command_palette();
+            continue;
+        }
+        if message.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(
+                message.code,
+                KeyCode::Char('x') | KeyCode::Char('X') | KeyCode::Char('.')
+            )
+        {
+            state.clear_esc_arm();
+            state.clear_ime_preedit();
+            if state.shortcuts_cheatsheet.open {
+                state.close_shortcuts_cheatsheet();
+            } else {
+                state.open_shortcuts_cheatsheet();
+            }
             continue;
         }
 
@@ -253,7 +290,7 @@ pub fn input_system(
             session.ctrl_c_armed = false;
         }
 
-        // ── Esc steal: IME preedit → operator panel → slash menu → clear ──
+        // ── Esc: IME → panel → palette → cheatsheet → slash menu → clear ─
         if message.code == KeyCode::Esc {
             if !state.ime_preedit.is_empty() {
                 // Cancel composition first (do not clear the committed prompt).
@@ -262,6 +299,14 @@ pub fn input_system(
             }
             if state.operator_panel.open {
                 state.close_operator_panel();
+                continue;
+            }
+            if state.command_palette.open {
+                state.close_command_palette();
+                continue;
+            }
+            if state.shortcuts_cheatsheet.open {
+                state.close_shortcuts_cheatsheet();
                 continue;
             }
             if try_dismiss_slash_menu(&mut state) {
@@ -273,6 +318,45 @@ pub fn input_system(
                 agent_busy || session.active_shell.is_some(),
                 Instant::now(),
             );
+            continue;
+        }
+
+        // ── Command palette (filter + accept; does not mutate prompt until Enter)
+        if state.command_palette.open {
+            match message.code {
+                KeyCode::Up => state.command_palette.move_highlight(-1),
+                KeyCode::Down => state.command_palette.move_highlight(1),
+                KeyCode::PageUp => state.command_palette.move_highlight(-10),
+                KeyCode::PageDown => state.command_palette.move_highlight(10),
+                KeyCode::Home => state.command_palette.highlight = 0,
+                KeyCode::End => {
+                    let n = state.command_palette.rows.len();
+                    state.command_palette.highlight = n.saturating_sub(1);
+                }
+                KeyCode::Enter => {
+                    if accept_palette_selection(&mut state) {
+                        // Fill may need slash menu/ghost refresh for the new draft.
+                        refresh_slash_completion(&mut state, &agent_config, false);
+                    }
+                }
+                KeyCode::Backspace => {
+                    state.command_palette.filter_backspace();
+                }
+                KeyCode::Char(c)
+                    if !message.modifiers.contains(KeyModifiers::CONTROL)
+                        && !message.modifiers.contains(KeyModifiers::ALT)
+                        && !c.is_control() =>
+                {
+                    state.command_palette.insert_filter_char(c);
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        // ── Shortcuts cheatsheet: Esc already handled; swallow other keys ─
+        if state.shortcuts_cheatsheet.open {
+            // Allow opening palette on top via Ctrl+P already handled above.
             continue;
         }
 
@@ -364,8 +448,12 @@ pub fn input_system(
                 {
                     state.focus = TuiFocus::Prompt;
                     () = state.clear_esc_arm();
-                    insert_char(&mut state, c);
-                    refresh_slash_completion(&mut state, &agent_config, false);
+                    if c == '?' && state.prompt.is_empty() {
+                        state.open_command_palette();
+                    } else {
+                        insert_char(&mut state, c);
+                        refresh_slash_completion(&mut state, &agent_config, false);
+                    }
                 }
                 _ => {}
             }
@@ -404,8 +492,12 @@ pub fn input_system(
                     && !c.is_control() =>
             {
                 state.clear_esc_arm();
-                // Committed text clears any stale preedit slot.
                 state.clear_ime_preedit();
+                // `?` opens palette when draft is empty (Grok agent-screen binding).
+                if c == '?' && state.prompt.is_empty() {
+                    state.open_command_palette();
+                    continue;
+                }
                 () = insert_char(&mut state, c);
                 refresh_slash_completion(&mut state, &agent_config, false);
             }
@@ -644,4 +736,3 @@ fn handle_slash(
         }
     }
 }
-

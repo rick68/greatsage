@@ -4,6 +4,7 @@ use {
     super::{
         layout::split_frame,
         nav::{clamp_selected_line, ratatui_scroll_y},
+        palette::{CheatLine, PaletteRow, shortcuts_cheatsheet_lines},
         scrollback::ScrollbackView,
         slash_complete::SLASH_MENU_MAX_ROWS,
         state::{TuiFocus, TuiState},
@@ -21,8 +22,9 @@ use {
     std::cell::Cell,
 };
 
+/// Idle chrome: `Key:label` pairs (hotkey bright-white; label dim).
 pub const DEFAULT_STATUS_HINT: &str =
-    "Tab complete `/` · Tab/click focus · wheel · PgUp/Dn · Shift+←/→ · 2xEsc · Ctrl+C leave";
+    "Ctrl+P:commands · Ctrl+X:keys · /:menu · Tab:focus · 2xEsc:clear · Ctrl+C:leave";
 
 /// Prompt prefix shown before the draft (`"> "`).
 const PROMPT_PREFIX: &str = "> ";
@@ -39,6 +41,95 @@ fn white_caret_style() -> Style {
         .bg(Color::White)
         .fg(Color::Black)
         .add_modifier(Modifier::BOLD)
+}
+
+/// Bright-white hotkey chords (`Ctrl+P`, `Esc`, …) — bold named white, not dim gray.
+fn hotkey_style() -> Style {
+    Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Longest-first tokens highlighted as hotkeys in status / titles.
+const HOTKEY_TOKENS: &[&str] = &[
+    "Shift+←",
+    "Shift+→",
+    "Ctrl+P",
+    "Ctrl+X",
+    "Ctrl+C",
+    "Ctrl+D",
+    "Ctrl+.",
+    "2× Esc",
+    "2xEsc",
+    "PgUp",
+    "PgDn",
+    "Enter",
+    "Space",
+    "Home",
+    "End",
+    "Tab",
+    "Esc",
+    "↑↓",
+    "`/`",
+    "/", // bare slash in `/:menu` (after longer tokens)
+];
+
+/// Split `text` into spans: known hotkey chords → bright white; rest → `base`.
+fn line_with_hotkeys(text: &str, base: Style) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        let mut best: Option<(usize, &'static str)> = None;
+        for tok in HOTKEY_TOKENS {
+            if let Some(i) = rest.find(tok) {
+                match best {
+                    Some((bi, bt)) if i > bi || (i == bi && tok.len() <= bt.len()) => {}
+                    _ => best = Some((i, *tok)),
+                }
+            }
+        }
+        match best {
+            Some((0, tok)) => {
+                spans.push(Span::styled(tok.to_string(), hotkey_style()));
+                rest = &rest[tok.len()..];
+            }
+            Some((i, _)) => {
+                spans.push(Span::styled(rest[..i].to_string(), base));
+                rest = &rest[i..];
+            }
+            None => {
+                spans.push(Span::styled(rest.to_string(), base));
+                break;
+            }
+        }
+    }
+    if spans.is_empty() {
+        Line::from(Span::styled(String::new(), base))
+    } else {
+        Line::from(spans)
+    }
+}
+
+/// Format a cheatsheet binding: keys bright white, description dim.
+fn format_cheat_binding(keys: &str, desc: &str, key_col: usize, max_cols: usize) -> Line<'static> {
+    let keys_disp = str_display_width(keys).max(key_col);
+    let pad = " ".repeat(keys_disp.saturating_sub(str_display_width(keys)));
+    let key_part = format!("{keys}{pad}");
+    if max_cols <= keys_disp + 2 {
+        return Line::from(Span::styled(
+            one_line(&key_part, max_cols as u16),
+            hotkey_style(),
+        ));
+    }
+    let rest = max_cols.saturating_sub(keys_disp + 2);
+    let desc_clip = one_line(desc, rest as u16);
+    Line::from(vec![
+        Span::styled(key_part, hotkey_style()),
+        Span::styled(
+            format!("  {desc_clip}"),
+            Style::default().add_modifier(Modifier::DIM),
+        ),
+    ])
 }
 
 /// Paint a solid white caret into the frame buffer after widgets render.
@@ -120,6 +211,11 @@ pub fn draw_system(
     let panel_title = state.operator_panel.title.clone();
     let panel_lines = state.operator_panel.lines.clone();
     let panel_sel = state.operator_panel.selected;
+    let palette_open = state.command_palette.open;
+    let palette_filter = state.command_palette.filter.clone();
+    let palette_rows = state.command_palette.rows.clone();
+    let palette_hi = state.command_palette.highlight;
+    let cheatsheet_open = state.shortcuts_cheatsheet.open;
     let status_raw = state
         .status_hint
         .clone()
@@ -191,10 +287,8 @@ pub fn draw_system(
         () = frame.render_widget(scroll_widget, areas.scrollback);
 
         let status = one_line(&status_raw, areas.status.width.max(1));
-        () = frame.render_widget(
-            Paragraph::new(status).style(Style::default().add_modifier(Modifier::DIM)),
-            areas.status,
-        );
+        let status_line = line_with_hotkeys(&status, Style::default().add_modifier(Modifier::DIM));
+        () = frame.render_widget(Paragraph::new(status_line), areas.status);
 
         let prompt_title = match focus {
             TuiFocus::Prompt => " prompt (focused) ",
@@ -204,8 +298,7 @@ pub fn draw_system(
         let after = &prompt[cursor_byte..];
         let ime_preedit = state.ime_preedit.clone();
         // Display columns before caret; caret width matches glyph under insertion point.
-        let caret_cols =
-            (str_display_width(PROMPT_PREFIX) + str_display_width(before)) as u16;
+        let caret_cols = (str_display_width(PROMPT_PREFIX) + str_display_width(before)) as u16;
         // While IME preedit is active, use a 1-col insert bar so the terminal can
         // draw composition at the hardware cursor without fighting a wide cover.
         let caret_w = if ime_preedit.is_empty() {
@@ -214,33 +307,31 @@ pub fn draw_system(
             1
         };
         // When covering a wide glyph (no preedit), omit it so the white bar replaces it.
-        let after_rest: String = if focus == TuiFocus::Prompt
-            && ime_preedit.is_empty()
-            && !after.is_empty()
-        {
-            after.chars().skip(1).collect()
-        } else {
-            after.to_string()
-        };
+        let after_rest: String =
+            if focus == TuiFocus::Prompt && ime_preedit.is_empty() && !after.is_empty() {
+                after.chars().skip(1).collect()
+            } else {
+                after.to_string()
+            };
         let mut spans = vec![
             Span::raw(PROMPT_PREFIX.to_string()),
             Span::raw(before.to_string()),
         ];
         if focus == TuiFocus::Prompt {
             // Placeholder cells (= caret display width); painted white after.
-            spans.push(Span::raw(" ".repeat(caret_w)));
+            () = spans.push(Span::raw(" ".repeat(caret_w)));
             // IME composition (underlined) between caret and committed tail.
             if !ime_preedit.is_empty() {
-                spans.push(Span::styled(
+                () = spans.push(Span::styled(
                     ime_preedit.clone(),
                     Style::default()
                         .add_modifier(Modifier::UNDERLINED)
                         .fg(Color::Yellow),
                 ));
             }
-            spans.push(Span::raw(after_rest));
+            () = spans.push(Span::raw(after_rest));
         } else {
-            spans.push(Span::raw(after.to_string()));
+            () = spans.push(Span::raw(after.to_string()));
         }
         if let Some(ref g) = ghost {
             // Ghost only when not composing (IME preedit owns that slot).
@@ -255,20 +346,39 @@ pub fn draw_system(
             .block(Block::default().borders(Borders::ALL).title(prompt_title));
         () = frame.render_widget(prompt_display, areas.prompt);
 
-        if menu_open && !menu_cands.is_empty() && ime_preedit.is_empty() {
-            render_slash_menu(frame, areas.prompt, &menu_cands, menu_hi);
+        // Slash menu under global overlays (palette/cheatsheet drawn later).
+        if menu_open && !menu_cands.is_empty() && ime_preedit.is_empty() && !palette_open {
+            () = render_slash_menu(frame, areas.prompt, &menu_cands, menu_hi);
         }
 
         // Operator panel: floating window over scrollback (does not pollute conversation).
         if panel_open && !panel_lines.is_empty() {
             let panel_rect = operator_panel_rect(areas.scrollback, panel_lines.len());
-            captured_panel.set(panel_rect);
-            render_operator_panel(frame, panel_rect, &panel_title, &panel_lines, panel_sel);
+            () = captured_panel.set(panel_rect);
+            () = render_operator_panel(frame, panel_rect, &panel_title, &panel_lines, panel_sel);
+        }
+
+        // Shortcuts cheatsheet (below palette if both ever stacked).
+        if cheatsheet_open {
+            let lines = shortcuts_cheatsheet_lines();
+            let rect = centered_overlay_rect(areas.scrollback, lines.len().saturating_add(1), 56);
+            () = render_cheatsheet(frame, rect, &lines);
+        }
+
+        // Command palette on top of other chrome (except operator panel still
+        // painted above scrollback; Esc closes panel first).
+        if palette_open {
+            let rect = centered_overlay_rect(
+                areas.scrollback,
+                palette_rows.len().saturating_add(3).min(16),
+                64,
+            );
+            () = render_command_palette(frame, rect, &palette_filter, &palette_rows, palette_hi);
         }
 
         // White caret + hardware cursor at the same display column so OS IME
         // preedit anchors correctly (wrong cursor → layout corruption).
-        if focus == TuiFocus::Prompt {
+        if focus == TuiFocus::Prompt && !palette_open && !cheatsheet_open {
             paint_white_caret(frame, areas.prompt, caret_cols, caret_w);
             let inner_x = areas.prompt.x.saturating_add(1);
             let inner_y = areas.prompt.y.saturating_add(1);
@@ -277,7 +387,7 @@ pub fn draw_system(
                 .x
                 .saturating_add(areas.prompt.width.saturating_sub(2));
             let hx = inner_x.saturating_add(caret_cols).min(max_x);
-            frame.set_cursor_position(Position { x: hx, y: inner_y });
+            () = frame.set_cursor_position(Position { x: hx, y: inner_y });
         }
     })?;
 
@@ -291,10 +401,14 @@ pub fn draw_system(
 
 /// Centered floating rect inside scrollback (Grok-style small window).
 fn operator_panel_rect(scrollback: Rect, line_count: usize) -> Rect {
+    centered_overlay_rect(scrollback, line_count, 72)
+}
+
+fn centered_overlay_rect(scrollback: Rect, content_lines: usize, prefer_width: u16) -> Rect {
     let max_h = scrollback.height.saturating_sub(2).max(5);
-    let content_h = (line_count as u16).saturating_add(2).min(max_h).max(5);
+    let content_h = (content_lines as u16).saturating_add(2).min(max_h).max(5);
     let max_w = scrollback.width.saturating_sub(4).max(20);
-    let width = max_w.min(72).max(24);
+    let width = max_w.min(prefer_width).max(24);
     let x = scrollback.x + (scrollback.width.saturating_sub(width)) / 2;
     let y = scrollback.y + (scrollback.height.saturating_sub(content_h)) / 2;
     Rect {
@@ -303,6 +417,138 @@ fn operator_panel_rect(scrollback: Rect, line_count: usize) -> Rect {
         width,
         height: content_h,
     }
+}
+
+fn format_palette_row(row: &PaletteRow, name_col: usize, max_cols: usize) -> Line<'static> {
+    let name = row.label().to_string();
+    let name_disp = str_display_width(&name).max(name_col);
+    let desc = row.description();
+    if desc.is_empty() || max_cols <= name_disp + 2 {
+        return Line::from(Span::raw(one_line(&name, max_cols as u16)));
+    }
+    let pad = " ".repeat(name_disp.saturating_sub(str_display_width(&name)));
+    let rest = max_cols.saturating_sub(name_disp + 2);
+    let desc_clip = one_line(desc, rest as u16);
+    Line::from(vec![
+        Span::raw(format!("{name}{pad}")),
+        Span::styled(
+            format!("  {desc_clip}"),
+            Style::default().add_modifier(Modifier::DIM),
+        ),
+    ])
+}
+
+fn render_command_palette(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    filter: &str,
+    rows: &[PaletteRow],
+    highlight: usize,
+) {
+    if area.width < 8 || area.height < 4 {
+        return;
+    }
+    () = frame.render_widget(Clear, area);
+    let filter_line = if filter.is_empty() {
+        "filter: (type to search)".to_string()
+    } else {
+        format!("filter: {filter}")
+    };
+    let title = line_with_hotkeys(" Ctrl+P:commands · Esc:close ", Style::default());
+    // Outer block + filter as first "header" via nested layout:
+    // row 0 of inner = filter, rest = list.
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let inner = block.inner(area);
+    () = frame.render_widget(block, area);
+    if inner.height < 2 {
+        return;
+    }
+    let filter_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y.saturating_add(1),
+        width: inner.width,
+        height: inner.height.saturating_sub(1),
+    };
+    () = frame.render_widget(
+        Paragraph::new(one_line(&filter_line, filter_area.width.max(1)))
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        filter_area,
+    );
+    if rows.is_empty() {
+        () = frame.render_widget(
+            Paragraph::new("(no matches)").style(Style::default().add_modifier(Modifier::DIM)),
+            list_area,
+        );
+        return;
+    }
+    let n = rows.len();
+    let hi = highlight.min(n.saturating_sub(1));
+    let max_vis = (list_area.height as usize).max(1);
+    let start = if n <= max_vis {
+        0
+    } else {
+        hi.saturating_sub(max_vis / 2).min(n - max_vis)
+    };
+    let end = (start + max_vis).min(n);
+    let visible = &rows[start..end];
+    let name_col = visible
+        .iter()
+        .map(|r| str_display_width(r.label()))
+        .max()
+        .unwrap_or(0);
+    let inner_w = list_area.width.saturating_sub(2).max(8) as usize;
+    let items: Vec<ListItem> = visible
+        .iter()
+        .map(|r| ListItem::new(format_palette_row(r, name_col, inner_w)))
+        .collect();
+    let mut list_state = ListState::default();
+    list_state.select(Some(hi.saturating_sub(start)));
+    let list = List::new(items)
+        .highlight_symbol("❯ ")
+        .highlight_style(focus_solid().add_modifier(Modifier::BOLD));
+    () = frame.render_stateful_widget(list, list_area, &mut list_state);
+}
+
+fn render_cheatsheet(frame: &mut ratatui::Frame, area: Rect, lines: &[CheatLine]) {
+    if area.width < 6 || area.height < 3 {
+        return;
+    }
+    let n = lines.len();
+    let max_vis = (area.height.saturating_sub(2) as usize).max(1);
+    let end = max_vis.min(n);
+    let visible = &lines[..end];
+    let key_col = visible
+        .iter()
+        .filter_map(|l| match l {
+            CheatLine::Binding { keys, .. } => Some(str_display_width(keys)),
+            CheatLine::Header(_) => None,
+        })
+        .max()
+        .unwrap_or(12)
+        .min(22);
+    let inner_w = area.width.saturating_sub(4).max(8) as usize;
+    let items: Vec<ListItem> = visible
+        .iter()
+        .map(|line| match line {
+            CheatLine::Header(h) => ListItem::new(Line::from(Span::styled(
+                one_line(h, inner_w as u16),
+                Style::default().add_modifier(Modifier::DIM),
+            ))),
+            CheatLine::Binding { keys, desc } => {
+                ListItem::new(format_cheat_binding(keys, desc, key_col, inner_w))
+            }
+        })
+        .collect();
+    () = frame.render_widget(Clear, area);
+    let title = line_with_hotkeys(" Ctrl+X:keys · Esc:close ", Style::default());
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
+    () = frame.render_widget(list, area);
 }
 
 fn render_operator_panel(
@@ -330,12 +576,15 @@ fn render_operator_panel(
         .map(|l| ListItem::new(one_line(l, inner_w as u16)))
         .collect();
     let mut list_state = ListState::default();
-    list_state.select(Some(hi.saturating_sub(start)));
+    () = list_state.select(Some(hi.saturating_sub(start)));
 
-    let title = format!(" {title} · ↑↓ · Enter · Esc ");
+    let title_line = line_with_hotkeys(
+        &format!(" {title} · ↑↓:nav · Enter:fill · Esc:close "),
+        Style::default(),
+    );
     () = frame.render_widget(Clear, area);
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title))
+        .block(Block::default().borders(Borders::ALL).title(title_line))
         .highlight_symbol("❯ ")
         .highlight_style(focus_solid().add_modifier(Modifier::BOLD));
     () = frame.render_stateful_widget(list, area, &mut list_state);
@@ -387,7 +636,7 @@ fn render_slash_menu(
         .map(|c| ListItem::new(format_slash_menu_row(c, name_col, inner_w)))
         .collect();
     let mut list_state = ListState::default();
-    list_state.select(Some(hi.saturating_sub(start)));
+    () = list_state.select(Some(hi.saturating_sub(start)));
 
     () = frame.render_widget(Clear, menu_area);
     // Grok slash menu: marker + solid selection row.
@@ -397,4 +646,3 @@ fn render_slash_menu(
         .highlight_style(focus_solid().add_modifier(Modifier::BOLD));
     () = frame.render_stateful_widget(list, menu_area, &mut list_state);
 }
-

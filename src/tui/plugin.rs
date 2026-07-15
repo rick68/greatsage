@@ -35,7 +35,10 @@ impl Plugin for TuiPlugin {
         .init_resource::<TuiState>()
         .init_resource::<ScrollbackView>()
         .init_resource::<ReplSessionState>()
-        .add_systems(Startup, (enable_bracketed_paste_system, install_paste_cleanup))
+        .add_systems(
+            Startup,
+            (enable_bracketed_paste_system, install_paste_cleanup),
+        )
         .add_systems(
             PreUpdate,
             (
