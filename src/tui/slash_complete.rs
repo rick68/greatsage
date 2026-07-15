@@ -36,11 +36,15 @@ fn char_index_to_byte(prompt: &str, char_idx: usize) -> usize {
 }
 
 /// Close menu and drop cached candidates (ghost cleared separately by refresh).
+/// Clears any Esc-dismiss latch (prompt no longer slash, or full reset).
 pub fn close_slash_menu(state: &mut TuiState) {
     state.slash_menu = SlashMenuState::default();
 }
 
-/// Recompute ghost + candidates. Opens menu when eligible (not bare `/` unless `force_open`).
+/// Recompute ghost + candidates. Opens menu when eligible.
+///
+/// After Esc dismiss, the menu stays closed while the draft is unchanged.
+/// Typing (prompt change) or `force_open` (Tab) clears the latch and may re-open.
 pub fn refresh_slash_completion(
     state: &mut TuiState,
     agent_config: &AgentConfig,
@@ -53,6 +57,16 @@ pub fn refresh_slash_completion(
         return;
     }
 
+    // Prompt changed since Esc → allow menu again.
+    if state
+        .slash_menu
+        .dismissed_for
+        .as_deref()
+        .is_some_and(|d| d != prompt)
+    {
+        state.slash_menu.dismissed_for = None;
+    }
+
     let cursor_chars = cursor_char_index(prompt, state.cursor);
     let at_end = cursor_chars == prompt.chars().count();
     state.ghost_hint = if at_end {
@@ -63,7 +77,14 @@ pub fn refresh_slash_completion(
 
     let candidates = completions(prompt, cursor_chars, agent_config);
     if candidates.is_empty() {
-        () = close_slash_menu(state);
+        // Keep dismiss latch if still same draft (no matches is still "closed").
+        let dismissed_for = state.slash_menu.dismissed_for.clone();
+        state.slash_menu = SlashMenuState {
+            open: false,
+            highlight: 0,
+            candidates: Vec::new(),
+            dismissed_for,
+        };
         return;
     }
 
@@ -72,18 +93,42 @@ pub fn refresh_slash_completion(
     // re-accepting forever. Args still incomplete (`/model ` → models) keep the menu.
     let token = token_prefix(prompt, cursor_chars);
     if candidates.len() == 1 && candidates[0] == token {
-        () = close_slash_menu(state);
+        let dismissed_for = state.slash_menu.dismissed_for.clone();
+        state.slash_menu = SlashMenuState {
+            open: false,
+            highlight: 0,
+            candidates: Vec::new(),
+            dismissed_for,
+        };
         return;
     }
 
-    // Grok slash menu: typing `/` opens the command list immediately.
+    // Esc latch: stay closed until prompt edits or Tab force-open.
+    if !force_open
+        && state
+            .slash_menu
+            .dismissed_for
+            .as_deref()
+            .is_some_and(|d| d == prompt)
+    {
+        let dismissed_for = state.slash_menu.dismissed_for.clone();
+        state.slash_menu = SlashMenuState {
+            open: false,
+            highlight: 0,
+            candidates,
+            dismissed_for,
+        };
+        return;
+    }
+
+    // Tab force-open (or first open after typing) clears Esc latch.
     let prev = state.slash_menu.highlight;
     let highlight = prev.min(candidates.len().saturating_sub(1));
-    let _ = force_open; // retained for Tab-force API; bare `/` now always opens
     state.slash_menu = SlashMenuState {
         open: true,
         highlight,
         candidates,
+        dismissed_for: None,
     };
 }
 
@@ -173,12 +218,19 @@ pub fn move_menu_highlight(state: &mut TuiState, delta: i32) {
     state.slash_menu.highlight = next;
 }
 
-/// Esc with menu open: dismiss only. Returns `true` if consumed.
+/// Esc with menu open: dismiss only (draft unchanged). Returns `true` if consumed.
+///
+/// Latches `dismissed_for` to the current prompt so a following refresh does not
+/// immediately re-open the list while the user is still on the same draft.
 pub fn try_dismiss_slash_menu(state: &mut TuiState) -> bool {
     if state.slash_menu.open {
-        () = close_slash_menu(state);
-        // Keep ghost if still slash; refresh without force (may stay closed on bare `/`)
-        // Caller supplies AgentConfig for full refresh; here only dismiss menu.
+        let draft = state.prompt.clone();
+        state.slash_menu = SlashMenuState {
+            open: false,
+            highlight: 0,
+            candidates: Vec::new(),
+            dismissed_for: Some(draft),
+        };
         state.ghost_hint = None;
         return true;
     }

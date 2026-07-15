@@ -1,7 +1,8 @@
 //! Command palette: shared `help_data` catalog + small UI-only action set.
 //!
-//! Filter is case-insensitive substring on name/label and description.
-//! Accepting a slash row fills the prompt only — does **not** dispatch.
+//! In-panel **search** field filters rows (case-insensitive substring on
+//! name/label + description). Accepting a slash row fills the prompt only —
+//! does **not** dispatch.
 
 use crate::repl::help_data::{KNOWN_COMMANDS, command_short_description};
 
@@ -65,7 +66,7 @@ pub fn all_palette_rows() -> Vec<PaletteRow> {
     ];
     for cmd in KNOWN_COMMANDS {
         let description = command_short_description(cmd.name).unwrap_or(cmd.summary);
-        () =  rows.push(PaletteRow::Slash {
+        rows.push(PaletteRow::Slash {
             name: cmd.name,
             description,
         });

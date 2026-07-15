@@ -191,6 +191,7 @@ pub fn input_system(
     let line_count = scrollback.line_count();
     let turn_starts = scrollback.turn_starts.clone();
     let agent_busy = runtime_status.iter().any(|s| s.is_processing());
+    () = state.expire_esc_arm_if_stale(Instant::now());
 
     for message in keys.read() {
         // Ignore Null (some IME/control sequences) and non-press kinds.
@@ -311,6 +312,12 @@ pub fn input_system(
             }
             if try_dismiss_slash_menu(&mut state) {
                 refresh_slash_completion(&mut state, &agent_config, false);
+                // Count menu dismiss as the first Esc of double-clear so
+                // `/` + 2×Esc closes the menu and clears the draft (not 3×Esc).
+                let now = Instant::now();
+                if !state.prompt.is_empty() && state.focus == TuiFocus::Prompt {
+                    () = state.arm_esc_clear(now);
+                }
                 continue;
             }
             handle_esc(
@@ -321,13 +328,14 @@ pub fn input_system(
             continue;
         }
 
-        // ── Command palette (filter + accept; does not mutate prompt until Enter)
+        // ── Command palette (search field + list; Enter fills, does not dispatch)
         if state.command_palette.open {
             match message.code {
                 KeyCode::Up => state.command_palette.move_highlight(-1),
                 KeyCode::Down => state.command_palette.move_highlight(1),
                 KeyCode::PageUp => state.command_palette.move_highlight(-10),
                 KeyCode::PageDown => state.command_palette.move_highlight(10),
+                // Home/End move list selection (search cursor is always at end of query).
                 KeyCode::Home => state.command_palette.highlight = 0,
                 KeyCode::End => {
                     let n = state.command_palette.rows.len();
@@ -335,11 +343,14 @@ pub fn input_system(
                 }
                 KeyCode::Enter => {
                     if accept_palette_selection(&mut state) {
-                        // Fill may need slash menu/ghost refresh for the new draft.
                         refresh_slash_completion(&mut state, &agent_config, false);
                     }
                 }
                 KeyCode::Backspace => {
+                    state.command_palette.filter_backspace();
+                }
+                KeyCode::Delete => {
+                    // Same as backspace for end-of-query search field.
                     state.command_palette.filter_backspace();
                 }
                 KeyCode::Char(c)
@@ -347,6 +358,7 @@ pub fn input_system(
                         && !message.modifiers.contains(KeyModifiers::ALT)
                         && !c.is_control() =>
                 {
+                    // All printable typing goes into the in-palette search field.
                     state.command_palette.insert_filter_char(c);
                 }
                 _ => {}
@@ -596,11 +608,11 @@ pub fn handle_esc(state: &mut TuiState, busy: bool, now: Instant) {
         Some(armed) if now.duration_since(armed) <= ESC_CLEAR_WINDOW => {
             () = state.clear_prompt();
             () = state.clear_esc_arm();
-            () = state.set_status_hint("prompt cleared");
+            // Back to idle key chrome (not a sticky toast that hides bindings).
+            state.status_hint = None;
         }
         _ => {
-            state.esc_armed_at = Some(now);
-            () = state.set_status_hint("press Esc again to clear");
+            () = state.arm_esc_clear(now);
         }
     }
 }

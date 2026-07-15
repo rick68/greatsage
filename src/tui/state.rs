@@ -26,6 +26,9 @@ pub struct SlashMenuState {
     pub open: bool,
     pub highlight: usize,
     pub candidates: Vec<String>,
+    /// Esc closed the menu for this exact draft; stay closed until the prompt
+    /// text changes (or Tab force-opens). Prevents refresh from re-opening.
+    pub dismissed_for: Option<String>,
 }
 
 /// Multi-line slash/shell/help output — **separate window**, does not pollute Session ECS scrollback.
@@ -235,16 +238,16 @@ impl TuiState {
         self.shortcuts_cheatsheet.close();
         self.command_palette.open_fresh();
         () = self.clear_esc_arm();
-        self.status_hint = Some("Ctrl+P:filter · Enter:fill · Esc:close".into());
+        self.status_hint = Some("Ctrl+P:search · Enter:fill · Esc:close".into());
     }
 
     pub fn close_command_palette(&mut self) {
         self.command_palette.close();
-        if self
-            .status_hint
-            .as_deref()
-            .is_some_and(|h| h.starts_with("Ctrl+P:filter") || h.starts_with("palette"))
-        {
+        if self.status_hint.as_deref().is_some_and(|h| {
+            h.starts_with("Ctrl+P:search")
+                || h.starts_with("Ctrl+P:filter")
+                || h.starts_with("palette")
+        }) {
             self.status_hint = None;
         }
     }
@@ -289,6 +292,35 @@ impl TuiState {
 
     pub fn clear_esc_arm(&mut self) {
         self.esc_armed_at = None;
+        // First Esc arms with a temporary hint; cancel arm (typing, other keys)
+        // must restore idle key chrome, not leave "press Esc again to clear".
+        if self.status_hint_is_esc_arm() {
+            self.status_hint = None;
+        }
+    }
+
+    fn status_hint_is_esc_arm(&self) -> bool {
+        self.status_hint
+            .as_deref()
+            .is_some_and(|h| h.contains("Esc again") || h == "press Esc again to clear")
+    }
+
+    /// Drop a stale double-Esc arm so the arm hint cannot stick past the window.
+    pub fn expire_esc_arm_if_stale(&mut self, now: Instant) {
+        if let Some(armed) = self.esc_armed_at {
+            if now.duration_since(armed) > ESC_CLEAR_WINDOW {
+                () = self.clear_esc_arm();
+            }
+        } else if self.status_hint_is_esc_arm() {
+            // Hint without arm timestamp (should not happen) — still restore chrome.
+            self.status_hint = None;
+        }
+    }
+
+    /// First half of double-Esc clear (prompt non-empty, prompt-focused).
+    pub fn arm_esc_clear(&mut self, now: Instant) {
+        self.esc_armed_at = Some(now);
+        () = self.set_status_hint("press Esc again to clear");
     }
 
     pub fn page_size(&self) -> u16 {

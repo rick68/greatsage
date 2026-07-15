@@ -50,6 +50,21 @@ fn hotkey_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+/// Palette search **query** text — cyan complement to the white block caret
+/// (white-on-white made typed chars and placeholder hard to read).
+fn search_query_style() -> Style {
+    Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Dim cyan placeholder after the caret cell (`type to search`).
+fn search_placeholder_style() -> Style {
+    Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::DIM)
+}
+
 /// Longest-first tokens highlighted as hotkeys in status / titles.
 const HOTKEY_TOKENS: &[&str] = &[
     "Shift+←",
@@ -200,6 +215,9 @@ pub fn draw_system(
     mut state: ResMut<TuiState>,
     scrollback: Res<ScrollbackView>,
 ) -> bevy::prelude::Result {
+    // Double-Esc arm is time-boxed; drop sticky "press Esc again…" if the window lapsed.
+    () = state.expire_esc_arm_if_stale(std::time::Instant::now());
+
     let focus = state.focus;
     let prompt = state.prompt.clone();
     let cursor_byte = state.cursor.min(prompt.len());
@@ -368,16 +386,17 @@ pub fn draw_system(
         // Command palette on top of other chrome (except operator panel still
         // painted above scrollback; Esc closes panel first).
         if palette_open {
-            let rect = centered_overlay_rect(
+            // Open: vertically centered. While typing: same top edge (height shrinks
+            // from the bottom) so `search: ` does not jump as matches drop.
+            let rect = palette_overlay_rect(
                 areas.scrollback,
-                palette_rows.len().saturating_add(3).min(16),
-                64,
+                &palette_filter,
+                palette_rows.len(),
             );
             () = render_command_palette(frame, rect, &palette_filter, &palette_rows, palette_hi);
         }
 
-        // White caret + hardware cursor at the same display column so OS IME
-        // preedit anchors correctly (wrong cursor → layout corruption).
+        // White caret on prompt when palette closed (palette paints its own search caret).
         if focus == TuiFocus::Prompt && !palette_open && !cheatsheet_open {
             paint_white_caret(frame, areas.prompt, caret_cols, caret_w);
             let inner_x = areas.prompt.x.saturating_add(1);
@@ -419,6 +438,42 @@ fn centered_overlay_rect(scrollback: Rect, content_lines: usize, prefer_width: u
     }
 }
 
+/// Command palette overlay geometry.
+///
+/// - **Open / empty filter:** full list viewport, **vertically centered** (same idea as
+///   operator panel).
+/// - **While typing:** keep that **top** Y; height may shrink from the bottom as the
+///   match list shortens, so `search: ` does not jump.
+fn palette_overlay_rect(scrollback: Rect, filter: &str, filtered_count: usize) -> Rect {
+    /// Inner: search row + separator + list viewport cap.
+    const SEARCH_AND_SEP: u16 = 2;
+    const MAX_LIST: u16 = 12;
+    let max_h = scrollback.height.saturating_sub(2).max(7);
+    // Open footprint used for centering (and as the pinned top when filtering).
+    let open_height = (SEARCH_AND_SEP + MAX_LIST + 2).min(max_h).max(7);
+    let max_w = scrollback.width.saturating_sub(4).max(20);
+    let width = max_w.min(64).max(24);
+    let x = scrollback.x + (scrollback.width.saturating_sub(width)) / 2;
+    let y = scrollback.y + (scrollback.height.saturating_sub(open_height)) / 2;
+
+    let height = if filter.is_empty() {
+        open_height
+    } else {
+        // At least one list row for "(no matches)"; never taller than open box.
+        let list_rows = (filtered_count as u16).clamp(1, MAX_LIST);
+        (SEARCH_AND_SEP + list_rows + 2)
+            .min(open_height)
+            .max(5)
+    };
+
+    Rect {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
 fn format_palette_row(row: &PaletteRow, name_col: usize, max_cols: usize) -> Line<'static> {
     let name = row.label().to_string();
     let name_disp = str_display_width(&name).max(name_col);
@@ -438,6 +493,9 @@ fn format_palette_row(row: &PaletteRow, name_col: usize, max_cols: usize) -> Lin
     ])
 }
 
+/// In-palette search field prefix (leading space so label is not flush against the border).
+const PALETTE_SEARCH_LABEL: &str = " search: ";
+
 fn render_command_palette(
     frame: &mut ratatui::Frame,
     area: Rect,
@@ -445,41 +503,89 @@ fn render_command_palette(
     rows: &[PaletteRow],
     highlight: usize,
 ) {
-    if area.width < 8 || area.height < 4 {
+    if area.width < 8 || area.height < 5 {
         return;
     }
     () = frame.render_widget(Clear, area);
-    let filter_line = if filter.is_empty() {
-        "filter: (type to search)".to_string()
-    } else {
-        format!("filter: {filter}")
-    };
     let title = line_with_hotkeys(" Ctrl+P:commands · Esc:close ", Style::default());
-    // Outer block + filter as first "header" via nested layout:
-    // row 0 of inner = filter, rest = list.
+    // Outer block: search row (with caret) + result list.
     let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(area);
     () = frame.render_widget(block, area);
-    if inner.height < 2 {
+    if inner.height < 3 {
         return;
     }
-    let filter_area = Rect {
+    // Search field: one row + bottom border line so it reads as a real input.
+    let search_area = Rect {
         x: inner.x,
         y: inner.y,
         width: inner.width,
         height: 1,
     };
-    let list_area = Rect {
+    let sep_area = Rect {
         x: inner.x,
         y: inner.y.saturating_add(1),
         width: inner.width,
-        height: inner.height.saturating_sub(1),
+        height: 1,
     };
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y.saturating_add(2),
+        width: inner.width,
+        height: inner.height.saturating_sub(2),
+    };
+
+    // Layout: `search: ` + query(cyan) + [caret cell] + optional dim placeholder.
+    // Query uses cyan (complement to white caret) so invert-white never masks text.
+    let label = PALETTE_SEARCH_LABEL;
+    let label_w = str_display_width(label);
+    // Reserve 1 col for caret; leave room for a short placeholder when empty.
+    let max_query_cols = (search_area.width as usize)
+        .saturating_sub(label_w + 1 + 14)
+        .max(1);
+    let query_display = if filter.is_empty() {
+        None
+    } else {
+        Some(one_line(filter, max_query_cols as u16))
+    };
+    let query_w = query_display
+        .as_ref()
+        .map(|q| str_display_width(q))
+        .unwrap_or(0);
+    let mut search_spans = vec![Span::styled(label.to_string(), hotkey_style())];
+    if let Some(ref q) = query_display {
+        search_spans.push(Span::styled(q.clone(), search_query_style()));
+    }
+    // Dedicated cell for the white block caret (must not share a glyph with text).
+    search_spans.push(Span::raw(" "));
+    if query_display.is_none() {
+        search_spans.push(Span::styled(
+            "type to search".to_string(),
+            search_placeholder_style(),
+        ));
+    }
+    () = frame.render_widget(Paragraph::new(Line::from(search_spans)), search_area);
+
+    // Separator under search field.
+    let sep = "─".repeat(search_area.width.max(1) as usize);
     () = frame.render_widget(
-        Paragraph::new(one_line(&filter_line, filter_area.width.max(1)))
+        Paragraph::new(one_line(&sep, search_area.width.max(1)))
             .style(Style::default().add_modifier(Modifier::DIM)),
-        filter_area,
+        sep_area,
     );
+
+    // White caret only on the reserved cell (after label + query).
+    let caret_cols = (label_w + query_w) as u16;
+    paint_white_caret_at(frame, search_area.x, search_area.y, caret_cols, 1, search_area);
+    let hx = search_area
+        .x
+        .saturating_add(caret_cols)
+        .min(search_area.x.saturating_add(search_area.width.saturating_sub(1)));
+    frame.set_cursor_position(Position {
+        x: hx,
+        y: search_area.y,
+    });
+
     if rows.is_empty() {
         () = frame.render_widget(
             Paragraph::new("(no matches)").style(Style::default().add_modifier(Modifier::DIM)),
@@ -513,6 +619,33 @@ fn render_command_palette(
         .highlight_symbol("❯ ")
         .highlight_style(focus_solid().add_modifier(Modifier::BOLD));
     () = frame.render_stateful_widget(list, list_area, &mut list_state);
+}
+
+/// Paint white caret at absolute `(x + cols, y)` clipped to `clip` area.
+fn paint_white_caret_at(
+    frame: &mut ratatui::Frame,
+    base_x: u16,
+    y: u16,
+    cols_before: u16,
+    width: usize,
+    clip: Rect,
+) {
+    if width == 0 || clip.width == 0 {
+        return;
+    }
+    let max_x = clip.x.saturating_add(clip.width.saturating_sub(1));
+    let x0 = base_x.saturating_add(cols_before).min(max_x);
+    let buf = frame.buffer_mut();
+    for dx in 0..width {
+        let cx = x0.saturating_add(dx as u16);
+        if cx > max_x || cx < clip.x || y < clip.y || y >= clip.y.saturating_add(clip.height) {
+            break;
+        }
+        if let Some(cell) = buf.cell_mut(Position { x: cx, y }) {
+            cell.set_char(' ');
+            cell.set_style(white_caret_style());
+        }
+    }
 }
 
 fn render_cheatsheet(frame: &mut ratatui::Frame, area: Rect, lines: &[CheatLine]) {

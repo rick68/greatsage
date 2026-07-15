@@ -37,7 +37,8 @@ pub fn accept_palette_selection(state: &mut TuiState) -> bool {
         PaletteAccept::Ui(PaletteUiAction::ClearPrompt) => {
             () = state.clear_prompt();
             () = state.clear_esc_arm();
-            () = state.set_status_hint("prompt cleared");
+            // Restore default key chrome (same as 2×Esc clear).
+            state.status_hint = None;
             true
         }
     }
