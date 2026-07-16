@@ -162,6 +162,21 @@ pub fn cli_logout(provider_arg: Option<&str>) -> Result<(), i32> {
     match logout_provider(provider) {
         Ok(()) => {
             eprintln!("Logged out OAuth tokens for `{provider}`.");
+            // If a static key remains, resolve falls back to it (mode=oauth or auto).
+            let has_key = config
+                .get_api_key(Some(provider))
+                .is_some_and(|k| !k.trim().is_empty());
+            if has_key {
+                eprintln!(
+                    "Static API key still configured for `{provider}` — will keep using it \
+(no re-login required). Run `greatsage auth status {provider}` to confirm."
+                );
+            } else {
+                eprintln!(
+                    "No static API key for `{provider}`. Set an env/config key or run \
+`greatsage login {provider}` before the next agent turn."
+                );
+            }
             Ok(())
         }
         Err(err) => {

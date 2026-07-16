@@ -63,7 +63,9 @@ pub fn resolved_metadata(
 /// Modes (`auth.<provider>.mode` / `auth.default_mode`, default `auto`):
 /// - `auto` — static key if set, else OAuth store
 /// - `api_key` — static key only
-/// - `oauth` — OAuth store only (prefer token even when a key exists)
+/// - `oauth` — prefer OAuth store when usable; if no usable OAuth token (e.g. after
+///   `logout`), **fall back to static API key** when configured so the session is
+///   not interrupted. While OAuth tokens exist, they still win over the key.
 pub fn resolve_credential(config: &Config, provider: Option<Provider>) -> Option<String> {
     let provider = provider?;
     let mode = auth_mode_for(config, provider);
@@ -73,7 +75,7 @@ pub fn resolve_credential(config: &Config, provider: Option<Provider>) -> Option
 
     match mode {
         AuthMode::ApiKey => static_key,
-        AuthMode::Oauth => oauth_access(config, provider),
+        AuthMode::Oauth => oauth_access(config, provider).or(static_key),
         AuthMode::Auto => static_key.or_else(|| oauth_access(config, provider)),
     }
 }

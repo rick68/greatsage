@@ -15,6 +15,7 @@ mod nav;
 mod palette;
 mod slash_complete;
 mod text_width;
+mod theme;
 
 mod plugin;
 pub use plugin::tui_plugin;

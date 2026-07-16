@@ -13,7 +13,8 @@ pub enum AuthMode {
     Auto,
     /// Static API key only.
     ApiKey,
-    /// OAuth token store only (prefer store even when a key exists).
+    /// Prefer OAuth store when usable; if none (e.g. after logout), fall back to
+    /// a configured static API key so the operator is not left without credentials.
     Oauth,
 }
 

@@ -77,6 +77,9 @@ pub fn status_for(config: &Config, provider: Provider) -> AuthStatus {
                 "oauth"
             } else if has_oauth_token {
                 "oauth" // refresh may still work
+            } else if has_static_key {
+                // After logout (or never-logged-in): keep using configured API key.
+                "api_key"
             } else {
                 "none"
             }
