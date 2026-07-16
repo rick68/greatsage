@@ -16,7 +16,8 @@ mod commands_session_nav;
 mod commands_shell;
 mod completion;
 mod context_display;
-mod cost;
+/// Session cost estimation (`/cost`); TUI idle cost chrome reuses `estimate_cost` / `format_cost`.
+pub(crate) mod cost;
 mod dispatch;
 /// Re-export for TUI slash autocomplete (same catalog engine as line REPL).
 pub(crate) use completion::{

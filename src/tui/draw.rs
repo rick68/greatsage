@@ -13,10 +13,12 @@ use {
         text_width::{caret_width_for_after, str_display_width, truncate_to_width},
         theme::TuiTheme,
         token_chrome::{
-            LifetimeTokens, compose_status_line, format_usage_status_fragment,
+            LifetimeTokens, compose_status_line, format_cost_status_fragment,
+            format_usage_status_fragment,
         },
     },
     crate::{
+        agents::AgentConfig,
         repl::help_data::command_short_description,
         session::{
             FocusedSession, SessionContextStats, SessionLifetimeUsage, SessionManager,
@@ -218,6 +220,7 @@ pub fn draw_system(
     mut state: ResMut<TuiState>,
     scrollback: Res<ScrollbackView>,
     config: Option<Res<crate::config::Config>>,
+    agent_config: Option<Res<AgentConfig>>,
     focused: Option<Res<FocusedSession>>,
     session_manager: Option<Res<SessionManager>>,
     lifetime_usage: Option<Res<SessionLifetimeUsage>>,
@@ -247,7 +250,7 @@ pub fn draw_system(
     let palette_hi = state.command_palette.highlight;
     let cheatsheet_open = state.shortcuts_cheatsheet.open;
 
-    // Idle: key hints · auth · Session ECS usage. Sticky status_hint wins (no forced embed).
+    // Idle: key hints · auth · Session ECS usage · cost. Sticky status_hint wins (no forced embed).
     let auth_chrome = if state.status_hint.is_none() {
         config.as_deref().map(|cfg| {
             let provider = cfg
@@ -258,10 +261,8 @@ pub fn draw_system(
     } else {
         None
     };
-    let usage_fragment = if state.status_hint.is_none() {
-        let (used, max) =
-            focused_context_stats(focused.as_deref(), session_manager.as_deref(), &context_stats);
-        let lifetime = lifetime_usage
+    let idle_lifetime = if state.status_hint.is_none() {
+        lifetime_usage
             .as_ref()
             .map(|u| LifetimeTokens {
                 input: u.input,
@@ -269,8 +270,21 @@ pub fn draw_system(
                 cache_read: u.cache_read,
                 cache_write: u.cache_write,
             })
-            .unwrap_or_default();
-        format_usage_status_fragment(used, max, lifetime)
+            .unwrap_or_default()
+    } else {
+        LifetimeTokens::default()
+    };
+    let usage_fragment = if state.status_hint.is_none() {
+        let (used, max) =
+            focused_context_stats(focused.as_deref(), session_manager.as_deref(), &context_stats);
+        format_usage_status_fragment(used, max, idle_lifetime)
+    } else {
+        None
+    };
+    let cost_fragment = if state.status_hint.is_none() {
+        agent_config.as_ref().and_then(|ac| {
+            format_cost_status_fragment(idle_lifetime, ac.provider, ac.model.as_str())
+        })
     } else {
         None
     };
@@ -279,6 +293,7 @@ pub fn draw_system(
         DEFAULT_STATUS_HINT,
         auth_chrome.as_deref(),
         usage_fragment.as_deref(),
+        cost_fragment.as_deref(),
     );
     let empty = scrollback.empty_placeholder || scrollback.lines.is_empty();
     let line_count = scrollback.line_count();

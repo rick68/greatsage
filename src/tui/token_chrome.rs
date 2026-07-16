@@ -1,9 +1,20 @@
-//! Compact Session-ECS token usage for idle TUI status chrome.
+//! Compact Session-ECS token/cost usage for idle TUI status chrome.
 //!
-//! Numbers come from `SessionContextStats` + `SessionLifetimeUsage` (same truth as
-//! `/tokens` / BRP). Formatting reuses dashboard helpers — no private counter.
+//! Token numbers come from `SessionContextStats` + `SessionLifetimeUsage` (same truth as
+//! `/tokens` / BRP). Estimated dollars reuse `repl::cost` (`estimate_cost` / `format_cost`)
+//! over lifetime usage × current model rates — no private counter or parallel ledger.
 
-use crate::repl::session_dashboard::format_token_amount;
+use {
+    crate::{
+        providers::Provider,
+        repl::{
+            cost::{estimate_cost, format_cost},
+            session_dashboard::format_token_amount,
+        },
+    },
+    bevy::utils::default,
+    yoagent::types::Usage,
+};
 
 /// Lifetime field bag for pure formatting (mirrors `SessionLifetimeUsage` / `Usage`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -25,6 +36,17 @@ impl LifetimeTokens {
     pub fn is_zero(self) -> bool {
         self.total() == 0
     }
+
+    /// Convert to yoagent `Usage` for shared cost helpers.
+    pub fn to_usage(self) -> Usage {
+        Usage {
+            input: self.input,
+            output: self.output,
+            cache_read: self.cache_read,
+            cache_write: self.cache_write,
+            ..default()
+        }
+    }
 }
 
 /// Build compact usage fragment: context fill first, then lifetime totals.
@@ -34,6 +56,8 @@ impl LifetimeTokens {
 /// - both empty → `None` (caller keeps key-hint chrome only)
 ///
 /// Examples: `ctx:12.0k/256.0k (5%) · Σ1.2M`, `ctx:933`, `Σ4.5k`
+///
+/// Token-only — no pricing deps. Cost is a separate fragment.
 pub fn format_usage_status_fragment(
     context_used: u64,
     context_max: u64,
@@ -79,15 +103,34 @@ fn format_lifetime_fragment(lifetime: LifetimeTokens) -> Option<String> {
     }
 }
 
+/// Compact estimated session cost for idle status (`$0.0016` style).
+///
+/// - zero lifetime → `None`
+/// - unpriced model (`estimate_cost` unavailable) → `None`
+/// - otherwise `format_cost` of the estimated total
+pub fn format_cost_status_fragment(
+    lifetime: LifetimeTokens,
+    provider: Provider,
+    model: &str,
+) -> Option<String> {
+    if lifetime.is_zero() {
+        return None;
+    }
+    let usage = lifetime.to_usage();
+    let total = estimate_cost(&usage, provider, model)?;
+    Some(format_cost(total))
+}
+
 /// Compose the idle status line with optional sticky override.
 ///
-/// Sticky `status_hint` wins entirely (no forced usage embed). Idle path:
-/// `default_hint · auth · usage` (auth/usage omitted when `None`).
+/// Sticky `status_hint` wins entirely (no forced usage/cost embed). Idle path:
+/// `default_hint · auth · usage · cost` (each optional when `None`/empty).
 pub fn compose_status_line(
     status_hint: Option<&str>,
     default_hint: &str,
     auth_chrome: Option<&str>,
     usage_fragment: Option<&str>,
+    cost_fragment: Option<&str>,
 ) -> String {
     if let Some(hint) = status_hint {
         return hint.to_owned();
@@ -99,6 +142,9 @@ pub fn compose_status_line(
     }
     if let Some(usage) = usage_fragment.filter(|s| !s.is_empty()) {
         line = format!("{line} · {usage}");
+    }
+    if let Some(cost) = cost_fragment.filter(|s| !s.is_empty()) {
+        line = format!("{line} · {cost}");
     }
     line
 }
