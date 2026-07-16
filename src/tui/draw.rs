@@ -20,9 +20,7 @@ use {
     crate::{
         agents::AgentConfig,
         repl::help_data::command_short_description,
-        session::{
-            FocusedSession, SessionContextStats, SessionLifetimeUsage, SessionManager,
-        },
+        session::{FocusedSession, SessionContextStats, SessionLifetimeUsage, SessionManager},
     },
     bevy::ecs::{
         change_detection::{Res, ResMut},
@@ -62,8 +60,6 @@ fn focused_context_stats(
         Err(_) => (0, 0),
     }
 }
-
-
 
 /// Longest-first tokens highlighted as hotkeys in status / titles.
 const HOTKEY_TOKENS: &[&str] = &[
@@ -249,6 +245,9 @@ pub fn draw_system(
     let palette_rows = state.command_palette.rows.clone();
     let palette_hi = state.command_palette.highlight;
     let cheatsheet_open = state.shortcuts_cheatsheet.open;
+    let history_open = state.prompt_history.is_open();
+    let history_entries = state.prompt_history.entries.clone();
+    let history_selected = state.prompt_history.selected;
 
     // Idle: key hints · auth · Session ECS usage · cost. Sticky status_hint wins (no forced embed).
     let auth_chrome = if state.status_hint.is_none() {
@@ -275,8 +274,11 @@ pub fn draw_system(
         LifetimeTokens::default()
     };
     let usage_fragment = if state.status_hint.is_none() {
-        let (used, max) =
-            focused_context_stats(focused.as_deref(), session_manager.as_deref(), &context_stats);
+        let (used, max) = focused_context_stats(
+            focused.as_deref(),
+            session_manager.as_deref(),
+            &context_stats,
+        );
         format_usage_status_fragment(used, max, idle_lifetime)
     } else {
         None
@@ -453,8 +455,21 @@ pub fn draw_system(
         () = frame.render_widget(prompt_display, areas.prompt);
 
         // Slash menu under global overlays (palette/cheatsheet drawn later).
-        if menu_open && !menu_cands.is_empty() && ime_preedit.is_empty() && !palette_open {
+        // Hidden while prompt-history browse is open (arrows own the modal).
+        if menu_open
+            && !menu_cands.is_empty()
+            && ime_preedit.is_empty()
+            && !palette_open
+            && !history_open
+        {
             () = render_slash_menu(frame, areas.prompt, &menu_cands, menu_hi, theme);
+        }
+
+        // Prompt history browse (Grok empty-↑): floating list, newest near prompt.
+        // Does not write into Session ECS scrollback.
+        if history_open && !history_entries.is_empty() {
+            let rect = history_overlay_rect(areas.scrollback, history_entries.len());
+            () = render_prompt_history(frame, rect, &history_entries, history_selected, theme);
         }
 
         // Operator panel: floating window over scrollback (does not pollute conversation).
@@ -522,6 +537,89 @@ pub fn draw_system(
 /// Centered floating rect inside scrollback (Grok-style small window).
 fn operator_panel_rect(scrollback: Rect, line_count: usize) -> Rect {
     centered_overlay_rect(scrollback, line_count, 72)
+}
+
+/// History browse: bottom-anchored in scrollback so newest rows sit near the prompt.
+fn history_overlay_rect(scrollback: Rect, entry_count: usize) -> Rect {
+    let max_h = scrollback.height.saturating_sub(2).max(5);
+    let content_h = (entry_count as u16)
+        .saturating_add(2)
+        .min(max_h)
+        .min(12)
+        .max(5);
+    // Full terminal / scrollback width (edge-to-edge in the scrollback pane).
+    let width = scrollback.width.max(1);
+    let x = scrollback.x;
+    let y = scrollback
+        .y
+        .saturating_add(scrollback.height.saturating_sub(content_h));
+    Rect {
+        x,
+        y,
+        width,
+        height: content_h,
+    }
+}
+
+fn render_prompt_history(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    entries_newest_first: &[String],
+    selected: usize,
+    theme: &TuiTheme,
+) {
+    if area.width < 6 || area.height < 3 || entries_newest_first.is_empty() {
+        return;
+    }
+    let n = entries_newest_first.len();
+    let max_vis = (area.height.saturating_sub(2) as usize).max(1);
+    // Draw oldest→newest so newest is at the bottom of the list.
+    let display: Vec<(usize, &str)> = (0..n)
+        .rev()
+        .map(|i| (i, entries_newest_first[i].as_str()))
+        .collect();
+    let sel_display = display
+        .iter()
+        .position(|(idx, _)| *idx == selected)
+        .unwrap_or(display.len().saturating_sub(1));
+    let start = if display.len() <= max_vis {
+        0
+    } else {
+        sel_display
+            .saturating_sub(max_vis / 2)
+            .min(display.len() - max_vis)
+    };
+    let end = (start + max_vis).min(display.len());
+    let inner_w = area.width.saturating_sub(4).max(8) as usize;
+    let items: Vec<ListItem> = display[start..end]
+        .iter()
+        .map(|(_, text)| {
+            ListItem::new(Line::from(Span::styled(
+                one_line(text, inner_w as u16),
+                theme.secondary_style(),
+            )))
+        })
+        .collect();
+    let mut list_state = ListState::default();
+    () = list_state.select(Some(sel_display.saturating_sub(start)));
+    let title = line_with_hotkeys(
+        " history · ↑↓:step · Enter:keep · Esc:cancel ",
+        theme.dim_style(),
+        theme,
+    );
+    () = frame.render_widget(Clear, area);
+    let list = List::new(items)
+        .style(theme.base_style())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.border_overlay())
+                .title(title)
+                .style(theme.base_style()),
+        )
+        .highlight_symbol("❯ ")
+        .highlight_style(theme.selection_style());
+    () = frame.render_stateful_widget(list, area, &mut list_state);
 }
 
 fn centered_overlay_rect(scrollback: Rect, content_lines: usize, prefer_width: u16) -> Rect {

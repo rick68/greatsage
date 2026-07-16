@@ -26,7 +26,8 @@ pub(crate) use completion::{
 /// Re-export for `tui` slash forwarding (same dispatch as line REPL).
 pub(crate) use dispatch::{DispatchResult, dispatch_slash_command};
 pub(crate) mod help_data;
-mod history;
+/// Shared with TUI Grok prompt-history browse (`↑` empty composer).
+pub(crate) mod history;
 mod model_cmd;
 pub(crate) mod model_id;
 /// Static rate book for `/cost` / `/model info`; also fills `ModelConfig.cost` at agent install.

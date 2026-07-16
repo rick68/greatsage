@@ -1,7 +1,10 @@
 //! Mutable TUI interaction state.
 
 use {
-    super::palette::{CommandPaletteState, ShortcutsCheatsheetState},
+    super::{
+        palette::{CommandPaletteState, ShortcutsCheatsheetState},
+        prompt_history::PromptHistoryBrowse,
+    },
     bevy::ecs::resource::Resource,
     ratatui::layout::Rect,
     std::time::{Duration, Instant},
@@ -179,6 +182,8 @@ pub struct TuiState {
     /// IME / composition preedit text (not yet committed into `prompt`).
     /// Shown after the caret; terminal IME also anchors to the hardware cursor we set.
     pub ime_preedit: String,
+    /// Grok-style empty-`↑` prompt history browse (ephemeral; not Session ECS).
+    pub prompt_history: PromptHistoryBrowse,
 }
 
 impl Default for TuiState {
@@ -201,6 +206,7 @@ impl Default for TuiState {
             shortcuts_cheatsheet: ShortcutsCheatsheetState::default(),
             ghost_hint: None,
             ime_preedit: String::new(),
+            prompt_history: PromptHistoryBrowse::default(),
         }
     }
 }
@@ -218,12 +224,7 @@ pub fn rect_contains(rect: Rect, column: u16, row: u16) -> bool {
 }
 
 /// Prompt pane **or** the 1-row status above it — operator aims here to type.
-pub fn hit_prompt_or_status(
-    prompt: Rect,
-    status: Rect,
-    column: u16,
-    row: u16,
-) -> bool {
+pub fn hit_prompt_or_status(prompt: Rect, status: Rect, column: u16, row: u16) -> bool {
     rect_contains(prompt, column, row) || rect_contains(status, column, row)
 }
 
@@ -241,6 +242,11 @@ pub fn dismiss_key_stealing_overlays(state: &mut TuiState) {
     }
     if state.shortcuts_cheatsheet.open {
         state.close_shortcuts_cheatsheet();
+    }
+    if state.prompt_history.is_open() {
+        let restore = super::prompt_history::close_restore(&mut state.prompt_history);
+        state.prompt = restore;
+        state.cursor = state.prompt.len();
     }
 }
 
@@ -409,7 +415,19 @@ impl TuiState {
         self.cursor = 0;
         self.slash_menu = SlashMenuState::default();
         self.ghost_hint = None;
-        self.ime_preedit.clear();
+        () = self.ime_preedit.clear();
+        if self.prompt_history.is_open() {
+            () = super::prompt_history::detach(&mut self.prompt_history);
+        }
+    }
+
+    /// Set composer text and place cursor at end (history live-fill / accept).
+    pub fn set_prompt_fill(&mut self, text: impl Into<String>) {
+        self.prompt = text.into();
+        self.cursor = self.prompt.len();
+        self.slash_menu = SlashMenuState::default();
+        self.ghost_hint = None;
+        () = self.ime_preedit.clear();
     }
 
     pub fn clear_ime_preedit(&mut self) {

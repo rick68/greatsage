@@ -13,6 +13,7 @@ mod input;
 mod layout;
 mod nav;
 mod palette;
+mod prompt_history;
 mod slash_complete;
 mod text_width;
 mod theme;

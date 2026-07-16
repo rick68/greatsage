@@ -4,6 +4,11 @@ use {
     super::{
         commands::{accept_palette_selection, is_ui_quit_line},
         nav::{jump_end, jump_home, jump_turn, move_selection_by, ratatui_scroll_y, scroll_page},
+        prompt_history::{
+            BrowseDownResult, accept as history_accept, close_restore, combine_prompt_history,
+            detach as history_detach, open_browse, step_down, step_up,
+            user_prompt_texts_from_blocks,
+        },
         scrollback::ScrollbackView,
         slash_complete::{
             TabSlashResult, enter_should_accept_menu, handle_prompt_tab, move_menu_highlight,
@@ -20,24 +25,27 @@ use {
         config::Config,
         repl::{
             DispatchResult, ReplEcsDashboard, dispatch_slash_command,
-            session_dashboard::SessionDashboardSnapshot, session_state::ReplSessionState,
+            history::{ReplInputHistory, persist_repl_history},
+            session_dashboard::SessionDashboardSnapshot,
+            session_state::ReplSessionState,
         },
-        session::SessionRuntimeStatus,
+        session::{ContentBlock, ContentBlockEntity, SessionRuntimeStatus},
     },
     bevy::{
         app::AppExit,
         ecs::{
             change_detection::{Res, ResMut},
             message::{MessageReader, MessageWriter},
+            query::With,
             system::Query,
         },
+        platform::time::Instant,
     },
     bevy_ratatui::{
         crossterm::event::{KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind},
         event::{KeyMessage, MouseMessage, PasteMessage},
     },
     bevy_tokio_tasks::TokioTasksRuntime,
-    std::time::Instant,
 };
 
 /// Live-stream body + finish footer for `/run` / `!` (shared path with line REPL).
@@ -192,6 +200,10 @@ pub fn paste_system(
         }
         state.clear_esc_arm();
         state.clear_ime_preedit();
+        // Paste detaches Grok browse (keep filled text, then insert).
+        if state.prompt_history.is_open() {
+            () = history_detach(&mut state.prompt_history);
+        }
         insert_str(&mut state, &paste.0);
         refresh_slash_completion(&mut state, &agent_config, false);
     }
@@ -212,6 +224,8 @@ pub fn input_system(
     auth_ui: Res<super::auth_ui::AuthUiChannel>,
     runtime_status: Query<&SessionRuntimeStatus>,
     ecs_dashboard: ReplEcsDashboard,
+    mut input_history: ResMut<ReplInputHistory>,
+    content_blocks: Query<&ContentBlock, With<ContentBlockEntity>>,
 ) {
     let line_count = scrollback.line_count();
     let turn_starts = scrollback.turn_starts.clone();
@@ -316,7 +330,7 @@ pub fn input_system(
             session.ctrl_c_armed = false;
         }
 
-        // ── Esc: IME → panel → palette → cheatsheet → slash menu → clear ─
+        // ── Esc: IME → panel → palette → cheatsheet → history browse → slash → clear ─
         if message.code == KeyCode::Esc {
             if !state.ime_preedit.is_empty() {
                 // Cancel composition first (do not clear the committed prompt).
@@ -335,6 +349,12 @@ pub fn input_system(
                 state.close_shortcuts_cheatsheet();
                 continue;
             }
+            if state.prompt_history.is_open() {
+                let restore = close_restore(&mut state.prompt_history);
+                () = state.set_prompt_fill(restore);
+                state.clear_esc_arm();
+                continue;
+            }
             if try_dismiss_slash_menu(&mut state) {
                 refresh_slash_completion(&mut state, &agent_config, false);
                 // Count menu dismiss as the first Esc of double-clear so
@@ -345,11 +365,18 @@ pub fn input_system(
                 }
                 continue;
             }
-            handle_esc(
+            if let Some(cleared) = handle_esc(
                 &mut state,
                 agent_busy || session.active_shell.is_some(),
                 Instant::now(),
-            );
+            ) {
+                // Grok: 2×Esc clear records draft into prompt history bag.
+                () = input_history.push_submitted(&cleared);
+                () = persist_repl_history(
+                    input_history.as_mut(),
+                    &crate::config_paths::repl_history_path(),
+                );
+            }
             continue;
         }
 
@@ -373,15 +400,15 @@ pub fn input_system(
                         tokio_runtime.as_ref(),
                         auth_ui.as_ref(),
                     ) {
-                        refresh_slash_completion(&mut state, &agent_config, false);
+                        () = refresh_slash_completion(&mut state, &agent_config, false);
                     }
                 }
                 KeyCode::Backspace => {
-                    state.command_palette.filter_backspace();
+                    () = state.command_palette.filter_backspace();
                 }
                 KeyCode::Delete => {
                     // Same as backspace for end-of-query search field.
-                    state.command_palette.filter_backspace();
+                    () = state.command_palette.filter_backspace();
                 }
                 KeyCode::Char(c)
                     if !message.modifiers.contains(KeyModifiers::CONTROL)
@@ -389,7 +416,7 @@ pub fn input_system(
                         && !c.is_control() =>
                 {
                     // All printable typing goes into the in-palette search field.
-                    state.command_palette.insert_filter_char(c);
+                    () = state.command_palette.insert_filter_char(c);
                 }
                 _ => {}
             }
@@ -421,26 +448,93 @@ pub fn input_system(
                 KeyCode::PageDown => panel_nav(&mut state, 10),
                 KeyCode::Home => {
                     state.operator_panel.selected = 0;
-                    state.sync_prompt_from_operator_selection();
+                    () = state.sync_prompt_from_operator_selection();
                 }
                 KeyCode::End => {
                     let n = state.operator_panel.lines.len();
                     state.operator_panel.selected = n.saturating_sub(1);
-                    state.sync_prompt_from_operator_selection();
+                    () = state.sync_prompt_from_operator_selection();
                 }
                 KeyCode::Enter => {
                     // Fill prompt from selection; close panel; stay ready to run.
                     state.sync_prompt_from_operator_selection();
                     state.close_operator_panel();
                     state.focus = TuiFocus::Prompt;
-                    refresh_slash_completion(&mut state, &agent_config, false);
+                    () = refresh_slash_completion(&mut state, &agent_config, false);
                 }
                 KeyCode::Tab => {
                     state.focus = TuiFocus::Prompt;
                     state.clear_esc_arm();
-                    refresh_slash_completion(&mut state, &agent_config, false);
+                    () = refresh_slash_completion(&mut state, &agent_config, false);
                 }
                 _ => {}
+            }
+            continue;
+        }
+
+        // ── Prompt history browse (Grok empty-↑ modal) ────────────────────
+        if state.prompt_history.is_open() {
+            match message.code {
+                KeyCode::Up => {
+                    if let Some(fill) = step_up(&mut state.prompt_history) {
+                        () = state.set_prompt_fill(fill);
+                    }
+                }
+                KeyCode::Down => match step_down(&mut state.prompt_history) {
+                    Some(BrowseDownResult::StillOpen { fill }) => {
+                        () = state.set_prompt_fill(fill);
+                    }
+                    Some(BrowseDownResult::Closed { restore }) => {
+                        () = state.set_prompt_fill(restore);
+                    }
+                    None => {}
+                },
+                KeyCode::Enter | KeyCode::Tab => {
+                    let text = history_accept(&mut state.prompt_history);
+                    () = state.set_prompt_fill(text);
+                    // Accept only — do not send / dispatch on this key.
+                }
+                KeyCode::Char(c)
+                    if !message.modifiers.contains(KeyModifiers::CONTROL)
+                        && !message.modifiers.contains(KeyModifiers::ALT)
+                        && !c.is_control() =>
+                {
+                    // Detach: keep filled text, apply key as normal edit.
+                    () = history_detach(&mut state.prompt_history);
+                    state.clear_esc_arm();
+                    state.clear_ime_preedit();
+                    if c == '?' && state.prompt.is_empty() {
+                        state.open_command_palette();
+                    } else {
+                        () = insert_char(&mut state, c);
+                        () = refresh_slash_completion(&mut state, &agent_config, false);
+                    }
+                }
+                KeyCode::Backspace => {
+                    () = history_detach(&mut state.prompt_history);
+                    state.clear_esc_arm();
+                    if !state.ime_preedit.is_empty() {
+                        state.clear_ime_preedit();
+                    } else {
+                        () = backspace(&mut state);
+                        () = refresh_slash_completion(&mut state, &agent_config, false);
+                    }
+                }
+                KeyCode::Left if !message.modifiers.contains(KeyModifiers::SHIFT) => {
+                    () = history_detach(&mut state.prompt_history);
+                    () = state.clear_esc_arm();
+                    () = state.clear_ime_preedit();
+                    () = move_cursor_left(&mut state);
+                }
+                KeyCode::Right if !message.modifiers.contains(KeyModifiers::SHIFT) => {
+                    () = history_detach(&mut state.prompt_history);
+                    () = state.clear_esc_arm();
+                    () = state.clear_ime_preedit();
+                    () = move_cursor_right(&mut state);
+                }
+                _ => {
+                    // Other keys: detach and fall through? Prefer consume.
+                }
             }
             continue;
         }
@@ -513,6 +607,35 @@ pub fn input_system(
                 }
                 _ => {}
             }
+        }
+
+        // ── Empty ↑: open Grok prompt-history browse (↓ never opens) ─────
+        if state.focus == TuiFocus::Prompt
+            && state.prompt.is_empty()
+            && !state.slash_menu.open
+            && message.code == KeyCode::Up
+            && !message.modifiers.contains(KeyModifiers::CONTROL)
+            && !message.modifiers.contains(KeyModifiers::ALT)
+        {
+            let ecs_user = user_prompt_texts_from_blocks(content_blocks.iter());
+            let combined = combine_prompt_history(&ecs_user, input_history.entries());
+            if let Some(browse) = open_browse(combined, String::new()) {
+                let fill = browse.selected_text().unwrap_or("").to_owned();
+                state.prompt_history = browse;
+                () = state.set_prompt_fill(fill);
+            }
+            // Consumed even when empty (no cursor motion fallback).
+            continue;
+        }
+        // Explicit: ↓ on empty closed prompt does not open history.
+        if state.focus == TuiFocus::Prompt
+            && state.prompt.is_empty()
+            && !state.slash_menu.open
+            && message.code == KeyCode::Down
+            && !message.modifiers.contains(KeyModifiers::CONTROL)
+            && !message.modifiers.contains(KeyModifiers::ALT)
+        {
+            continue;
         }
 
         // ── Prompt-focused edit ───────────────────────────────────────────
@@ -588,6 +711,12 @@ pub fn input_system(
                 if line.is_empty() {
                     continue;
                 }
+                // Shared bag with line REPL (Grok / readline history).
+                () = input_history.push_submitted(&line);
+                () = persist_repl_history(
+                    input_history.as_mut(),
+                    &crate::config_paths::repl_history_path(),
+                );
                 () = state.clear_prompt();
                 if is_ui_quit_line(&line) {
                     exit.write_default();
@@ -640,27 +769,33 @@ pub fn input_system(
 }
 
 /// Pure Esc handling for tests + `input_system` (menu already dismissed by caller).
-pub fn handle_esc(state: &mut TuiState, busy: bool, now: Instant) {
+///
+/// Returns `Some(cleared_text)` when double-Esc successfully clears a non-empty draft
+/// (caller records into `ReplInputHistory`).
+pub fn handle_esc(state: &mut TuiState, busy: bool, now: Instant) -> Option<String> {
     if busy {
         // Grok: Esc does not cancel mid-turn
-        return;
+        return None;
     }
     if state.focus != TuiFocus::Prompt {
         // Clear is prompt-pane only; scrollback Esc is no-op
-        return;
+        return None;
     }
     if state.prompt.is_empty() {
-        return;
+        return None;
     }
     match state.esc_armed_at {
         Some(armed) if now.duration_since(armed) <= ESC_CLEAR_WINDOW => {
+            let cleared = state.prompt.clone();
             () = state.clear_prompt();
             () = state.clear_esc_arm();
             // Back to idle key chrome (not a sticky toast that hides bindings).
             state.status_hint = None;
+            Some(cleared)
         }
         _ => {
             () = state.arm_esc_clear(now);
+            None
         }
     }
 }
@@ -721,21 +856,13 @@ fn move_cursor_right(state: &mut TuiState) {
 
 /// `/status` `/tokens` `/cost` `/context` need a prebuilt Session ECS dashboard.
 fn slash_needs_dashboard(line: &str) -> bool {
-    let cmd = line
-        .split_whitespace()
-        .next()
-        .unwrap_or(line)
-        .trim();
+    let cmd = line.split_whitespace().next().unwrap_or(line).trim();
     matches!(cmd, "/status" | "/tokens" | "/cost" | "/context")
 }
 
 /// Catalog panels (`/help`) keep select+fill; dumps are read-only.
 fn slash_panel_is_selectable(line: &str) -> bool {
-    let cmd = line
-        .split_whitespace()
-        .next()
-        .unwrap_or(line)
-        .trim();
+    let cmd = line.split_whitespace().next().unwrap_or(line).trim();
     matches!(cmd, "/help")
 }
 
@@ -861,10 +988,8 @@ fn handle_slash(
             );
         }
         DispatchResult::Unknown => {
-            () = state.open_operator_panel_readonly(
-                "unknown",
-                [format!("unknown command: {line}")],
-            );
+            () =
+                state.open_operator_panel_readonly("unknown", [format!("unknown command: {line}")]);
         }
     }
 }
