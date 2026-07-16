@@ -4,11 +4,51 @@ use {
     super::{
         palette::{CommandPaletteState, ShortcutsCheatsheetState},
         prompt_history::PromptHistoryBrowse,
+        theme::{CATALOG, ThemeId, TuiTheme},
     },
     bevy::ecs::resource::Resource,
     ratatui::layout::Rect,
     std::time::{Duration, Instant},
 };
+
+/// Ephemeral theme picker overlay (not Session ECS).
+#[derive(Clone, Debug, Default)]
+pub struct ThemePickerState {
+    pub open: bool,
+    pub highlight: usize,
+    /// Theme active when the picker opened (Esc restores this).
+    pub saved_id: ThemeId,
+}
+
+impl ThemePickerState {
+    pub fn close(&mut self) {
+        self.open = false;
+        self.highlight = 0;
+    }
+
+    pub fn open_for(&mut self, active: ThemeId) {
+        self.open = true;
+        self.saved_id = active;
+        self.highlight = active.catalog_index();
+    }
+
+    pub fn move_highlight(&mut self, delta: isize) {
+        let n = CATALOG.len() as isize;
+        if n == 0 {
+            self.highlight = 0;
+            return;
+        }
+        let cur = self.highlight as isize;
+        self.highlight = (cur + delta).clamp(0, n - 1) as usize;
+    }
+
+    pub fn highlighted_id(&self) -> ThemeId {
+        CATALOG
+            .get(self.highlight)
+            .copied()
+            .unwrap_or(ThemeId::GrokNight)
+    }
+}
 
 /// Double-Esc clear window (Grok ~800ms).
 pub const ESC_CLEAR_WINDOW: Duration = Duration::from_millis(800);
@@ -184,6 +224,10 @@ pub struct TuiState {
     pub ime_preedit: String,
     /// Grok-style empty-`↑` prompt history browse (ephemeral; not Session ECS).
     pub prompt_history: PromptHistoryBrowse,
+    /// Applied TUI theme (config + `/theme` + picker Enter).
+    pub active_theme_id: ThemeId,
+    /// Theme picker overlay (live preview while open).
+    pub theme_picker: ThemePickerState,
 }
 
 impl Default for TuiState {
@@ -207,6 +251,8 @@ impl Default for TuiState {
             ghost_hint: None,
             ime_preedit: String::new(),
             prompt_history: PromptHistoryBrowse::default(),
+            active_theme_id: ThemeId::GrokNight,
+            theme_picker: ThemePickerState::default(),
         }
     }
 }
@@ -236,6 +282,10 @@ pub fn hit_prompt_or_status(prompt: Rect, status: Rect, column: u16, row: u16) -
 pub fn dismiss_key_stealing_overlays(state: &mut TuiState) {
     if state.operator_panel.open {
         state.close_operator_panel();
+    }
+    if state.theme_picker.open {
+        // Click-away: cancel preview (same as Esc).
+        () = state.cancel_theme_picker();
     }
     if state.command_palette.open {
         state.close_command_palette();
@@ -469,5 +519,58 @@ impl TuiState {
 
     pub fn page_size(&self) -> u16 {
         self.last_scrollback_height.saturating_sub(1).max(1)
+    }
+
+    /// Theme used for the current frame (preview while picker open).
+    pub fn effective_theme_id(&self) -> ThemeId {
+        if self.theme_picker.open {
+            self.theme_picker.highlighted_id()
+        } else {
+            self.active_theme_id
+        }
+    }
+
+    pub fn effective_theme(&self) -> &'static TuiTheme {
+        TuiTheme::get(self.effective_theme_id())
+    }
+
+    pub fn open_theme_picker(&mut self) {
+        self.theme_picker.open_for(self.active_theme_id);
+        () = self.clear_esc_arm();
+        self.status_hint = Some("theme · ↑↓:preview · Enter:apply · Esc:cancel".into());
+    }
+
+    /// Esc / click-away: close picker and restore pre-open theme (no persist).
+    pub fn cancel_theme_picker(&mut self) {
+        if !self.theme_picker.open {
+            return;
+        }
+        // Active theme was never mutated during preview — only draw used highlight.
+        self.theme_picker.close();
+        if self
+            .status_hint
+            .as_deref()
+            .is_some_and(|h| h.starts_with("theme ·"))
+        {
+            self.status_hint = None;
+        }
+    }
+
+    /// Enter on picker: apply highlighted id (caller persists config).
+    pub fn apply_theme_picker_selection(&mut self) -> ThemeId {
+        let id = self.theme_picker.highlighted_id();
+        self.active_theme_id = id;
+        self.theme_picker.close();
+        self.status_hint = Some(format!("theme: {}", id.as_str()));
+        id
+    }
+
+    /// Apply a theme id (named `/theme` or cycle); caller persists.
+    pub fn apply_theme_id(&mut self, id: ThemeId) {
+        self.active_theme_id = id;
+        if self.theme_picker.open {
+            self.theme_picker.close();
+        }
+        self.status_hint = Some(format!("theme: {}", id.as_str()));
     }
 }

@@ -37,6 +37,8 @@ pub(super) enum CommandRoute {
     Run,
     Cd,
     Bg,
+    /// TUI multi-theme (`/theme`); line REPL prints a short TUI-only hint.
+    Theme,
     UnknownSlash,
     NotSlash,
 }
@@ -109,6 +111,8 @@ pub(super) fn route_command(cmd: &str) -> CommandRoute {
         "/remember" => CommandRoute::Remember,
         "/memories" => CommandRoute::Memories,
         "/forget" => CommandRoute::Forget,
+        // TUI chrome (Grok-shaped; not yoyo)
+        "/theme" | "/t" => CommandRoute::Theme,
         // otherwise
         _ if cmd.starts_with('/') => CommandRoute::UnknownSlash,
         _ => CommandRoute::NotSlash,

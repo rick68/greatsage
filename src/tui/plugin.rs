@@ -7,16 +7,23 @@ use {
         input::{input_system, mouse_input_system, paste_system, poll_shell_system},
         scrollback::{ScrollbackView, rebuild_scrollback_view},
         state::TuiState,
+        theme::ThemeId,
     },
-    crate::repl::{
-        history::{DEFAULT_MAX_ENTRIES, ReplInputHistory, persist_repl_history},
-        session_state::ReplSessionState,
+    crate::{
+        config::Config,
+        repl::{
+            history::{DEFAULT_MAX_ENTRIES, ReplInputHistory, persist_repl_history},
+            session_state::ReplSessionState,
+        },
     },
     bevy::{
         app::{App, AppExit, Last, Plugin, PostUpdate, PreUpdate, Startup, Update},
         ecs::{
-            change_detection::ResMut, message::MessageReader, resource::Resource,
-            schedule::IntoScheduleConfigs, system::Commands,
+            change_detection::{Res, ResMut},
+            message::MessageReader,
+            resource::Resource,
+            schedule::IntoScheduleConfigs,
+            system::Commands,
         },
         utils::default,
     },
@@ -50,7 +57,11 @@ impl Plugin for TuiPlugin {
         .insert_resource(history)
         .add_systems(
             Startup,
-            (enable_bracketed_paste_system, install_paste_cleanup),
+            (
+                enable_bracketed_paste_system,
+                install_paste_cleanup,
+                seed_theme_from_config,
+            ),
         )
         .add_systems(
             PreUpdate,
@@ -78,6 +89,15 @@ fn persist_history_on_exit(
     for _ in exits.read() {
         () = persist_repl_history(history.as_mut(), &crate::config_paths::repl_history_path());
     }
+}
+
+/// Seed active theme from config.toml `theme` key (default GrokNight).
+fn seed_theme_from_config(config: Option<Res<Config>>, mut state: ResMut<TuiState>) {
+    let Some(config) = config else {
+        return;
+    };
+    let id = ThemeId::resolve(&config.get_theme());
+    state.active_theme_id = id;
 }
 
 /// Bracketed paste: multi-char IME commits / paste arrive as `PasteMessage` (not key spam).

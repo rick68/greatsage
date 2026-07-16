@@ -419,6 +419,7 @@ fn complete_args(
     match command {
         "/provider" => complete_provider_names(prefix),
         "/model" => complete_model_line_args(line, prefix, agent_config),
+        "/theme" | "/t" => complete_theme_names(prefix),
         "/save" | "/load" => {
             if prefix.is_empty() {
                 Vec::new()
@@ -432,6 +433,28 @@ fn complete_args(
         "/bg" => complete_bg_subcommands(prefix),
         _ => Vec::new(),
     }
+}
+
+/// Built-in TUI theme ids (keep in sync with `tui::theme::CATALOG` / `/theme` arg_hint).
+fn complete_theme_names(prefix: &str) -> Vec<String> {
+    let lower = prefix.to_lowercase();
+    [
+        "groknight",
+        "grokday",
+        "tokyonight",
+        "rosepine",
+        "oscura",
+        // common aliases
+        "dark",
+        "light",
+        "day",
+        "tokyo",
+        "rose",
+    ]
+    .into_iter()
+    .filter(|s| s.starts_with(lower.as_str()))
+    .map(str::to_string)
+    .collect()
 }
 
 fn complete_history_subcommands(prefix: &str) -> Vec<String> {
@@ -544,6 +567,12 @@ pub fn inline_hint(line: &str, cursor: usize, agent_config: &AgentConfig) -> Opt
 
     // Exact match before prefix completion — otherwise `/mark` ghosts as `/marks`
     // because "marks".starts_with("mark").
+    // `/theme` (and alias `/t`): show catalog options, not the short description.
+    if typed == "theme" || typed == "t" {
+        if let Some(hint) = help_arg_hint("theme") {
+            return Some(format!(" {hint}"));
+        }
+    }
     for cmd in KNOWN_COMMANDS {
         let cmd_name = &cmd.name[1..];
         if cmd_name == typed {

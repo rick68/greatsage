@@ -13,6 +13,8 @@ pub enum PaletteUiAction {
     OpenShortcuts,
     /// Clear the prompt draft (same effect as double-Esc clear).
     ClearPrompt,
+    /// Open multi-theme picker (live preview).
+    OpenThemePicker,
     /// Show non-secret auth status in OperatorPanel.
     AuthStatus,
     /// OAuth device login (xAI) in background → OperatorPanel.
@@ -68,6 +70,11 @@ pub fn all_palette_rows() -> Vec<PaletteRow> {
             action: PaletteUiAction::ClearPrompt,
             label: "clear prompt",
             description: "Clear the draft prompt",
+        },
+        PaletteRow::Ui {
+            action: PaletteUiAction::OpenThemePicker,
+            label: "theme picker",
+            description: "Switch TUI theme (live preview · Enter apply)",
         },
         PaletteRow::Ui {
             action: PaletteUiAction::AuthStatus,
@@ -251,6 +258,10 @@ pub fn shortcuts_cheatsheet_lines() -> Vec<CheatLine> {
         CheatLine::Binding {
             keys: "Ctrl+X / Ctrl+.",
             desc: "Keyboard shortcuts",
+        },
+        CheatLine::Binding {
+            keys: "/theme",
+            desc: "Cycle / set TUI theme (picker via Ctrl+P)",
         },
         CheatLine::Binding {
             keys: "Esc",

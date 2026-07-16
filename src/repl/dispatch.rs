@@ -150,6 +150,19 @@ pub(crate) fn dispatch_slash_command(
             _ => DispatchResult::Unknown,
         },
         route if route.is_info() => commands_info::dispatch(route, args, &ctx),
+        CommandRoute::Theme => DispatchResult::Handled {
+            output: vec![
+                "theme: TUI multi-theme (Grok-shaped)".into(),
+                "  Run `greatsage tui`, then:".into(),
+                "    /theme <name>   — apply (groknight, grokday, tokyonight, rosepine, oscura)".into(),
+                "    /theme          — cycle next theme".into(),
+                "    Ctrl+P → theme picker — live preview".into(),
+                "  Config: theme = \"groknight\"  (flat key; default GrokNight)".into(),
+            ],
+            detail: vec![],
+            redraw_prompt: true,
+            reinstall: None,
+        },
         CommandRoute::UnknownSlash | CommandRoute::NotSlash => DispatchResult::Unknown,
         _ => DispatchResult::Unknown,
     }

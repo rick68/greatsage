@@ -1,20 +1,127 @@
-//! TUI color tokens — **GrokNight-inspired** (Grok Build CLI default).
+//! TUI color tokens — multi-theme catalog (Grok Build CLI–aligned).
 //!
-//! Palette values are adapted from [xai-org/grok-build](https://github.com/xai-org/grok-build)
-//! `xai-grok-pager-render` `theme/groknight.rs` (neutral gray base + TokyoNight accents).
+//! Built-in palettes are a **reduced** hand-port of [xai-org/grok-build](https://github.com/xai-org/grok-build)
+//! theme modules (`xai-grok-pager-render` / guide `06-theming`), not a crate dependency.
 //!
-//! **Living alignment:** re-diff against the current Grok pin / grok-build tip when
-//! re-pinning (see `TODO.md` · Snapshot). This module is a **reduced** token set for
-//! greatsage chrome only — not a fork of Grok's full `Theme` struct.
+//! **Living alignment:** re-diff RGB anchors against the current Grok pin when re-pinning
+//! (see `TODO.md` · Snapshot / `docs/alignment/grok-build-report.md`).
 //!
-//! Scope today: single default theme (no picker / no `config.toml` key). Multi-theme
-//! is a later OpenSpec if needed.
+//! Catalog: `groknight` (default) · `grokday` · `tokyonight` · `rosepine` · `oscura`.
+//! Runtime selection + picker + config `theme` key — not Session ECS / BRP.
 
 use ratatui::style::{Color, Modifier, Style};
 
 /// Helper for concise `Color::Rgb` definitions.
 const fn rgb(r: u8, g: u8, b: u8) -> Color {
     Color::Rgb(r, g, b)
+}
+
+/// Built-in theme catalog ids (canonical form used in config).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+pub enum ThemeId {
+    #[default]
+    GrokNight,
+    GrokDay,
+    TokyoNight,
+    RosePine,
+    Oscura,
+}
+
+/// Catalog order for cycle (`/theme` bare) and picker list.
+pub const CATALOG: &[ThemeId] = &[
+    ThemeId::GrokNight,
+    ThemeId::GrokDay,
+    ThemeId::TokyoNight,
+    ThemeId::RosePine,
+    ThemeId::Oscura,
+];
+
+impl ThemeId {
+    /// Canonical config / slash id (lowercase, no hyphens).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::GrokNight => "groknight",
+            Self::GrokDay => "grokday",
+            Self::TokyoNight => "tokyonight",
+            Self::RosePine => "rosepine",
+            Self::Oscura => "oscura",
+        }
+    }
+
+    /// Operator-facing label for the picker list.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::GrokNight => "GrokNight",
+            Self::GrokDay => "GrokDay",
+            Self::TokyoNight => "TokyoNight",
+            Self::RosePine => "RosePineMoon",
+            Self::Oscura => "OscuraMidnight",
+        }
+    }
+
+    /// Resolve a config / slash name (case-insensitive) with Grok-style aliases.
+    ///
+    /// Unknown / empty / unsupported (`auto`, `system`) → [`ThemeId::GrokNight`].
+    pub fn resolve(name: &str) -> Self {
+        let n = name.trim().to_ascii_lowercase().replace('_', "-");
+        if n.is_empty() {
+            return Self::GrokNight;
+        }
+        // Reject auto/system for v1 (no system appearance polling).
+        if n == "auto" || n == "system" {
+            return Self::GrokNight;
+        }
+        match n.as_str() {
+            "groknight" | "grok-night" | "dark" => Self::GrokNight,
+            "grokday" | "grok-day" | "light" | "day" => Self::GrokDay,
+            "tokyonight" | "tokyo-night" | "tokyo" => Self::TokyoNight,
+            "rosepine" | "rose-pine" | "rosepine-moon" | "rose-pine-moon" | "rose" => {
+                Self::RosePine
+            }
+            "oscura" | "oscura-midnight" | "midnight" => Self::Oscura,
+            _ => Self::GrokNight,
+        }
+    }
+
+    /// Whether `name` is a known id or alias (not unknown fallback).
+    pub fn is_known_name(name: &str) -> bool {
+        let n = name.trim().to_ascii_lowercase().replace('_', "-");
+        if n.is_empty() || n == "auto" || n == "system" {
+            return false;
+        }
+        matches!(
+            n.as_str(),
+            "groknight"
+                | "grok-night"
+                | "dark"
+                | "grokday"
+                | "grok-day"
+                | "light"
+                | "day"
+                | "tokyonight"
+                | "tokyo-night"
+                | "tokyo"
+                | "rosepine"
+                | "rose-pine"
+                | "rosepine-moon"
+                | "rose-pine-moon"
+                | "rose"
+                | "oscura"
+                | "oscura-midnight"
+                | "midnight"
+        )
+    }
+
+    /// Next catalog entry after `self` (wraps).
+    pub fn next(self) -> Self {
+        let idx = CATALOG.iter().position(|t| *t == self).unwrap_or(0);
+        CATALOG[(idx + 1) % CATALOG.len()]
+    }
+
+    /// Index in [`CATALOG`] (for picker highlight).
+    pub fn catalog_index(self) -> usize {
+        CATALOG.iter().position(|t| *t == self).unwrap_or(0)
+    }
 }
 
 /// GrokNight-aligned colors used by `draw` (and any future TUI chrome).
@@ -55,6 +162,44 @@ pub struct TuiTheme {
 }
 
 impl TuiTheme {
+    /// Resolve tokens for a catalog id.
+    #[allow(dead_code)] // available for tests / future non-static paths
+    pub const fn for_id(id: ThemeId) -> Self {
+        match id {
+            ThemeId::GrokNight => Self::groknight(),
+            ThemeId::GrokDay => Self::grokday(),
+            ThemeId::TokyoNight => Self::tokyonight(),
+            ThemeId::RosePine => Self::rosepine(),
+            ThemeId::Oscura => Self::oscura(),
+        }
+    }
+
+    /// Static reference for draw (themes are pure const data).
+    pub fn get(id: ThemeId) -> &'static Self {
+        match id {
+            ThemeId::GrokNight => {
+                static T: TuiTheme = TuiTheme::groknight();
+                &T
+            }
+            ThemeId::GrokDay => {
+                static T: TuiTheme = TuiTheme::grokday();
+                &T
+            }
+            ThemeId::TokyoNight => {
+                static T: TuiTheme = TuiTheme::tokyonight();
+                &T
+            }
+            ThemeId::RosePine => {
+                static T: TuiTheme = TuiTheme::rosepine();
+                &T
+            }
+            ThemeId::Oscura => {
+                static T: TuiTheme = TuiTheme::oscura();
+                &T
+            }
+        }
+    }
+
     /// Default TUI theme — GrokNight (Grok Build CLI default).
     ///
     /// RGB values match grok-build `Theme::groknight()` for the fields we use.
@@ -107,10 +252,182 @@ impl TuiTheme {
         }
     }
 
-    /// Active theme for TUI frames. Today always GrokNight.
-    pub fn current() -> &'static Self {
-        static THEME: TuiTheme = TuiTheme::groknight();
-        &THEME
+    /// Light theme for bright terminal backgrounds (Grok GrokDay family).
+    pub const fn grokday() -> Self {
+        const BG: Color = rgb(250, 250, 250); // #fafafa
+        const BG_BASE: Color = rgb(242, 242, 242); // #f2f2f2
+        const BG_HIGHLIGHT: Color = rgb(228, 228, 228); // #e4e4e4
+        const BG_VISUAL: Color = rgb(210, 210, 218); // #d2d2da
+        const FG: Color = rgb(36, 40, 59); // #24283b
+        const FG_SEC: Color = rgb(65, 72, 104); // #414868
+        const COMMENT: Color = rgb(120, 124, 140); // #787c8c
+        const BLUE: Color = rgb(47, 108, 200);
+        const CYAN: Color = rgb(15, 140, 180);
+        const GREEN: Color = rgb(72, 140, 60);
+        const MAGENTA: Color = rgb(140, 80, 200);
+        const ORANGE: Color = rgb(200, 110, 40);
+        const RED: Color = rgb(200, 60, 80);
+        const YELLOW: Color = rgb(160, 120, 20);
+
+        Self {
+            bg_base: BG_BASE,
+            bg_highlight: BG_HIGHLIGHT,
+            bg_visual: BG_VISUAL,
+            bg_terminal: BG,
+            text_primary: FG,
+            text_secondary: FG_SEC,
+            gray_dim: rgb(150, 152, 160),
+            gray: COMMENT,
+            accent_user: FG_SEC,
+            accent_assistant: MAGENTA,
+            accent_thinking: MAGENTA,
+            accent_tool: COMMENT,
+            accent_system: BLUE,
+            accent_error: RED,
+            accent_success: GREEN,
+            accent_running: MAGENTA,
+            command: YELLOW,
+            path: ORANGE,
+            running: CYAN,
+            warning: YELLOW,
+            fuzzy_accent: BLUE,
+            selection_border: rgb(160, 160, 170),
+            prompt_border: rgb(180, 180, 190),
+            prompt_border_active: rgb(100, 100, 120),
+        }
+    }
+
+    /// Tokyo Night — blue-tinted dark (truecolor-friendly).
+    pub const fn tokyonight() -> Self {
+        const BG: Color = rgb(26, 27, 38); // #1a1b26
+        const BG_BASE: Color = rgb(36, 40, 59); // #24283b
+        const BG_HIGHLIGHT: Color = rgb(41, 46, 66); // #292e42
+        const BG_VISUAL: Color = rgb(54, 59, 82);
+        const FG: Color = rgb(192, 202, 245); // #c0caf5
+        const FG_DARK: Color = rgb(169, 177, 214); // #a9b1d6
+        const COMMENT: Color = rgb(86, 95, 137); // #565f89
+        const BLUE: Color = rgb(122, 162, 247);
+        const CYAN: Color = rgb(125, 207, 255);
+        const GREEN: Color = rgb(158, 206, 106);
+        const MAGENTA: Color = rgb(187, 154, 247);
+        const ORANGE: Color = rgb(255, 158, 100);
+        const RED: Color = rgb(247, 118, 142);
+        const YELLOW: Color = rgb(224, 175, 104);
+
+        Self {
+            bg_base: BG_BASE,
+            bg_highlight: BG_HIGHLIGHT,
+            bg_visual: BG_VISUAL,
+            bg_terminal: BG,
+            text_primary: FG,
+            text_secondary: FG_DARK,
+            gray_dim: rgb(65, 72, 104),
+            gray: COMMENT,
+            accent_user: FG_DARK,
+            accent_assistant: MAGENTA,
+            accent_thinking: MAGENTA,
+            accent_tool: COMMENT,
+            accent_system: BLUE,
+            accent_error: RED,
+            accent_success: GREEN,
+            accent_running: CYAN,
+            command: YELLOW,
+            path: ORANGE,
+            running: CYAN,
+            warning: YELLOW,
+            fuzzy_accent: BLUE,
+            selection_border: rgb(65, 72, 104),
+            prompt_border: rgb(59, 66, 97),
+            prompt_border_active: rgb(122, 162, 247),
+        }
+    }
+
+    /// Rosé Pine Moon family — muted dark + mauve accents.
+    pub const fn rosepine() -> Self {
+        const BG: Color = rgb(35, 33, 54); // #232136
+        const BG_BASE: Color = rgb(42, 39, 63); // #2a273f
+        const BG_HIGHLIGHT: Color = rgb(57, 53, 82); // #393552
+        const BG_VISUAL: Color = rgb(68, 65, 90);
+        const FG: Color = rgb(224, 222, 244); // #e0def4
+        const FG_SEC: Color = rgb(144, 140, 170); // #908caa
+        const MUTED: Color = rgb(110, 106, 134); // #6e6a86
+        const IRIS: Color = rgb(196, 167, 231); // #c4a7e7
+        const FOAM: Color = rgb(156, 207, 216); // #9ccfd8
+        const PINE: Color = rgb(62, 143, 176); // #3e8fb0
+        const GOLD: Color = rgb(246, 193, 119); // #f6c177
+        const LOVE: Color = rgb(235, 111, 146); // #eb6f92
+        const ROSE: Color = rgb(234, 154, 151); // #ea9a97
+
+        Self {
+            bg_base: BG_BASE,
+            bg_highlight: BG_HIGHLIGHT,
+            bg_visual: BG_VISUAL,
+            bg_terminal: BG,
+            text_primary: FG,
+            text_secondary: FG_SEC,
+            gray_dim: rgb(86, 82, 110),
+            gray: MUTED,
+            accent_user: FG_SEC,
+            accent_assistant: IRIS,
+            accent_thinking: IRIS,
+            accent_tool: MUTED,
+            accent_system: PINE,
+            accent_error: LOVE,
+            accent_success: FOAM,
+            accent_running: IRIS,
+            command: GOLD,
+            path: ROSE,
+            running: FOAM,
+            warning: GOLD,
+            fuzzy_accent: IRIS,
+            selection_border: rgb(86, 82, 110),
+            prompt_border: rgb(68, 65, 90),
+            prompt_border_active: IRIS,
+        }
+    }
+
+    /// Oscura Midnight — deep dark base with purple accents.
+    pub const fn oscura() -> Self {
+        const BG: Color = rgb(12, 10, 18);
+        const BG_BASE: Color = rgb(18, 16, 28);
+        const BG_HIGHLIGHT: Color = rgb(32, 28, 48);
+        const BG_VISUAL: Color = rgb(48, 40, 72);
+        const FG: Color = rgb(230, 225, 240);
+        const FG_SEC: Color = rgb(180, 170, 200);
+        const DIM: Color = rgb(100, 90, 120);
+        const PURPLE: Color = rgb(180, 140, 255);
+        const CYAN: Color = rgb(120, 200, 220);
+        const GREEN: Color = rgb(140, 200, 140);
+        const ORANGE: Color = rgb(240, 170, 100);
+        const RED: Color = rgb(240, 100, 130);
+        const YELLOW: Color = rgb(230, 200, 120);
+
+        Self {
+            bg_base: BG_BASE,
+            bg_highlight: BG_HIGHLIGHT,
+            bg_visual: BG_VISUAL,
+            bg_terminal: BG,
+            text_primary: FG,
+            text_secondary: FG_SEC,
+            gray_dim: rgb(70, 65, 90),
+            gray: DIM,
+            accent_user: FG_SEC,
+            accent_assistant: PURPLE,
+            accent_thinking: PURPLE,
+            accent_tool: DIM,
+            accent_system: CYAN,
+            accent_error: RED,
+            accent_success: GREEN,
+            accent_running: PURPLE,
+            command: YELLOW,
+            path: ORANGE,
+            running: CYAN,
+            warning: YELLOW,
+            fuzzy_accent: PURPLE,
+            selection_border: rgb(70, 60, 100),
+            prompt_border: rgb(50, 45, 70),
+            prompt_border_active: PURPLE,
+        }
     }
 
     /// Pane / overlay fill.

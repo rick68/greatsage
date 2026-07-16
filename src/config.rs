@@ -297,6 +297,37 @@ impl Config {
             .unwrap_or(String::from(SYSTEM_PROMPT))
     }
 
+    /// TUI theme id string from config (`theme` key). Empty/missing → default
+    /// `"groknight"` (callers resolve aliases via `tui::theme::ThemeId::resolve`).
+    pub fn get_theme(&self) -> String {
+        self.get_string("theme")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| String::from("groknight"))
+    }
+
+    /// Persist canonical theme id to the resolved config.toml (creates file if needed).
+    ///
+    /// Does not update the in-memory `config` crate snapshot; TUI keeps active id
+    /// on `TuiState` for the running process.
+    pub fn set_theme(&self, theme_id: &str) {
+        let path = Self::config_file();
+        let mut doc = if path.is_file() {
+            fs::read_to_string(&path)
+                .ok()
+                .and_then(|c| c.parse::<DocumentMut>().ok())
+                .unwrap_or_default()
+        } else {
+            DocumentMut::default()
+        };
+        doc["theme"] = Item::Value(theme_id.into());
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(&path, doc.to_string());
+    }
+
     /// Public string lookup for non-secret config keys (e.g. OAuth client metadata).
     pub fn get_string(&self, key: &str) -> Result<String, config::ConfigError> {
         self.0.get_string(key)

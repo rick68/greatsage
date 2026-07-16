@@ -192,8 +192,12 @@ fn one_line(s: &str, max_cols: u16) -> String {
 ///
 /// Arg / path candidates without a registry description stay name-only.
 /// Column padding uses display width so wide glyphs align.
-pub fn format_slash_menu_row(candidate: &str, name_col: usize, max_cols: usize) -> Line<'static> {
-    let theme = TuiTheme::current();
+pub fn format_slash_menu_row(
+    candidate: &str,
+    name_col: usize,
+    max_cols: usize,
+    theme: &TuiTheme,
+) -> Line<'static> {
     let name = String::from(candidate);
     let name_disp = str_display_width(&name).max(name_col);
     let desc = command_short_description(candidate).unwrap_or("");
@@ -223,7 +227,7 @@ pub fn draw_system(
     lifetime_usage: Option<Res<SessionLifetimeUsage>>,
     context_stats: Query<&SessionContextStats>,
 ) -> bevy::prelude::Result {
-    let theme = TuiTheme::current();
+    let theme = state.effective_theme();
 
     // Double-Esc arm is time-boxed; drop sticky "press Esc again…" if the window lapsed.
     () = state.expire_esc_arm_if_stale(std::time::Instant::now());
@@ -249,6 +253,9 @@ pub fn draw_system(
     let history_open = state.prompt_history.is_open();
     let history_entries = state.prompt_history.entries.clone();
     let history_selected = state.prompt_history.selected;
+    let theme_picker_open = state.theme_picker.open;
+    let theme_picker_hi = state.theme_picker.highlight;
+    let theme_picker_active = state.active_theme_id;
 
     // Idle: key hints · auth · Session ECS usage · cost. Sticky status_hint wins (no forced embed).
     let auth_chrome = if state.status_hint.is_none() {
@@ -501,8 +508,16 @@ pub fn draw_system(
             && ime_preedit.is_empty()
             && !palette_open
             && !history_open
+            && !theme_picker_open
         {
-            () = render_slash_menu(frame, areas.prompt, &menu_cands, menu_hi, theme);
+            () = render_slash_menu(
+                frame,
+                areas.prompt,
+                &menu_cands,
+                menu_hi,
+                theme_picker_active,
+                theme,
+            );
         }
 
         // Prompt history browse (Grok empty-↑): floating list, newest near prompt.
@@ -551,8 +566,24 @@ pub fn draw_system(
             );
         }
 
+        // Theme picker (live preview = frame already uses highlighted theme).
+        if theme_picker_open {
+            let rect = centered_overlay_rect(
+                areas.scrollback,
+                super::theme::CATALOG.len().saturating_add(1),
+                56,
+            );
+            () = render_theme_picker(
+                frame,
+                rect,
+                theme_picker_hi,
+                theme_picker_active,
+                theme,
+            );
+        }
+
         // White caret on prompt when palette closed (palette paints its own search caret).
-        if focus == TuiFocus::Prompt && !palette_open && !cheatsheet_open {
+        if focus == TuiFocus::Prompt && !palette_open && !cheatsheet_open && !theme_picker_open {
             paint_white_caret(frame, areas.prompt, caret_cols, caret_w, theme);
             let inner_x = areas.prompt.x.saturating_add(1);
             let inner_y = areas.prompt.y.saturating_add(1);
@@ -1027,12 +1058,78 @@ fn render_operator_panel(
     }
 }
 
+/// Theme picker list (catalog ids); frame chrome already previews highlight via `theme`.
+///
+/// `active` is the **applied** theme (not the preview highlight). Marked on the left with `*`
+/// and on the right with ` (current)` so it stays visible even under list highlight style /
+/// narrow widths (left mark never truncates).
+fn render_theme_picker(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    highlight: usize,
+    active: super::theme::ThemeId,
+    theme: &TuiTheme,
+) {
+    use super::theme::CATALOG;
+    if area.width < 8 || area.height < 3 {
+        return;
+    }
+    let items: Vec<ListItem> = CATALOG
+        .iter()
+        .map(|id| {
+            // Column 0: applied marker (always visible; not trailing-truncated).
+            let on = if *id == active { "* " } else { "  " };
+            let name = id.label();
+            let canon = id.as_str();
+            let tail = if *id == active { " (current)" } else { "" };
+            // Single string so List highlight_style cannot drop trailing spans oddly.
+            let text = format!("{on}{name}  ({canon}){tail}");
+            ListItem::new(Line::from(Span::styled(text, theme.secondary_style())))
+        })
+        .collect();
+    let mut list_state = ListState::default();
+    () = list_state.select(Some(highlight.min(CATALOG.len().saturating_sub(1))));
+    // Title always names the applied theme (works even if row marker is missed).
+    let title = line_with_hotkeys(
+        &format!(
+            " theme · current:{} · Enter:apply · Esc:cancel ",
+            active.as_str()
+        ),
+        theme.dim_style(),
+        theme,
+    );
+    () = frame.render_widget(Clear, area);
+    let list = List::new(items)
+        .style(theme.base_style())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.border_overlay())
+                .title(title)
+                .style(theme.base_style()),
+        )
+        .highlight_symbol("❯ ")
+        .highlight_style(theme.selection_style());
+    () = frame.render_stateful_widget(list, area, &mut list_state);
+}
+
+/// Decorate a theme-name candidate when it is the applied theme.
+fn slash_candidate_label(cand: &str, active_theme: super::theme::ThemeId) -> String {
+    use super::theme::ThemeId;
+    if ThemeId::is_known_name(cand) && ThemeId::resolve(cand) == active_theme {
+        format!("{cand} (current)")
+    } else {
+        cand.to_string()
+    }
+}
+
 /// Draw candidate list above the prompt pane (capped rows).
 fn render_slash_menu(
     frame: &mut ratatui::Frame,
     prompt_area: Rect,
     candidates: &[String],
     highlight: usize,
+    active_theme: super::theme::ThemeId,
     theme: &TuiTheme,
 ) {
     let n = candidates.len().min(SLASH_MENU_MAX_ROWS);
@@ -1061,7 +1158,10 @@ fn render_slash_menu(
             .min(total - SLASH_MENU_MAX_ROWS)
     };
     let end = (start + SLASH_MENU_MAX_ROWS).min(total);
-    let visible = &candidates[start..end];
+    let visible: Vec<String> = candidates[start..end]
+        .iter()
+        .map(|c| slash_candidate_label(c, active_theme))
+        .collect();
     let name_col = visible
         .iter()
         .map(|c| str_display_width(c))
@@ -1071,7 +1171,7 @@ fn render_slash_menu(
     let inner_w = menu_area.width.saturating_sub(4).max(8) as usize;
     let items: Vec<ListItem> = visible
         .iter()
-        .map(|c| ListItem::new(format_slash_menu_row(c, name_col, inner_w)))
+        .map(|c| ListItem::new(format_slash_menu_row(c, name_col, inner_w, theme)))
         .collect();
     let mut list_state = ListState::default();
     () = list_state.select(Some(hi.saturating_sub(start)));

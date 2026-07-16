@@ -17,10 +17,12 @@ pub enum ReplCommandCategory {
     Git,
     Project,
     Ai,
+    /// Full-screen TUI chrome only (`greatsage tui`); not line-REPL session ops.
+    Tui,
 }
 
 impl ReplCommandCategory {
-    const ALL: &[Self] = &[Self::Session, Self::Git, Self::Project, Self::Ai];
+    const ALL: &[Self] = &[Self::Session, Self::Git, Self::Project, Self::Ai, Self::Tui];
 
     const fn title(self) -> &'static str {
         match self {
@@ -28,6 +30,7 @@ impl ReplCommandCategory {
             Self::Git => "Git",
             Self::Project => "Project",
             Self::Ai => "AI",
+            Self::Tui => "TUI",
         }
     }
 
@@ -594,6 +597,49 @@ pub const KNOWN_COMMANDS: &[ReplCommand] = &[
         ),
     },
     ReplCommand {
+        name: "/theme",
+        summary: "Theme picker / cycle (Grok-shaped)",
+        cli_summary: Some("Switch color theme"),
+        short_description: Some("Theme · /theme <name> or bare cycle"),
+        category: ReplCommandCategory::Tui,
+        // List label stays short; ghost after `/theme` / `/theme ` lists catalog.
+        args: "[name]",
+        arg_hint: "[groknight | grokday | tokyonight | rosepine | oscura]",
+        help_extra_lines: &[],
+        usage: "/theme [name] — Switch color theme (alias: /t)",
+        detail: concat!(
+            "Usage:\n",
+            "  /theme <name>     Apply a built-in theme and save to config\n",
+            "  /theme            Cycle to the next built-in theme\n",
+            "  /t [name]         Alias for /theme\n",
+            "\n",
+            "Built-in themes (canonical ids):\n",
+            "  groknight         Default dark (GrokNight)\n",
+            "  grokday           Light theme\n",
+            "  tokyonight        Blue-tinted dark\n",
+            "  rosepine          Rose Pine Moon family\n",
+            "  oscura            Oscura Midnight (deep purple)\n",
+            "\n",
+            "Common aliases (case-insensitive):\n",
+            "  dark              -> groknight\n",
+            "  light, day        -> grokday\n",
+            "  tokyo             -> tokyonight\n",
+            "  rose              -> rosepine\n",
+            "\n",
+            "Palette:\n",
+            "  Ctrl+P -> \"theme picker\"  live preview; Enter apply; Esc cancel\n",
+            "\n",
+            "Config (persists across restarts):\n",
+            "  theme = \"tokyonight\"   in ~/.config/greatsage/config.toml\n",
+            "  (or project .greatsage/config.toml)\n",
+            "\n",
+            "Notes:\n",
+            "  Full-screen TUI only. Line REPL prints a short hint for /theme.\n",
+            "  theme=auto / system appearance is not supported yet.\n",
+            "  Not a yoyo command — Grok Build CLI TUI alignment.\n",
+        ),
+    },
+    ReplCommand {
         name: "/provider",
         summary: "Switch provider (resets model to provider default)",
         cli_summary: None,
@@ -874,10 +920,15 @@ fn repl_command_lines_grouped(audience: HelpListAudience) -> String {
 
 pub fn normalize_command_name(input: &str) -> String {
     let trimmed = input.trim();
-    if trimmed.starts_with('/') {
+    let with_slash = if trimmed.starts_with('/') {
         trimmed.to_string()
     } else {
         format!("/{trimmed}")
+    };
+    // Aliases that are not separate KNOWN_COMMANDS rows.
+    match with_slash.as_str() {
+        "/t" => String::from("/theme"),
+        other => other.to_string(),
     }
 }
 
