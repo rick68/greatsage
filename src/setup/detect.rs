@@ -84,5 +84,11 @@ fn has_credentials() -> bool {
 
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-    config_search_paths(&cwd).iter().any(toml_has_credentials)
+    if config_search_paths(&cwd).iter().any(toml_has_credentials) {
+        return true;
+    }
+
+    // OAuth token store (access or refresh present) counts offline — no refresh I/O.
+    // Uses the store module directly so path-included setup tests need only `auth::store`.
+    crate::auth::store::any_oauth_tokens_present()
 }

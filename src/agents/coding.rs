@@ -212,7 +212,10 @@ pub(crate) fn model_config_for(agent_config: &AgentConfig) -> ModelConfig {
         ..
     } = agent_config;
 
-    let mut config = match anthropic_preset_for_model(model) {
+    let named_preset = anthropic_preset_for_model(model).or_else(|| openai_preset_for_model(model));
+    let used_named_preset = named_preset.is_some();
+
+    let mut config = match named_preset {
         Some(preset) => preset,
         None => match provider {
             Provider::Anthropic => ModelConfig::anthropic(model, model),
@@ -232,7 +235,7 @@ pub(crate) fn model_config_for(agent_config: &AgentConfig) -> ModelConfig {
 
     // Presets already pin the catalog id; keep agent_config.model as the wire id when
     // the user selected a non-preset or vendor-prefixed id on a generic constructor.
-    if anthropic_preset_for_model(model).is_none() {
+    if !used_named_preset {
         config.id = model.clone();
         config.name = model.clone();
     } else if !model_ids_match_preset(model, &config.id) {
@@ -264,13 +267,23 @@ fn anthropic_preset_for_model(model: &str) -> Option<ModelConfig> {
         return Some(ModelConfig::claude_opus_4_8());
     }
     if id.contains("sonnet-5") || id.contains("sonnet-5.") || id == "claude-sonnet-5" {
-        // Avoid matching older sonnet-3.5 / 3-5.
+        // Avoid matching older sonnet-3.5 / 3-5 / sonnet-4.x.
         if !id.contains("3-5") && !id.contains("3.5") && !id.contains("4-") && !id.contains("4.") {
             return Some(ModelConfig::claude_sonnet_5());
         }
     }
     if id.contains("haiku-4-5") || id.contains("haiku-4.5") || id.contains("haiku_4_5") {
         return Some(ModelConfig::claude_haiku_4_5());
+    }
+    None
+}
+
+/// Map well-known OpenAI catalog ids to yoagent 0.13 presets (window + pricing).
+fn openai_preset_for_model(model: &str) -> Option<ModelConfig> {
+    let id = crate::repl::model_id::canonical_model_name(model).to_ascii_lowercase();
+    // Exact gpt-5.5 family only — not gpt-5.5-pro/mini (those stay generic + native book).
+    if id == "gpt-5.5" || id == "gpt-5.5-chat" {
+        return Some(ModelConfig::gpt_5_5());
     }
     None
 }
@@ -1148,5 +1161,10 @@ pub fn coding_agent_plugin(app: &mut App) {
             PostUpdate,
             sync_pending_session_context_stats.after(ingest_agent_events),
         )
-        .add_systems(PostUpdate, shutdown_coding_agent);
+        // Before `shutdown_tokio_on_exit`: cancel AgentsCancelToken so dual-select
+        // waiters can leave on either token.
+        .add_systems(
+            PostUpdate,
+            shutdown_coding_agent.before(crate::tokio::shutdown_tokio_on_exit),
+        );
 }

@@ -121,7 +121,7 @@ pub const PROVIDER_SPECS: &[ProviderSpec] = &[
         wizard_label: "xAI",
         env_var: Some("XAI_API_KEY"),
         config_key: "xai_api_key",
-        default_model: "grok-4.3",
+        default_model: "grok-4.5",
         known_models: XAI_KNOWN_MODELS,
     },
     ProviderSpec {

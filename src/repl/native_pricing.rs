@@ -10,6 +10,9 @@
 //! `ModelConfig.cost` MUST stay aligned for known models (`coding::model_config_for`
 //! fills zero costs from here, and yoagent named presets carry the same rates). Unknown
 //! models intentionally stay unpriced (`None` / all-zero cost) — never invent free.
+//!
+//! **yoagent upgrade:** update classify + rates together with `provider_models` catalogs
+//! and named presets (`AGENTS.md` · When bumping yoagent).
 
 use super::model_id::canonical_model_name;
 
@@ -78,7 +81,10 @@ enum PriceTier {
     MistralNemo,
     MistralMixtral8x7,
     MistralDefault,
-    // xAI
+    // xAI (docs.x.ai text pricing — short-context tier; long-context is higher)
+    XaiGrok45,
+    XaiGrok43,
+    XaiGrokBuild,
     XaiGrok4Mini,
     XaiGrok4,
     XaiGrok3Mini,
@@ -176,9 +182,10 @@ fn tier_rates(tier: PriceTier) -> PerMTok {
         OpenAiGptAudio => nc(2.50, 10.00),
         OpenAiGptMiniLatest => nc(0.40, 1.60),
         OpenAiGptLatest => nc(2.00, 8.00),
+        // yoagent `gpt_5_5` CostConfig (input/output; cache_read 0.5/MTok)
         OpenAiGpt55Mini => nc(0.40, 1.60),
-        OpenAiGpt55Pro => nc(5.00, 20.00),
-        OpenAiGpt55 => nc(5.00, 20.00),
+        OpenAiGpt55Pro => (5.00, 0.0, 0.50, 30.00),
+        OpenAiGpt55 => (5.00, 0.0, 0.50, 30.00),
         OpenAiGpt5Mini => nc(0.40, 1.60),
         OpenAiGpt5Pro => nc(5.00, 20.00),
         OpenAiGpt5 => nc(2.00, 8.00),
@@ -211,12 +218,16 @@ fn tier_rates(tier: PriceTier) -> PerMTok {
         MistralMixtral8x7 => nc(0.24, 0.24),
         MistralDefault => nc(1.00, 3.00),
 
+        // Per docs.x.ai (short-context / <200k prompt). Cached input → cache_read slot.
+        XaiGrok45 => (2.00, 0.0, 0.50, 6.00),
+        XaiGrok43 => (1.25, 0.0, 0.20, 2.50),
+        XaiGrokBuild => (1.00, 0.0, 0.20, 2.00),
         XaiGrok4Mini => nc(0.60, 3.00),
         XaiGrok4 => nc(3.00, 15.00),
         XaiGrok3Mini => nc(0.30, 0.50),
         XaiGrok3 => nc(3.00, 15.00),
         XaiGrok2 => nc(2.00, 10.00),
-        XaiGrokDefault => nc(3.00, 15.00),
+        XaiGrokDefault => (1.25, 0.0, 0.20, 2.50),
 
         ZaiGlmPremium => nc(0.70, 0.70),
         ZaiGlmBudget => nc(0.01, 0.01),
@@ -488,8 +499,26 @@ fn classify_mistral(model: &str) -> Option<PriceTier> {
 
 fn classify_xai(model: &str) -> Option<PriceTier> {
     use PriceTier::*;
+    if !model.contains("grok") {
+        return None;
+    }
+    // grok-build* (alias grok-build-latest → 4.5 family on xAI; price as build id)
+    if model.contains("grok-build") {
+        return Some(XaiGrokBuild);
+    }
+    if model.contains("grok-4.5") || model.contains("grok-4-5") {
+        return Some(XaiGrok45);
+    }
+    // 4.3 and 4.20 dated builds share short-context list pricing on docs.x.ai
+    if model.contains("grok-4.3")
+        || model.contains("grok-4-3")
+        || model.contains("grok-4.20")
+        || model.contains("grok-4-20")
+    {
+        return Some(XaiGrok43);
+    }
     if model.contains("grok-4") {
-        if model.contains("mini") || model.contains("build") {
+        if model.contains("mini") {
             return Some(XaiGrok4Mini);
         }
         return Some(XaiGrok4);
@@ -503,10 +532,7 @@ fn classify_xai(model: &str) -> Option<PriceTier> {
     if model.contains("grok-2") {
         return Some(XaiGrok2);
     }
-    if model.contains("grok") {
-        return Some(XaiGrokDefault);
-    }
-    None
+    Some(XaiGrokDefault)
 }
 
 fn classify_zai(model: &str) -> Option<PriceTier> {

@@ -103,7 +103,7 @@ fn line_with_hotkeys(text: &str, base: Style) -> Line<'static> {
         }
         match best {
             Some((0, tok)) => {
-                spans.push(Span::styled(tok.to_string(), hotkey_style()));
+                spans.push(Span::styled(String::from(tok), hotkey_style()));
                 rest = &rest[tok.len()..];
             }
             Some((i, _)) => {
@@ -111,7 +111,7 @@ fn line_with_hotkeys(text: &str, base: Style) -> Line<'static> {
                 rest = &rest[i..];
             }
             None => {
-                spans.push(Span::styled(rest.to_string(), base));
+                spans.push(Span::styled(String::from(rest), base));
                 break;
             }
         }
@@ -190,7 +190,7 @@ fn one_line(s: &str, max_cols: u16) -> String {
 /// Arg / path candidates without a registry description stay name-only.
 /// Column padding uses display width so wide glyphs align.
 pub fn format_slash_menu_row(candidate: &str, name_col: usize, max_cols: usize) -> Line<'static> {
-    let name = candidate.to_string();
+    let name = String::from(candidate);
     let name_disp = str_display_width(&name).max(name_col);
     let desc = command_short_description(candidate).unwrap_or("");
     if desc.is_empty() || max_cols <= name_disp + 2 {
@@ -212,6 +212,7 @@ pub fn draw_system(
     mut context: ResMut<RatatuiContext>,
     mut state: ResMut<TuiState>,
     scrollback: Res<ScrollbackView>,
+    config: Option<Res<crate::config::Config>>,
 ) -> bevy::prelude::Result {
     // Double-Esc arm is time-boxed; drop sticky "press Esc again…" if the window lapsed.
     () = state.expire_esc_arm_if_stale(std::time::Instant::now());
@@ -232,17 +233,27 @@ pub fn draw_system(
     let palette_rows = state.command_palette.rows.clone();
     let palette_hi = state.command_palette.highlight;
     let cheatsheet_open = state.shortcuts_cheatsheet.open;
-    let status_raw = state
+    let mut status_raw = state
         .status_hint
         .clone()
-        .unwrap_or_else(|| DEFAULT_STATUS_HINT.to_string());
+        .unwrap_or(String::from(DEFAULT_STATUS_HINT));
+    // Non-secret auth chrome (no tokens). Idle default only — keep sticky hints clean.
+    if state.status_hint.is_none()
+        && let Some(cfg) = config.as_deref()
+    {
+        let provider = cfg
+            .get_provider()
+            .unwrap_or(crate::providers::Provider::Xai);
+        let chrome = crate::auth::status_for(cfg, provider).chrome_label();
+        status_raw = format!("{status_raw} · {chrome}");
+    }
     let empty = scrollback.empty_placeholder || scrollback.lines.is_empty();
     let line_count = scrollback.line_count();
     let selected = clamp_selected_line(state.selected_line, line_count);
     let scroll_from_bottom = state.scroll_from_bottom;
 
     let body_lines: Vec<(String, bool)> = if empty {
-        vec![("(empty session — type a prompt below)".to_string(), false)]
+        vec![(String::from("(empty session — type a prompt below)"), false)]
     } else {
         scrollback
             .lines
@@ -327,11 +338,11 @@ pub fn draw_system(
             if focus == TuiFocus::Prompt && ime_preedit.is_empty() && !after.is_empty() {
                 after.chars().skip(1).collect()
             } else {
-                after.to_string()
+                String::from(after)
             };
         let mut spans = vec![
-            Span::raw(PROMPT_PREFIX.to_string()),
-            Span::raw(before.to_string()),
+            Span::raw(String::from(PROMPT_PREFIX)),
+            Span::raw(String::from(before)),
         ];
         if focus == TuiFocus::Prompt {
             // Placeholder cells (= caret display width); painted white after.
@@ -347,7 +358,7 @@ pub fn draw_system(
             }
             () = spans.push(Span::raw(after_rest));
         } else {
-            () = spans.push(Span::raw(after.to_string()));
+            () = spans.push(Span::raw(String::from(after)));
         }
         if let Some(ref g) = ghost {
             // Ghost only when not composing (IME preedit owns that slot).
@@ -467,7 +478,7 @@ fn palette_overlay_rect(scrollback: Rect, filter: &str, filtered_count: usize) -
 }
 
 fn format_palette_row(row: &PaletteRow, name_col: usize, max_cols: usize) -> Line<'static> {
-    let name = row.label().to_string();
+    let name = String::from(row.label());
     let name_disp = str_display_width(&name).max(name_col);
     let desc = row.description();
     if desc.is_empty() || max_cols <= name_disp + 2 {
@@ -544,7 +555,7 @@ fn render_command_palette(
         .as_ref()
         .map(|q| str_display_width(q))
         .unwrap_or(0);
-    let mut search_spans = vec![Span::styled(label.to_string(), hotkey_style())];
+    let mut search_spans = vec![Span::styled(String::from(label), hotkey_style())];
     if let Some(ref q) = query_display {
         search_spans.push(Span::styled(q.clone(), search_query_style()));
     }
@@ -552,7 +563,7 @@ fn render_command_palette(
     search_spans.push(Span::raw(" "));
     if query_display.is_none() {
         search_spans.push(Span::styled(
-            "type to search".to_string(),
+            String::from("type to search"),
             search_placeholder_style(),
         ));
     }

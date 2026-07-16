@@ -23,6 +23,24 @@ pub fn block_on_session<T>(runtime: &Runtime, future: impl Future<Output = T>) -
     runtime.handle().block_on(future)
 }
 
+/// Bound wait for the agent mutex (exit / auto-save must not hang if a turn holds the lock).
+const AGENT_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Abort in-flight yoagent work if the lock is available quickly.
+pub fn abort_agent_best_effort(runtime: &Runtime, agent: &CodingAgent) {
+    let agent = agent.clone();
+    let _ = runtime.handle().block_on(async move {
+        match tokio::time::timeout(AGENT_LOCK_TIMEOUT, agent.lock()).await {
+            Ok(guard) => {
+                guard.abort();
+            }
+            Err(_) => {
+                // Still streaming / locked — skip; cancel tokens / task teardown continue.
+            }
+        }
+    });
+}
+
 pub const DEFAULT_SESSION_FILENAME: &str = "greatsage-session.json";
 pub const LAST_SESSION_REL_PATH: &str = ".greatsage/last-session.json";
 
@@ -167,7 +185,14 @@ pub(super) async fn save_messages(agent: &CodingAgent, path: &Path) -> Result<St
 
 /// Auto-save non-empty yoagent history for `--continue` (exit paths).
 pub async fn try_auto_save_session(agent: &CodingAgent, cwd: &Path) -> Result<(), String> {
-    let guard = agent.lock().await;
+    let guard = match tokio::time::timeout(AGENT_LOCK_TIMEOUT, agent.lock()).await {
+        Ok(guard) => guard,
+        Err(_) => {
+            return Err(String::from(
+                "agent busy (lock timeout) — auto-save skipped",
+            ));
+        }
+    };
     if guard.messages().is_empty() {
         return Ok(());
     }

@@ -122,12 +122,18 @@ impl From<&Cli> for Config {
             _ => (),
         }
 
+        // `--api-key` / env `API_KEY` supply a generic key only. Do **not** force
+        // `provider = custom`: clap binds `API_KEY` to this flag, and layered
+        // `~/.config/greatsage/.env` often still has a leftover `API_KEY` after
+        // the user switches to e.g. `provider = "xai"` + OAuth. Forcing Custom
+        // then yields `ModelConfig::local` with an empty `base_url` → invalid
+        // URL → reqwest EventSource "expected a cloneable request".
+        // Select custom explicitly via `provider = "custom"` / `--provider custom`.
         if let Some(api_key) = &cli.api_key {
             config_builder = config_builder
                 .clone()
                 .set_override("api_key", api_key.clone())
                 .unwrap_or(config_builder);
-            current_provider = Some(&Provider::Custom);
         }
         if let Ok(api_key) = dotenvy::var("API_KEY")
             && !api_key.trim().is_empty()
@@ -291,6 +297,13 @@ impl Config {
             .unwrap_or(String::from(SYSTEM_PROMPT))
     }
 
+    /// Public string lookup for non-secret config keys (e.g. OAuth client metadata).
+    pub fn get_string(&self, key: &str) -> Result<String, config::ConfigError> {
+        self.0.get_string(key)
+    }
+
+    /// Static API key only (env / TOML / overrides). Prefer
+    /// [`crate::auth::resolve_credential`] for agent construct (includes OAuth).
     pub fn get_api_key(&self, provider: Option<Provider>) -> Option<String> {
         let paired_env = crate::config_paths::paired_env_path(&Self::config_file());
         let paired_ref = paired_env.is_file().then_some(paired_env.as_path());

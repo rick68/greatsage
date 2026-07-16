@@ -1,19 +1,30 @@
-//! Per-provider model catalogs for the setup wizard.
+//! Per-provider model catalogs for the setup wizard and `/model list`.
 //!
 //! Model IDs match each vendor's API (not OpenRouter `provider/model` format),
 //! except for [`OPENROUTER_KNOWN_MODELS`] and Groq hosted IDs that include slashes.
 //! OpenRouter list is synced from https://openrouter.ai/api/v1/models (text output).
+//!
+//! **yoagent upgrade:** re-diff this file + `PROVIDER_SPECS` defaults +
+//! `repl/native_pricing` + `agents/coding` presets in the **same** change as the
+//! crate bump. See `AGENTS.md` · When bumping yoagent.
 
-/// Anthropic Claude API models (2026-06).
+/// Anthropic Claude API models (aligned with yoagent 0.13 presets + current API ids).
+///
+/// First four ids match yoagent `ModelConfig` presets (`claude_fable_5`, `claude_opus_4_8`,
+/// `claude_sonnet_5`, `claude_haiku_4_5`) used at agent install for window + cost.
 pub const ANTHROPIC_KNOWN_MODELS: &[&str] = &[
     "claude-fable-5",
-    "claude-opus-4-8",
-    "claude-sonnet-4-6",
     "claude-haiku-4-5",
     "claude-haiku-4-5-20251001",
+    "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
+    "claude-sonnet-5",
+    "claude-sonnet-4-7",
+    "claude-sonnet-4-6",
+    "claude-sonnet-4-5",
     "claude-sonnet-4-5-20250929",
+    "claude-sonnet-4-20250514",
     "claude-opus-4-5-20251101",
 ];
 
@@ -98,9 +109,13 @@ pub const MISTRAL_KNOWN_MODELS: &[&str] = &[
 ];
 
 /// OpenAI chat/reasoning API models.
+///
+/// `gpt-5.5` is first — yoagent 0.13 `ModelConfig::gpt_5_5()` preset.
 pub const OPENAI_KNOWN_MODELS: &[&str] = &[
+    "codex-mini",
     "gpt-5.5",
     "gpt-5.5-pro",
+    "gpt-5.5-mini",
     "gpt-5.4",
     "gpt-5.4-pro",
     "gpt-5.4-mini",
@@ -127,21 +142,34 @@ pub const OPENAI_KNOWN_MODELS: &[&str] = &[
     "gpt-4.1-nano",
     "gpt-4o",
     "gpt-4o-mini",
+    "o1",
+    "o1-pro",
     "o3",
     "o3-pro",
     "o3-mini",
     "o4-mini",
-    "o1",
-    "o1-pro",
+    "o4-mini-high",
 ];
 
-/// xAI Grok chat API models.
+/// xAI Grok chat API models (docs.x.ai text models, 2026-07).
+///
+/// Default `grok-4.5` is xAI's recommended coding/chat model. Includes dated
+/// 4.20 builds, grok-build, aliases, and older `grok-4` / `grok-3` / `grok-2`
+/// ids still used by tooling and OpenRouter.
 pub const XAI_KNOWN_MODELS: &[&str] = &[
+    "grok-4.5",
+    "grok-4.5-latest",
     "grok-4.3",
     "grok-4.20-0309-reasoning",
     "grok-4.20-0309-non-reasoning",
     "grok-4.20-multi-agent-0309",
+    "grok-4",
+    "grok-4-mini",
+    "grok-3",
+    "grok-3-mini",
+    "grok-2",
     "grok-build-0.1",
+    "grok-build-latest",
 ];
 
 /// Z.ai text and vision chat models.
@@ -197,6 +225,7 @@ pub const OPENROUTER_KNOWN_MODELS: &[&str] = &[
     "anthropic/claude-sonnet-4",
     "anthropic/claude-sonnet-4.5",
     "anthropic/claude-sonnet-4.6",
+    "anthropic/claude-sonnet-5",
     "arcee-ai/coder-large",
     "arcee-ai/trinity-large-thinking",
     "arcee-ai/trinity-mini",
@@ -482,9 +511,12 @@ pub const OPENROUTER_KNOWN_MODELS: &[&str] = &[
     "undi95/remm-slerp-l2-13b",
     "upstage/solar-pro-3",
     "writer/palmyra-x5",
+    "x-ai/grok-4",
+    "x-ai/grok-4-mini",
     "x-ai/grok-4.20",
     "x-ai/grok-4.20-multi-agent",
     "x-ai/grok-4.3",
+    "x-ai/grok-4.5",
     "x-ai/grok-build-0.1",
     "xiaomi/mimo-v2.5",
     "xiaomi/mimo-v2.5-pro",

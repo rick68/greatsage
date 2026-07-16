@@ -186,6 +186,7 @@ pub fn input_system(
     cli: Res<Cli>,
     coding_agent: Option<Res<CodingAgent>>,
     tokio_runtime: Res<TokioTasksRuntime>,
+    auth_ui: Res<super::auth_ui::AuthUiChannel>,
     runtime_status: Query<&SessionRuntimeStatus>,
 ) {
     let line_count = scrollback.line_count();
@@ -342,7 +343,12 @@ pub fn input_system(
                     state.command_palette.highlight = n.saturating_sub(1);
                 }
                 KeyCode::Enter => {
-                    if accept_palette_selection(&mut state) {
+                    if accept_palette_selection(
+                        &mut state,
+                        config.as_ref(),
+                        tokio_runtime.as_ref(),
+                        auth_ui.as_ref(),
+                    ) {
                         refresh_slash_completion(&mut state, &agent_config, false);
                     }
                 }
@@ -729,8 +735,7 @@ fn handle_slash(
         DispatchResult::AgentOp(inv) => {
             let mut lines = inv.preamble;
             () = lines.push(
-                "(agent file ops simplified in TUI foundation — use line REPL for /save /load /jump)"
-                    .into(),
+                String::from("(agent file ops simplified in TUI foundation — use line REPL for /save /load /jump)"),
             );
             () = state.open_operator_panel("agent", lines);
         }
@@ -739,7 +744,9 @@ fn handle_slash(
                 "confirm",
                 [
                     prompt,
-                    "clear confirm: use line REPL for multi-step confirm in foundation".into(),
+                    String::from(
+                        "clear confirm: use line REPL for multi-step confirm in foundation",
+                    ),
                 ],
             );
         }

@@ -86,7 +86,7 @@ use {
         SessionContextStatsFields, SessionMetaFields, TurnUsageRow, build_snapshot,
     },
     session_ops::{
-        agent_message_stats, block_on_session, compact_agent_with_keep,
+        abort_agent_best_effort, agent_message_stats, block_on_session, compact_agent_with_keep,
         last_user_prompt_from_messages, load_agent_from_bookmark, load_agent_from_file,
         save_messages, try_auto_save_session,
     },
@@ -124,6 +124,8 @@ fn persist_session_on_exit(coding_agent: Option<&CodingAgent>, runtime: &tokio::
     let Some(agent) = coding_agent else {
         return;
     };
+    // Prefer abort before save so we are not stuck behind an in-flight turn's lock.
+    () = abort_agent_best_effort(runtime, agent);
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     if let Err(err) = block_on_session(runtime, try_auto_save_session(agent, &cwd)) {
         eprintln!("auto-save error: {err}");
@@ -234,8 +236,9 @@ fn leave_repl_app(
         state.ctrl_c_armed = false;
     }
     () = persist_repl_history(history, &crate::config_paths::repl_history_path());
-    () = persist_session_on_exit(coding_agent, tokio_runtime.runtime());
+    // Mark leave before auto-save so a second AppExit path can skip duplicate work.
     () = commands.remove_resource::<CodingAgentTask>();
+    () = persist_session_on_exit(coding_agent, tokio_runtime.runtime());
     () = write_quit_farewell_if_enabled(stdout, cli);
     exit.write_default();
 }
@@ -1204,13 +1207,14 @@ fn read_stdin_stream(
                         session_processing,
                     ) {
                         DispatchResult::Exit => {
+                            session_state.leaving = true;
                             () = persist_repl_history(
                                 history.as_mut(),
                                 &crate::config_paths::repl_history_path(),
                             );
+                            () = commands.remove_resource::<CodingAgentTask>();
                             () = persist_session_on_exit(coding_agent.as_deref(), runtime);
                             () = write_quit_farewell_if_enabled(&mut stdout, cli.as_ref());
-                            () = commands.remove_resource::<CodingAgentTask>();
                             exit.write_default();
                             return;
                         }
@@ -1291,10 +1295,16 @@ fn shutdown_repl(
     mut history: ResMut<ReplInputHistory>,
     coding_agent: Option<Res<CodingAgent>>,
     tokio_runtime: Res<TokioTasksRuntime>,
+    session_state: Option<Res<ReplSessionState>>,
 ) {
     for _message in messages.read() {
+        // History always; session auto-save only if leave path did not already run it
+        // (`leaving` set in leave_repl_app / Exit already saved).
         () = persist_repl_history(history.as_mut(), &crate::config_paths::repl_history_path());
-        persist_session_on_exit(coding_agent.as_deref(), tokio_runtime.runtime());
+        let already_saved = session_state.as_ref().is_some_and(|s| s.leaving);
+        if !already_saved {
+            persist_session_on_exit(coding_agent.as_deref(), tokio_runtime.runtime());
+        }
         let _ = crossterm::terminal::disable_raw_mode();
     }
 }
@@ -1321,5 +1331,10 @@ pub(crate) fn repl_plugin(app: &mut App) {
         )
             .chain(),
     )
-    .add_systems(PostUpdate, shutdown_repl);
+    // After `shutdown_tokio_on_exit`: stdin poll must drop `AppCancelToken` before
+    // `disable_raw_mode` (concurrent raw-mode teardown vs crossterm poll can hang).
+    .add_systems(
+        PostUpdate,
+        shutdown_repl.after(crate::tokio::shutdown_tokio_on_exit),
+    );
 }

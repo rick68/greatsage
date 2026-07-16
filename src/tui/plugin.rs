@@ -2,6 +2,7 @@
 
 use {
     super::{
+        auth_ui::{AuthUiChannel, poll_auth_ui_system},
         draw::draw_system,
         input::{input_system, mouse_input_system, paste_system, poll_shell_system},
         scrollback::{ScrollbackView, rebuild_scrollback_view},
@@ -35,6 +36,7 @@ impl Plugin for TuiPlugin {
         .init_resource::<TuiState>()
         .init_resource::<ScrollbackView>()
         .init_resource::<ReplSessionState>()
+        .init_resource::<AuthUiChannel>()
         .add_systems(
             Startup,
             (enable_bracketed_paste_system, install_paste_cleanup),
@@ -43,6 +45,7 @@ impl Plugin for TuiPlugin {
             PreUpdate,
             (
                 poll_shell_system,
+                poll_auth_ui_system,
                 paste_system,
                 input_system,
                 mouse_input_system,

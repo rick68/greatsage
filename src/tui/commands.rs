@@ -1,8 +1,13 @@
 //! UI-only command helpers (quit, palette actions); agent slash stays in `repl` dispatch.
 
-use super::{
-    palette::{PaletteAccept, PaletteUiAction, accept_selected},
-    state::TuiState,
+use {
+    super::{
+        auth_ui::{AuthUiChannel, panel_auth_logout, panel_auth_status, spawn_device_login},
+        palette::{PaletteAccept, PaletteUiAction, accept_selected},
+        state::TuiState,
+    },
+    crate::config::Config,
+    bevy_tokio_tasks::TokioTasksRuntime,
 };
 
 /// Returns true when the line is a quit request that should exit the TUI.
@@ -16,7 +21,12 @@ pub fn is_ui_quit_line(line: &str) -> bool {
 /// Apply the highlighted palette row. Returns `true` if a row was accepted.
 ///
 /// Slash rows fill the draft only — never dispatches. UI rows run local chrome.
-pub fn accept_palette_selection(state: &mut TuiState) -> bool {
+pub fn accept_palette_selection(
+    state: &mut TuiState,
+    config: &Config,
+    runtime: &TokioTasksRuntime,
+    auth_ui: &AuthUiChannel,
+) -> bool {
     let Some(action) = accept_selected(&state.command_palette) else {
         return false;
     };
@@ -39,6 +49,21 @@ pub fn accept_palette_selection(state: &mut TuiState) -> bool {
             () = state.clear_esc_arm();
             // Restore default key chrome (same as 2×Esc clear).
             state.status_hint = None;
+            true
+        }
+        PaletteAccept::Ui(PaletteUiAction::AuthStatus) => {
+            let (title, lines) = panel_auth_status(config);
+            () = state.open_operator_panel(title, lines);
+            true
+        }
+        PaletteAccept::Ui(PaletteUiAction::AuthLogout) => {
+            let (title, lines) = panel_auth_logout(config);
+            () = state.open_operator_panel(title, lines);
+            true
+        }
+        PaletteAccept::Ui(PaletteUiAction::AuthLogin) => {
+            // Device login on app runtime; URL/code → OperatorPanel via AuthUiChannel.
+            spawn_device_login(config, runtime, auth_ui, true);
             true
         }
     }

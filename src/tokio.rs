@@ -81,7 +81,7 @@ fn setup_signal_handles(runtime: ResMut<TokioTasksRuntime>, cancel: Res<AppCance
     });
 }
 
-fn shutdown_tokio_on_exit(
+pub(crate) fn shutdown_tokio_on_exit(
     mut messages: MessageReader<AppExit>,
     mut cancel: Option<Res<AppCancelToken>>,
 ) {
@@ -90,7 +90,21 @@ fn shutdown_tokio_on_exit(
             && !cancel.is_cancelled()
         {
             cancel.cancel();
-            while Arc::strong_count(&cancel) != 1 {}
+            // **Intentional barrier (wait until strong_count == 1).**
+            //
+            // Clone holders (each must drop on cancel while the runtime still exists):
+            // 1. signal_hook task — `tokio.rs` `setup_signal_handles` (`cancelled()` → break)
+            // 2. agents waiter — `agents/mod.rs` setup (`cancelled()` → ())
+            // 3. coding waiter — `agents/coding.rs` setup (`cancelled()` → ())
+            // 4. stdin poll — `stdin.rs` spawn_blocking loop (`is_cancelled` between polls)
+            //
+            // Resource owns the last Arc. Do **not** timeout this barrier (runtime teardown
+            // race). Main thread is not a Tokio worker: `yield_now` only lets OS schedule
+            // runtime/blocking-pool threads that perform the actual leave+drop.
+            // Holders must not need `run_on_main_thread` to drop (tick stops after exit).
+            while Arc::strong_count(&cancel) != 1 {
+                std::thread::yield_now();
+            }
         }
     }
 }
@@ -99,5 +113,6 @@ pub fn tokio_plugin(app: &mut App) {
     app.add_plugins(TokioTasksPlugin::default())
         .init_resource::<AppCancelToken>()
         .add_systems(Startup, setup_signal_handles)
+        // After agent cancel token; before REPL `disable_raw_mode` (stdin must leave first).
         .add_systems(PostUpdate, shutdown_tokio_on_exit);
 }

@@ -13,6 +13,12 @@ pub enum PaletteUiAction {
     OpenShortcuts,
     /// Clear the prompt draft (same effect as double-Esc clear).
     ClearPrompt,
+    /// Show non-secret auth status in OperatorPanel.
+    AuthStatus,
+    /// OAuth device login (xAI) in background → OperatorPanel.
+    AuthLogin,
+    /// Clear OAuth token store for active provider.
+    AuthLogout,
 }
 
 /// One palette list row.
@@ -62,6 +68,21 @@ pub fn all_palette_rows() -> Vec<PaletteRow> {
             action: PaletteUiAction::ClearPrompt,
             label: "clear prompt",
             description: "Clear the draft prompt",
+        },
+        PaletteRow::Ui {
+            action: PaletteUiAction::AuthStatus,
+            label: "auth status",
+            description: "Show login method (key/oauth) — no secrets",
+        },
+        PaletteRow::Ui {
+            action: PaletteUiAction::AuthLogin,
+            label: "auth login",
+            description: "xAI OAuth device-code login (OperatorPanel)",
+        },
+        PaletteRow::Ui {
+            action: PaletteUiAction::AuthLogout,
+            label: "auth logout",
+            description: "Clear stored OAuth tokens for active provider",
         },
     ];
     for cmd in KNOWN_COMMANDS {

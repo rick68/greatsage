@@ -4,6 +4,7 @@
 )]
 
 mod agents;
+mod auth;
 mod cli;
 mod config;
 mod config_paths;
@@ -77,8 +78,8 @@ fn main() {
 
     let mut cli = Cli::parse_and_check_help();
 
-    if matches!(cli.command, Some(Command::Setup)) {
-        match run_wizard() {
+    match &cli.command {
+        Some(Command::Setup) => match run_wizard() {
             Ok(()) => return,
             Err(err) => {
                 let failed = err.is_failure();
@@ -88,8 +89,80 @@ fn main() {
                 }
                 return;
             }
+        },
+        Some(Command::Login {
+            provider,
+            oauth: _,
+            device_code,
+            authorization_code,
+            no_browser,
+            force,
+        }) => {
+            let opts = auth::LoginOptions {
+                open_browser: !*no_browser,
+                device_code: *device_code,
+                authorization_code: *authorization_code,
+                force: *force,
+            };
+            if let Err(code) = auth::cli_login(provider.as_deref(), opts) {
+                std::process::exit(code);
+            }
+            return;
         }
-    } else {
+        Some(Command::Logout { provider }) => {
+            if let Err(code) = auth::cli_logout(provider.as_deref()) {
+                std::process::exit(code);
+            }
+            return;
+        }
+        Some(Command::Auth { action }) => {
+            use crate::cli::AuthCommand;
+            match action {
+                AuthCommand::Login {
+                    provider,
+                    oauth: _,
+                    device_code,
+                    authorization_code,
+                    no_browser,
+                    force,
+                } => {
+                    let opts = auth::LoginOptions {
+                        open_browser: !*no_browser,
+                        device_code: *device_code,
+                        authorization_code: *authorization_code,
+                        force: *force,
+                    };
+                    if let Err(code) = auth::cli_login(provider.as_deref(), opts) {
+                        std::process::exit(code);
+                    }
+                }
+                AuthCommand::Logout { provider } => {
+                    if let Err(code) = auth::cli_logout(provider.as_deref()) {
+                        std::process::exit(code);
+                    }
+                }
+                AuthCommand::Status { provider } => {
+                    if let Err(code) = auth::cli_status(provider.as_deref()) {
+                        std::process::exit(code);
+                    }
+                }
+                AuthCommand::List => {
+                    if let Err(code) = auth::cli_list() {
+                        std::process::exit(code);
+                    }
+                }
+            }
+            return;
+        }
+        Some(Command::Tui) | None => {}
+    }
+
+    if !matches!(
+        cli.command,
+        Some(
+            Command::Setup | Command::Login { .. } | Command::Logout { .. } | Command::Auth { .. }
+        )
+    ) {
         let interactive_repl =
             cli.prompt.is_none() && cli.prompt_file.is_none() && io::stdin().is_terminal();
 
@@ -205,15 +278,37 @@ fn main() {
         app.add_plugins(tui_plugin);
     } else if interactive_tty {
         app.add_plugins((stdin_plugin, repl_plugin));
-    } else if cfg!(feature = "dev_native") {
-        if !cli.no_hints {
+    } else if cli.headless {
+        // Explicit daemon: ScheduleRunner + BRP (dev_native). Opt-in only so
+        // `greatsage -n` / closed-stdin without -p cannot become an accidental
+        // multi-hour process (no AppExit until signal).
+        if !cfg!(feature = "dev_native") {
             eprintln!(
-                "greatsage: headless dev mode (stdin is not a TTY). \
-                 Send prompts via BRP session.send_prompt, or run `cargo run --features dev_native` in a terminal for REPL."
+                "greatsage: --headless requires a binary built with `--features dev_native` \
+                 (BRP / RemotePlugin)."
             );
+            std::process::exit(1);
         }
+        // Always announce daemon mode (ignore -n): operators must know this is long-lived.
+        let port = std::env::var("BRP_EXTRAS_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .unwrap_or(15702);
+        eprintln!(
+            "greatsage: headless server (stdin is not a TTY). BRP on 127.0.0.1:{port}. \
+             Send prompts via session.send_prompt / scripts/brp_send_prompt.sh. \
+             Stop with SIGTERM/SIGHUP (or kill). Ctrl+C does not exit this process."
+        );
     } else {
-        eprintln!("greatsage: stdin is not a terminal; use -p PROMPT or pipe a prompt.");
+        // Non-TTY without -p and without --headless: fail fast (not an infinite loop).
+        eprintln!(
+            "greatsage: stdin is not a terminal and no prompt was given.\n\
+             Use one of:\n\
+               -p \"prompt\"          one-shot then exit\n\
+               pipe a prompt          same as -p\n\
+               interactive TTY        REPL / TUI\n\
+               --headless             BRP server (requires --features dev_native)"
+        );
         std::process::exit(1);
     }
 

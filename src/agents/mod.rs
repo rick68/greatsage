@@ -87,7 +87,7 @@ impl AgentConfig {
         let base_prompt = config.get_system_prompt();
         let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let (system_prompt, _) = assemble_system_prompt(&base_prompt, &cwd, bare);
-        let api_key = config.get_api_key(provider).unwrap_or_default();
+        let api_key = crate::auth::resolve_credential(config, provider).unwrap_or_default();
         let mcp = if bare && !opts.explicit_mcp {
             Vec::new()
         } else {

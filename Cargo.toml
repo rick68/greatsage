@@ -3,6 +3,7 @@ temp_env_vars = "0.2.1"
 
 [dependencies]
 async-trait = "0.1.89"
+base64 = "0.22.1"
 bevy = { version = "0.19.0", default-features = false, features = [
     "bevy_state",
     "std",
@@ -27,14 +28,31 @@ crossbeam-channel = "0.5.15"
 dirs = "6.0.0"
 dotenvy = "0.15.7"
 inquire = "0.9.4"
+open = "5.4.0"
+rand = "0.10.2"
+reqwest = { version = "0.13", default-features = false, features = [
+    "form",
+    "json",
+    "rustls",
+] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+sha2 = "0.11.0"
 shell-words = "1.1.1"
 strum = { version = "0.28.0", features = ["derive"] }
+# Pin to clap-help 1.5's termimad (0.34.x); 0.35 is a different crate version
+# and breaks `Printer::skin_mut().table_border_chars` type identity.
 termimad = "0.34.1"
 thiserror = "2.0.18"
 toml_edit = "0.25.12"
-tokio = { version = "1.52.3", features = ["macros", "process", "rt-multi-thread", "time"] }
+tokio = { version = "1.52.3", features = [
+    "io-util",
+    "macros",
+    "net",
+    "process",
+    "rt-multi-thread",
+    "time",
+] }
 tokio-util = "0.7.18"
 unicode-width = "0.2.2"
 url = { version = "2.5.8", features = ["serde"] }

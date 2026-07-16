@@ -6,6 +6,7 @@
 //! crates.io `0.11.1` targets Bevy 0.18; greatsage uses Bevy 0.19 via git pin of
 //! [PR #98](https://github.com/ratatui/bevy_ratatui/pull/98) until a crates.io release.
 
+mod auth_ui;
 mod commands;
 mod draw;
 mod input;

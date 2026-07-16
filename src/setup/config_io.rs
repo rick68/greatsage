@@ -20,6 +20,8 @@ pub struct ExistingSetup {
     pub model: Option<String>,
     pub base_url: Option<String>,
     pub api_key: Option<String>,
+    /// From `auth.<provider>.mode` when present (`auto` | `api_key` | `oauth`).
+    pub auth_mode: Option<String>,
 }
 
 pub fn load_existing_setup() -> ExistingSetup {
@@ -65,11 +67,25 @@ fn load_existing_from_path(path: &Path) -> ExistingSetup {
             crate::env_load::resolve_credential_value_with_paired_env(&raw, paired_ref)
         });
 
+    let auth_mode = provider.and_then(|p| {
+        let id = p.to_string();
+        doc.get("auth")
+            .and_then(|item| item.as_table())
+            .and_then(|auth| auth.get(id.as_str()))
+            .and_then(|item| item.as_table())
+            .and_then(|t| t.get("mode"))
+            .and_then(|item| item.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    });
+
     ExistingSetup {
         provider,
         model,
         base_url,
         api_key,
+        auth_mode,
     }
 }
 
@@ -89,6 +105,10 @@ pub struct WizardConfig {
     pub api_key: Option<String>,
     /// When true, key came from the environment — do not rewrite `.env`.
     pub key_from_env: bool,
+    /// Non-secret auth mode to write under `[auth.<provider>]` (`api_key` | `oauth`).
+    pub auth_mode: Option<String>,
+    /// Optional grant (`device_code` | `authorization_code`).
+    pub auth_grant: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -149,6 +169,25 @@ pub fn save_wizard_config(path: &Path, config: &WizardConfig) -> io::Result<()> 
     } else {
         doc.as_table_mut().remove(field);
         doc.as_table_mut().remove("api_key");
+    }
+
+    if let Some(mode) = &config.auth_mode {
+        let id = config.provider.to_string();
+        let auth = doc
+            .as_table_mut()
+            .entry("auth")
+            .or_insert(Item::Table(toml_edit::Table::new()))
+            .as_table_mut()
+            .expect("auth table");
+        let prov = auth
+            .entry(id.as_str())
+            .or_insert(Item::Table(toml_edit::Table::new()))
+            .as_table_mut()
+            .expect("auth.provider table");
+        prov["mode"] = Item::Value(Value::from(mode.as_str()));
+        if let Some(grant) = &config.auth_grant {
+            prov["grant"] = Item::Value(Value::from(grant.as_str()));
+        }
     }
 
     fs::write(path, doc.to_string())

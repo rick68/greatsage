@@ -196,7 +196,8 @@ fn switch_provider(name: &str, agent_config: &mut AgentConfig, config: &Config) 
 
     agent_config.provider = new_provider;
     agent_config.model = new_provider.default_model().to_string();
-    agent_config.api_key = config.get_api_key(Some(new_provider)).unwrap_or_default();
+    agent_config.api_key =
+        crate::auth::resolve_credential(config, Some(new_provider)).unwrap_or_default();
     let success_message = format!(
         "Switched to provider {new_provider} with model {} (conversation preserved).",
         agent_config.model

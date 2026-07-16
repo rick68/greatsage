@@ -16,6 +16,7 @@ use {
     std::time::Duration,
 };
 
+/// Max wait for `event::poll` between cancel checks (not `thread::sleep`).
 const STDIN_POLL_TIMEOUT_MS: u64 = 100;
 
 #[derive(Message)]
@@ -34,20 +35,40 @@ fn setup(
 
     let app_cancel = app_cancel.clone();
 
+    // Holds `AppCancelToken` until the blocking poll loop exits, then drops it.
+    // Must complete on cancel so `shutdown_tokio_on_exit` can finish its barrier.
     tokio_runtime.spawn_background_task(|_ctx| async move {
-        let app_cancel = app_cancel.clone();
-
-        tokio::task::spawn_blocking(move || {
+        let join = tokio::task::spawn_blocking(move || {
             let timeout = Duration::from_millis(STDIN_POLL_TIMEOUT_MS);
-            while !app_cancel.is_cancelled() {
-                if event::poll(timeout).expect("Failed to poll stdin") {
-                    let evt = event::read().expect("Failed to read stdin event");
-                    if let event::Event::Key(key) = evt {
-                        tx.send(key).expect("Failed to transmit key event");
+            loop {
+                if app_cancel.is_cancelled() {
+                    break;
+                }
+                match event::poll(timeout) {
+                    Ok(true) => {
+                        // Re-check after poll: AppExit may have cancelled while waiting.
+                        if app_cancel.is_cancelled() {
+                            break;
+                        }
+                        match event::read() {
+                            Ok(event::Event::Key(key)) => {
+                                // Receiver gone (teardown) → leave so Arc can drop.
+                                if tx.send(key).is_err() {
+                                    break;
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(_) => break,
+                        }
                     }
+                    Ok(false) => {}
+                    Err(_) => break,
                 }
             }
+            // Arc dropped here when `app_cancel` goes out of scope.
         });
+        // Await so this task does not finish before the blocking loop drops the token.
+        let _ = join.await;
     });
 }
 

@@ -14,7 +14,10 @@ use {
         },
         detect::provider_env_var,
     },
-    crate::providers::{PROVIDER_SPECS, Provider},
+    crate::{
+        auth::{self, is_oauth_capable},
+        providers::{PROVIDER_SPECS, Provider},
+    },
     colored::Colorize,
     inquire::{Confirm, InquireError, Select, Text},
     std::{
@@ -68,10 +71,38 @@ const CUSTOM_MODEL_LABEL: &str = "Enter a custom model...";
 enum WizardStep {
     Provider,
     ApiKeyConfirm,
+    /// OAuth-capable providers: choose API key vs browser login.
+    CredentialMethod,
     ApiKey,
     Model,
     BaseUrl,
     Save,
+}
+
+const CRED_CHOICE_KEEP_OAUTH: &str = "Keep existing OAuth tokens";
+const CRED_CHOICE_API_KEY: &str = "API key (env / paste)";
+const CRED_CHOICE_BROWSER: &str = "Browser / device login (OAuth PKCE)";
+
+/// How the wizard resolved credentials for this run (drives `[auth.*]` write).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum AuthPath {
+    /// Do not rewrite `auth.<provider>` (non-oauth providers, or unchanged).
+    #[default]
+    LeaveUnchanged,
+    /// Use token store; write `mode = oauth`.
+    OauthKeep,
+    /// Fresh device login; write `mode = oauth` + `grant = device_code`.
+    OauthLogin,
+    /// Static key path; write `mode = api_key`.
+    ApiKey,
+}
+
+fn provider_has_oauth_tokens(provider: Provider) -> bool {
+    let id = crate::auth::providers::provider_id(provider);
+    matches!(
+        crate::auth::store::load_tokens(&id),
+        Ok(Some(t)) if t.has_usable_fields()
+    )
 }
 
 // ── Display helpers (yoyo-style) ────────────────────────────────────────────
@@ -250,6 +281,109 @@ fn prompt_custom_api_key_confirm() -> Result<Option<bool>, SetupError> {
     }
 }
 
+/// Returns chosen [`AuthPath`] for an OAuth-capable provider (`None` = go back).
+fn prompt_credential_method(provider: Provider) -> Result<Option<AuthPath>, SetupError> {
+    () = print_step(2, "How do you want to authenticate?");
+    () = print_hint(&format!(
+        "{} supports OAuth (device code + PKCE) or a static API key.",
+        provider.wizard_label()
+    ));
+    () = print_hint("With mode=auto, a static API key wins over OAuth tokens when both exist.");
+
+    let has_tokens = provider_has_oauth_tokens(provider);
+    if has_tokens {
+        () = print_ok(&format!(
+            "OAuth tokens already on disk for `{}`",
+            crate::auth::providers::provider_id(provider)
+        ));
+        () = print_hint("Choose “Keep existing OAuth tokens” to re-use them without re-login.");
+    }
+    println!();
+    () = print_navigation_hint(false);
+
+    let mut choices = Vec::new();
+    if has_tokens {
+        choices.push(CRED_CHOICE_KEEP_OAUTH);
+    }
+    choices.push(CRED_CHOICE_API_KEY);
+    choices.push(CRED_CHOICE_BROWSER);
+
+    let choice = match Select::new("Credential method:", choices)
+        .with_starting_cursor(0)
+        .prompt_skippable()?
+    {
+        None => return Ok(None),
+        Some(choice) => choice,
+    };
+
+    if choice == CRED_CHOICE_KEEP_OAUTH {
+        () = print_ok("Keeping existing OAuth tokens");
+        return Ok(Some(AuthPath::OauthKeep));
+    }
+    if choice == CRED_CHOICE_BROWSER {
+        () = print_ok("OAuth device login selected");
+        return Ok(Some(AuthPath::OauthLogin));
+    }
+    () = print_ok("API key selected");
+    Ok(Some(AuthPath::ApiKey))
+}
+
+fn run_wizard_oauth_login(provider: Provider) -> Result<(), SetupError> {
+    () = print_hint("Starting OAuth login (device code + PKCE for xAI)…");
+    () = print_hint(
+        "Tokens are saved under ~/.config/greatsage/tokens/ — finish Save to set provider + [auth.xai].",
+    );
+    () = print_hint(
+        "While waiting, do not press Enter repeatedly — keys can skip the model step after login.",
+    );
+    let opts = auth::LoginOptions {
+        open_browser: true,
+        device_code: true,
+        authorization_code: false,
+        force: true,
+    };
+    match auth::login_provider(None, provider, opts) {
+        Ok(()) => {
+            () = print_ok("OAuth login complete (token store written)");
+            Ok(())
+        }
+        Err(err) => Err(SetupError::Prompt(format!("OAuth login failed: {err}"))),
+    }
+}
+
+/// Pause after a long OAuth wait so buffered Enter keys do not auto-confirm the model Select.
+///
+/// Device login can take minutes; operators often press Enter while waiting. Those keystrokes
+/// remain in the TTY buffer and would otherwise immediately accept the default model.
+fn pause_before_model_step() -> Result<(), SetupError> {
+    println!();
+    println!(
+        "  {}",
+        "Next step: choose a model (do not skip).".bold().green()
+    );
+    () = print_hint(
+        "If you pressed Enter while waiting for browser approval, type ok below to continue.",
+    );
+    loop {
+        () = print_navigation_hint(false);
+        let entered =
+            match Text::new("Type ok and press Enter to open the model list").prompt_skippable()? {
+                None => return Ok(()), // Esc → still go to model (back from model is credential)
+                Some(value) => value,
+            };
+        let t = entered.trim();
+        // Empty = likely a buffered Enter from the wait; re-prompt instead of advancing.
+        if t.is_empty() {
+            () = print_hint("Empty input ignored (buffered key?). Type ok to continue.");
+            continue;
+        }
+        if t.eq_ignore_ascii_case("ok") || t.eq_ignore_ascii_case("y") || t == "1" {
+            return Ok(());
+        }
+        () = print_hint("Please type ok (or y) to continue to model selection.");
+    }
+}
+
 fn prompt_api_key(
     provider: Provider,
     existing: &ExistingSetup,
@@ -333,22 +467,45 @@ fn prompt_model(
     existing: &ExistingSetup,
     provider_changed: bool,
 ) -> Result<Option<String>, SetupError> {
-    let default_model = if provider_changed {
-        default_model_for_provider(provider)
-    } else {
+    let catalog = known_models_for_provider(provider);
+    // Existing model may be from another provider (e.g. custom/NVIDIA id after switching to xAI).
+    let existing_in_catalog = existing
+        .model
+        .as_deref()
+        .is_some_and(|m| catalog.iter().any(|k| *k == m));
+    let use_existing = !provider_changed && existing_in_catalog;
+
+    let default_model = if use_existing {
         existing
             .model
             .as_deref()
             .unwrap_or(default_model_for_provider(provider))
+    } else {
+        default_model_for_provider(provider)
     };
 
     () = print_step(3, "Choose a model");
-    if !provider_changed && existing.model.is_some() {
+    () = print_hint(&format!(
+        "Provider {} — ↑/↓ to move, Enter to select (default: {default_model})",
+        provider.wizard_label()
+    ));
+    if use_existing {
         () = print_hint(&format!("Current: {default_model} — press Enter to keep"));
+    } else if existing.model.is_some() && !existing_in_catalog {
+        () = print_hint(&format!(
+            "Previous model `{}` is not in this provider list; defaulting to {default_model}",
+            existing.model.as_deref().unwrap_or("")
+        ));
     }
     println!();
 
-    let choices = model_select_choices(provider, existing, provider_changed, default_model);
+    // When switching provider family, do not treat stale existing model as "unchanged".
+    let choices = model_select_choices(
+        provider,
+        existing,
+        provider_changed || !existing_in_catalog,
+        default_model,
+    );
 
     loop {
         let mut select = Select::new("Select a model:", choices.clone());
@@ -478,15 +635,20 @@ fn prompt_save_location() -> Result<Option<SaveLocation>, SetupError> {
 fn print_non_tty_guidance() {
     eprintln!("greatsage setup requires an interactive terminal (TTY).");
     eprintln!();
-    eprintln!("Set a provider API key via environment variable, for example:");
+    eprintln!("API key (any catalog provider), for example:");
+    eprintln!("  export XAI_API_KEY=your-key-here");
     eprintln!("  export ANTHROPIC_API_KEY=your-key-here");
-    eprintln!("  export OPENAI_API_KEY=your-key-here");
+    eprintln!("  export PROVIDER=xai   # optional");
+    eprintln!();
+    eprintln!("xAI OAuth (device code; works without a local browser on this host):");
+    eprintln!("  greatsage login xai --device-code --no-browser");
+    eprintln!("  greatsage auth login xai --device-code --no-browser");
     eprintln!();
     eprintln!("Or create a config file:");
     eprintln!("  .greatsage/config.toml          (project-level)");
     eprintln!("  ~/.config/greatsage/config.toml  (user-level)");
     eprintln!();
-    eprintln!("See `greatsage --help` for all provider env vars.");
+    eprintln!("See `greatsage --help` and `greatsage login --help` for PROVIDER ids.");
 }
 
 pub fn run_wizard() -> Result<(), SetupError> {
@@ -506,8 +668,24 @@ pub fn run_wizard() -> Result<(), SetupError> {
     let mut skipped_api_key = false;
     let mut api_key: Option<String> = None;
     let mut key_from_env = false;
+    let mut auth_path = AuthPath::LeaveUnchanged;
     let mut model = String::new();
     let mut base_url: Option<String> = None;
+
+    // Tokens can exist while config still says another provider (e.g. cancelled after OAuth).
+    if provider_has_oauth_tokens(Provider::Xai) && existing.provider != Some(Provider::Xai) {
+        () = print_hint(
+            "Note: OAuth tokens for xAI are already on disk, but config provider is not xai yet.",
+        );
+        () = print_hint("Select xAI → Keep existing OAuth tokens → finish Save to bind config.");
+    } else if existing.provider == Some(Provider::Xai)
+        && existing
+            .auth_mode
+            .as_deref()
+            .is_some_and(|m| m.eq_ignore_ascii_case("oauth"))
+    {
+        () = print_hint("Current config: provider=xai, auth.xai.mode=oauth");
+    }
 
     loop {
         match step {
@@ -518,8 +696,11 @@ pub fn run_wizard() -> Result<(), SetupError> {
                     prior_provider = Some(selected);
                     provider = selected;
                     skipped_api_key = false;
+                    auth_path = AuthPath::LeaveUnchanged;
                     step = if provider == Provider::Custom {
                         WizardStep::ApiKeyConfirm
+                    } else if is_oauth_capable(provider) {
+                        WizardStep::CredentialMethod
                     } else {
                         WizardStep::ApiKey
                     };
@@ -540,10 +721,42 @@ pub fn run_wizard() -> Result<(), SetupError> {
                     }
                 }
             },
+            WizardStep::CredentialMethod => match prompt_credential_method(provider)? {
+                None => step = WizardStep::Provider,
+                Some(AuthPath::OauthKeep) => {
+                    api_key = None;
+                    key_from_env = false;
+                    skipped_api_key = true;
+                    auth_path = AuthPath::OauthKeep;
+                    step = WizardStep::Model;
+                }
+                Some(AuthPath::OauthLogin) => {
+                    () = run_wizard_oauth_login(provider)?;
+                    // Tokens live in the store; no static key to write.
+                    api_key = None;
+                    key_from_env = false;
+                    skipped_api_key = true;
+                    auth_path = AuthPath::OauthLogin;
+                    // Long device wait → drain accidental Enter before model Select.
+                    () = pause_before_model_step()?;
+                    step = WizardStep::Model;
+                }
+                Some(AuthPath::ApiKey) => {
+                    skipped_api_key = false;
+                    auth_path = AuthPath::ApiKey;
+                    step = WizardStep::ApiKey;
+                }
+                Some(AuthPath::LeaveUnchanged) => {
+                    // Not offered by the prompt; treat as back.
+                    step = WizardStep::Provider;
+                }
+            },
             WizardStep::ApiKey => match prompt_api_key(provider, &existing, provider_changed)? {
                 None => {
                     step = if provider == Provider::Custom {
                         WizardStep::ApiKeyConfirm
+                    } else if is_oauth_capable(provider) {
+                        WizardStep::CredentialMethod
                     } else {
                         WizardStep::Provider
                     };
@@ -551,11 +764,23 @@ pub fn run_wizard() -> Result<(), SetupError> {
                 Some((key, from_env)) => {
                     api_key = key;
                     key_from_env = from_env;
+                    // Non-oauth providers never set AuthPath::ApiKey above.
+                    if !is_oauth_capable(provider) {
+                        auth_path = AuthPath::LeaveUnchanged;
+                    } else {
+                        auth_path = AuthPath::ApiKey;
+                    }
                     step = WizardStep::Model;
                 }
             },
             WizardStep::Model => match prompt_model(provider, &existing, provider_changed)? {
-                None => step = model_step_after_api_key(skipped_api_key),
+                None => {
+                    step = if is_oauth_capable(provider) && skipped_api_key {
+                        WizardStep::CredentialMethod
+                    } else {
+                        model_step_after_api_key(skipped_api_key)
+                    };
+                }
                 Some(selected) => {
                     model = selected;
                     step = if provider == Provider::Custom {
@@ -583,16 +808,34 @@ pub fn run_wizard() -> Result<(), SetupError> {
                 Some(save_location) => {
                     () = apply_api_key_to_env(provider, api_key.as_deref());
 
+                    // Only write [auth.*] when this run chose an auth path.
+                    // Do NOT clobber oauth → api_key merely because the provider is oauth-capable.
+                    let (auth_mode, auth_grant) = match auth_path {
+                        AuthPath::OauthKeep | AuthPath::OauthLogin => {
+                            (Some("oauth".into()), Some("device_code".into()))
+                        }
+                        AuthPath::ApiKey => (Some("api_key".into()), None),
+                        AuthPath::LeaveUnchanged => (None, None),
+                    };
+
                     let config = WizardConfig {
                         provider,
                         model: model.clone(),
                         base_url: base_url.clone(),
                         api_key: api_key.clone(),
                         key_from_env,
+                        auth_mode,
+                        auth_grant,
                     };
 
                     let saved = write_config(save_location, &config)?;
                     () = print_completion(&saved, provider, &api_key, key_from_env);
+                    if matches!(auth_path, AuthPath::OauthKeep | AuthPath::OauthLogin) {
+                        () = print_hint(&format!(
+                            "Auth: [auth.{}] mode=oauth (tokens under ~/.config/greatsage/tokens/)",
+                            crate::auth::providers::provider_id(provider)
+                        ));
+                    }
 
                     println!();
                     println!("  {}", "All set!".green().bold());
