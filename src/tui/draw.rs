@@ -4,7 +4,7 @@
 
 use {
     super::{
-        layout::split_frame,
+        layout::{MIN_FRAME_HEIGHT_FOR_2ROW_STATUS, split_frame_with_status_rows},
         nav::{clamp_selected_line, ratatui_scroll_y},
         palette::{CheatLine, PaletteRow, shortcuts_cheatsheet_lines},
         scrollback::ScrollbackView,
@@ -13,9 +13,10 @@ use {
         text_width::{caret_width_for_after, str_display_width, truncate_to_width},
         theme::TuiTheme,
         token_chrome::{
-            LifetimeTokens, compose_status_line, format_cost_status_fragment,
+            LifetimeTokens, compose_status_hierarchy, format_cost_status_fragment,
             format_usage_status_fragment,
         },
+        welcome::welcome_lines,
     },
     crate::{
         agents::AgentConfig,
@@ -290,20 +291,18 @@ pub fn draw_system(
     } else {
         None
     };
-    let status_raw = compose_status_line(
-        state.status_hint.as_deref(),
-        DEFAULT_STATUS_HINT,
-        auth_chrome.as_deref(),
-        usage_fragment.as_deref(),
-        cost_fragment.as_deref(),
-    );
     let empty = scrollback.empty_placeholder || scrollback.lines.is_empty();
     let line_count = scrollback.line_count();
     let selected = clamp_selected_line(state.selected_line, line_count);
     let scroll_from_bottom = state.scroll_from_bottom;
 
-    let body_lines: Vec<(String, bool)> = if empty {
-        vec![(String::from("(empty session — type a prompt below)"), false)]
+    // Welcome body is ephemeral UI only — not part of scrollback line_count / selection.
+    let body_lines: Vec<(String, bool, bool)> = if empty {
+        welcome_lines()
+            .into_iter()
+            .enumerate()
+            .map(|(i, text)| (text, false, i == 0))
+            .collect()
     } else {
         scrollback
             .lines
@@ -313,7 +312,7 @@ pub fn draw_system(
                 // Flatten accidental newlines so Paragraph line count == logical lines
                 // (scroll offset is in logical lines; wrap would desync and scramble the pane).
                 let text = l.text.replace(['\n', '\r'], " ");
-                (text, i == selected)
+                (text, i == selected, false)
             })
             .collect()
     };
@@ -324,11 +323,29 @@ pub fn draw_system(
     let captured_prompt = Cell::new(state.last_prompt_rect);
     let captured_panel = Cell::new(state.operator_panel.last_rect);
 
+    let sticky = state.status_hint.clone();
+    let default_hint = DEFAULT_STATUS_HINT;
+    let auth_for_status = auth_chrome.clone();
+    let usage_for_status = usage_fragment.clone();
+    let cost_for_status = cost_fragment.clone();
+
     context.draw(|frame| {
         // Fill frame with GrokNight base so gaps are not terminal default.
         () = frame.render_widget(Paragraph::new("").style(theme.base_style()), frame.area());
 
-        let areas = split_frame(frame.area());
+        let frame_area = frame.area();
+        let status_width = frame_area.width.max(1);
+        let allow_two = frame_area.height >= MIN_FRAME_HEIGHT_FOR_2ROW_STATUS;
+        let status_layout = compose_status_hierarchy(
+            sticky.as_deref(),
+            default_hint,
+            auth_for_status.as_deref(),
+            usage_for_status.as_deref(),
+            cost_for_status.as_deref(),
+            status_width,
+            allow_two,
+        );
+        let areas = split_frame_with_status_rows(frame_area, status_layout.status_rows());
         captured_scroll.set(areas.scrollback);
         captured_status.set(areas.status);
         captured_prompt.set(areas.prompt);
@@ -352,12 +369,18 @@ pub fn draw_system(
         };
         let body: Vec<Line> = body_lines
             .iter()
-            .map(|(text, sel)| {
+            .map(|(text, sel, is_welcome_title)| {
                 let clipped = one_line(text, scroll_inner_w);
-                Line::from(Span::styled(
-                    clipped,
-                    theme.scrollback_line_style(text, *sel, empty),
-                ))
+                let style = if empty {
+                    if *is_welcome_title && !text.is_empty() {
+                        theme.welcome_title_style()
+                    } else {
+                        theme.welcome_body_style()
+                    }
+                } else {
+                    theme.scrollback_line_style(text, *sel, false)
+                };
+                Line::from(Span::styled(clipped, style))
             })
             .collect();
         // No Wrap: scroll units must match logical lines (see body_lines comment).
@@ -380,10 +403,27 @@ pub fn draw_system(
             .scroll((scroll_y, 0));
         () = frame.render_widget(scroll_widget, areas.scrollback);
 
-        let status = one_line(&status_raw, areas.status.width.max(1));
-        let status_line = line_with_hotkeys(&status, theme.dim_style(), theme);
+        let status_w = areas.status.width.max(1);
+        // Re-fit to actual status rect width (usually == frame width).
+        let status_layout = compose_status_hierarchy(
+            sticky.as_deref(),
+            default_hint,
+            auth_for_status.as_deref(),
+            usage_for_status.as_deref(),
+            cost_for_status.as_deref(),
+            status_w,
+            areas.status.height >= 2,
+        );
+        let status_lines: Vec<Line> = status_layout
+            .lines
+            .iter()
+            .map(|raw| {
+                let clipped = one_line(raw, status_w);
+                line_with_hotkeys(&clipped, theme.dim_style(), theme)
+            })
+            .collect();
         () = frame.render_widget(
-            Paragraph::new(status_line).style(theme.base_style()),
+            Paragraph::new(status_lines).style(theme.base_style()),
             areas.status,
         );
 

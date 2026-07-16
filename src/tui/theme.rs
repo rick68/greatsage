@@ -123,6 +123,19 @@ impl TuiTheme {
         Style::default().bg(self.bg_base).fg(self.gray)
     }
 
+    /// Empty-session welcome title (product identity).
+    pub fn welcome_title_style(&self) -> Style {
+        Style::default()
+            .bg(self.bg_base)
+            .fg(self.text_primary)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    /// Empty-session welcome body / key-hint lines.
+    pub fn welcome_body_style(&self) -> Style {
+        self.dim_style()
+    }
+
     /// Secondary body text.
     pub fn secondary_style(&self) -> Style {
         Style::default().bg(self.bg_base).fg(self.text_secondary)

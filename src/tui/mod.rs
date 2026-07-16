@@ -18,6 +18,7 @@ mod slash_complete;
 mod text_width;
 mod theme;
 mod token_chrome;
+mod welcome;
 
 mod plugin;
 pub use plugin::tui_plugin;
