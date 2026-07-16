@@ -53,17 +53,17 @@ pub fn accept_palette_selection(
         }
         PaletteAccept::Ui(PaletteUiAction::AuthStatus) => {
             let (title, lines) = panel_auth_status(config);
-            () = state.open_operator_panel(title, lines);
+            () = state.open_operator_panel_readonly(title, lines);
             true
         }
         PaletteAccept::Ui(PaletteUiAction::AuthLogout) => {
             let (title, lines) = panel_auth_logout(config);
-            () = state.open_operator_panel(title, lines);
+            () = state.open_operator_panel_readonly(title, lines);
             true
         }
         PaletteAccept::Ui(PaletteUiAction::AuthLogin) => {
             // Device login on app runtime; URL/code → OperatorPanel via AuthUiChannel.
-            spawn_device_login(config, runtime, auth_ui, true);
+            () = spawn_device_login(config, runtime, auth_ui, true);
             true
         }
     }

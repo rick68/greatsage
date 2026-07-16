@@ -46,9 +46,11 @@ impl Plugin for TuiPlugin {
             (
                 poll_shell_system,
                 poll_auth_ui_system,
+                // Mouse before paste/keys so same-frame click-to-focus + type works,
+                // and overlay dismiss is visible to key handling in this frame.
+                mouse_input_system,
                 paste_system,
                 input_system,
-                mouse_input_system,
             )
                 .chain(),
         )

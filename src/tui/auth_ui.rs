@@ -106,7 +106,7 @@ pub fn poll_auth_ui_system(channel: Res<AuthUiChannel>, mut state: ResMut<super:
     loop {
         match channel.try_recv() {
             Ok(AuthUiEvent::PanelLines { title, lines }) => {
-                () = state.open_operator_panel(title, lines);
+                () = state.open_operator_panel_readonly(title, lines);
             }
             Ok(AuthUiEvent::PanelAppend(line)) => {
                 state.operator_panel.append_line(line);

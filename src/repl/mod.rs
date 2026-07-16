@@ -33,7 +33,7 @@ pub(crate) mod native_pricing;
 mod output;
 mod path_display;
 mod route;
-mod session_dashboard;
+pub(crate) mod session_dashboard;
 mod session_nav;
 pub(crate) mod session_ops;
 pub(crate) mod session_state;
@@ -83,7 +83,8 @@ use {
     output::ReplOutputChannel,
     route::{CommandRoute, route_command},
     session_dashboard::{
-        SessionContextStatsFields, SessionMetaFields, TurnUsageRow, build_snapshot,
+        SessionContextStatsFields, SessionDashboardSnapshot, SessionMetaFields, TurnUsageRow,
+        build_snapshot,
     },
     session_ops::{
         abort_agent_best_effort, agent_message_stats, block_on_session, compact_agent_with_keep,
@@ -756,8 +757,9 @@ fn history_keys_allowed(session_state: &ReplSessionState, input: &ReplInputLocal
     !session_state.pending_clear_confirm && input.tab.list_confirm.is_none()
 }
 
+/// Session ECS views for `/status` `/tokens` `/cost` (line REPL + TUI slash).
 #[derive(SystemParam)]
-struct ReplEcsDashboard<'w, 's> {
+pub(crate) struct ReplEcsDashboard<'w, 's> {
     turns: Query<'w, 's, (&'static SessionId, &'static TurnSummary), With<TurnEntity>>,
     session_meta: Query<'w, 's, &'static SessionMeta>,
     context_stats: Query<'w, 's, &'static SessionContextStats>,
@@ -767,7 +769,7 @@ struct ReplEcsDashboard<'w, 's> {
 }
 
 impl ReplEcsDashboard<'_, '_> {
-    fn turn_rows(&self, session_id: SessionId) -> Vec<TurnUsageRow> {
+    pub(crate) fn turn_rows(&self, session_id: SessionId) -> Vec<TurnUsageRow> {
         self.turns
             .iter()
             .filter(|(sid, _)| **sid == session_id)
@@ -780,7 +782,7 @@ impl ReplEcsDashboard<'_, '_> {
             .collect()
     }
 
-    fn meta_fields(&self, session_id: SessionId) -> Option<SessionMetaFields> {
+    pub(crate) fn meta_fields(&self, session_id: SessionId) -> Option<SessionMetaFields> {
         let root = self.session_manager.root_entity(session_id)?;
         let meta = self.session_meta.get(root).ok()?;
         Some(SessionMetaFields {
@@ -789,7 +791,10 @@ impl ReplEcsDashboard<'_, '_> {
         })
     }
 
-    fn context_stats_fields(&self, session_id: SessionId) -> Option<SessionContextStatsFields> {
+    pub(crate) fn context_stats_fields(
+        &self,
+        session_id: SessionId,
+    ) -> Option<SessionContextStatsFields> {
         let root = self.session_manager.root_entity(session_id)?;
         let stats = self.context_stats.get(root).ok()?;
         Some(SessionContextStatsFields {
@@ -799,7 +804,7 @@ impl ReplEcsDashboard<'_, '_> {
         })
     }
 
-    fn is_processing(&self, session_id: SessionId) -> bool {
+    pub(crate) fn is_processing(&self, session_id: SessionId) -> bool {
         let Some(root) = self.session_manager.root_entity(session_id) else {
             return false;
         };
@@ -807,6 +812,28 @@ impl ReplEcsDashboard<'_, '_> {
             .get(root)
             .ok()
             .is_some_and(SessionRuntimeStatus::is_processing)
+    }
+
+    /// Same snapshot the line REPL builds for info slash commands.
+    pub(crate) fn info_snapshot(
+        &self,
+        session_id: SessionId,
+        model: &str,
+        coding_agent: Option<&CodingAgent>,
+        runtime: &tokio::runtime::Runtime,
+    ) -> SessionDashboardSnapshot {
+        let turn_rows = self.turn_rows(session_id);
+        let meta = self.meta_fields(session_id);
+        let context_stats = self.context_stats_fields(session_id);
+        build_snapshot(
+            &turn_rows,
+            meta.as_ref(),
+            model,
+            context_stats.as_ref(),
+            coding_agent,
+            runtime,
+            &self.lifetime_usage.usage(),
+        )
     }
 }
 
@@ -1175,17 +1202,11 @@ fn read_stdin_stream(
                             .as_deref()
                             .map(crate::agents::CodingAgent::session_id)
                             .unwrap_or_default();
-                        let turn_rows = ecs_dashboard.turn_rows(session_id);
-                        let meta = ecs_dashboard.meta_fields(session_id);
-                        let context_stats = ecs_dashboard.context_stats_fields(session_id);
-                        Some(build_snapshot(
-                            &turn_rows,
-                            meta.as_ref(),
+                        Some(ecs_dashboard.info_snapshot(
+                            session_id,
                             &agent_config.model,
-                            context_stats.as_ref(),
                             coding_agent.as_deref(),
                             runtime,
-                            &ecs_dashboard.lifetime_usage.usage(),
                         ))
                     } else {
                         None

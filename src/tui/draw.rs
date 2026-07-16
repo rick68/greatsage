@@ -12,9 +12,20 @@ use {
         state::{TuiFocus, TuiState},
         text_width::{caret_width_for_after, str_display_width, truncate_to_width},
         theme::TuiTheme,
+        token_chrome::{
+            LifetimeTokens, compose_status_line, format_usage_status_fragment,
+        },
     },
-    crate::repl::help_data::command_short_description,
-    bevy::ecs::change_detection::{Res, ResMut},
+    crate::{
+        repl::help_data::command_short_description,
+        session::{
+            FocusedSession, SessionContextStats, SessionLifetimeUsage, SessionManager,
+        },
+    },
+    bevy::ecs::{
+        change_detection::{Res, ResMut},
+        system::Query,
+    },
     bevy_ratatui::RatatuiContext,
     ratatui::{
         layout::{Position, Rect},
@@ -31,6 +42,26 @@ pub const DEFAULT_STATUS_HINT: &str =
 
 /// Prompt prefix shown before the draft (`"> "`).
 const PROMPT_PREFIX: &str = "> ";
+
+/// Read focused session `SessionContextStats` for idle usage chrome.
+fn focused_context_stats(
+    focused: Option<&FocusedSession>,
+    session_manager: Option<&SessionManager>,
+    context_stats: &Query<&SessionContextStats>,
+) -> (u64, u64) {
+    let Some(session_id) = focused.and_then(|f| f.0) else {
+        return (0, 0);
+    };
+    let Some(root) = session_manager.and_then(|m| m.root_entity(session_id)) else {
+        return (0, 0);
+    };
+    match context_stats.get(root) {
+        Ok(stats) => (stats.context_used, stats.context_max),
+        Err(_) => (0, 0),
+    }
+}
+
+
 
 /// Longest-first tokens highlighted as hotkeys in status / titles.
 const HOTKEY_TOKENS: &[&str] = &[
@@ -187,6 +218,10 @@ pub fn draw_system(
     mut state: ResMut<TuiState>,
     scrollback: Res<ScrollbackView>,
     config: Option<Res<crate::config::Config>>,
+    focused: Option<Res<FocusedSession>>,
+    session_manager: Option<Res<SessionManager>>,
+    lifetime_usage: Option<Res<SessionLifetimeUsage>>,
+    context_stats: Query<&SessionContextStats>,
 ) -> bevy::prelude::Result {
     let theme = TuiTheme::current();
 
@@ -204,25 +239,47 @@ pub fn draw_system(
     let panel_title = state.operator_panel.title.clone();
     let panel_lines = state.operator_panel.lines.clone();
     let panel_sel = state.operator_panel.selected;
+    let panel_scroll = state.operator_panel.scroll;
+    let panel_selectable = state.operator_panel.is_selectable();
     let palette_open = state.command_palette.open;
     let palette_filter = state.command_palette.filter.clone();
     let palette_rows = state.command_palette.rows.clone();
     let palette_hi = state.command_palette.highlight;
     let cheatsheet_open = state.shortcuts_cheatsheet.open;
-    let mut status_raw = state
-        .status_hint
-        .clone()
-        .unwrap_or(String::from(DEFAULT_STATUS_HINT));
-    // Non-secret auth chrome (no tokens). Idle default only — keep sticky hints clean.
-    if state.status_hint.is_none()
-        && let Some(cfg) = config.as_deref()
-    {
-        let provider = cfg
-            .get_provider()
-            .unwrap_or(crate::providers::Provider::Xai);
-        let chrome = crate::auth::status_for(cfg, provider).chrome_label();
-        status_raw = format!("{status_raw} · {chrome}");
-    }
+
+    // Idle: key hints · auth · Session ECS usage. Sticky status_hint wins (no forced embed).
+    let auth_chrome = if state.status_hint.is_none() {
+        config.as_deref().map(|cfg| {
+            let provider = cfg
+                .get_provider()
+                .unwrap_or(crate::providers::Provider::Xai);
+            crate::auth::status_for(cfg, provider).chrome_label()
+        })
+    } else {
+        None
+    };
+    let usage_fragment = if state.status_hint.is_none() {
+        let (used, max) =
+            focused_context_stats(focused.as_deref(), session_manager.as_deref(), &context_stats);
+        let lifetime = lifetime_usage
+            .as_ref()
+            .map(|u| LifetimeTokens {
+                input: u.input,
+                output: u.output,
+                cache_read: u.cache_read,
+                cache_write: u.cache_write,
+            })
+            .unwrap_or_default();
+        format_usage_status_fragment(used, max, lifetime)
+    } else {
+        None
+    };
+    let status_raw = compose_status_line(
+        state.status_hint.as_deref(),
+        DEFAULT_STATUS_HINT,
+        auth_chrome.as_deref(),
+        usage_fragment.as_deref(),
+    );
     let empty = scrollback.empty_placeholder || scrollback.lines.is_empty();
     let line_count = scrollback.line_count();
     let selected = clamp_selected_line(state.selected_line, line_count);
@@ -246,6 +303,7 @@ pub fn draw_system(
 
     let captured_inner_h = Cell::new(state.last_scrollback_height);
     let captured_scroll = Cell::new(state.last_scrollback_rect);
+    let captured_status = Cell::new(state.last_status_rect);
     let captured_prompt = Cell::new(state.last_prompt_rect);
     let captured_panel = Cell::new(state.operator_panel.last_rect);
 
@@ -255,6 +313,7 @@ pub fn draw_system(
 
         let areas = split_frame(frame.area());
         captured_scroll.set(areas.scrollback);
+        captured_status.set(areas.status);
         captured_prompt.set(areas.prompt);
         let inner_h = areas.scrollback.height.saturating_sub(2).max(1);
         captured_inner_h.set(inner_h);
@@ -392,7 +451,9 @@ pub fn draw_system(
                 panel_rect,
                 &panel_title,
                 &panel_lines,
+                panel_selectable,
                 panel_sel,
+                panel_scroll,
                 theme,
             );
         }
@@ -436,6 +497,7 @@ pub fn draw_system(
 
     state.last_scrollback_height = captured_inner_h.get();
     state.last_scrollback_rect = captured_scroll.get();
+    state.last_status_rect = captured_status.get();
     state.last_prompt_rect = captured_prompt.get();
     state.operator_panel.last_rect = captured_panel.get();
 
@@ -744,19 +806,23 @@ fn render_operator_panel(
     area: Rect,
     title: &str,
     lines: &[String],
+    selectable: bool,
     selected: usize,
+    scroll: usize,
     theme: &TuiTheme,
 ) {
     if area.width < 6 || area.height < 3 {
         return;
     }
     let n = lines.len();
-    let hi = selected.min(n.saturating_sub(1));
     let max_vis = (area.height.saturating_sub(2) as usize).max(1);
     let start = if n <= max_vis {
         0
-    } else {
+    } else if selectable {
+        let hi = selected.min(n.saturating_sub(1));
         hi.saturating_sub(max_vis / 2).min(n - max_vis)
+    } else {
+        scroll.min(n.saturating_sub(max_vis))
     };
     let end = (start + max_vis).min(n);
     let inner_w = area.width.saturating_sub(4).max(8) as usize;
@@ -769,27 +835,43 @@ fn render_operator_panel(
             )))
         })
         .collect();
-    let mut list_state = ListState::default();
-    () = list_state.select(Some(hi.saturating_sub(start)));
 
-    let title_line = line_with_hotkeys(
-        &format!(" {title} · ↑↓:nav · Enter:fill · Esc:close "),
-        theme.dim_style(),
-        theme,
-    );
+    let chrome = if selectable {
+        format!(" {title} · ↑↓:nav · Enter:fill · Esc:close ")
+    } else {
+        // Read-only dumps: title only (any key dismisses — no scroll chrome).
+        format!(" {title} ")
+    };
+    let title_line = line_with_hotkeys(&chrome, theme.dim_style(), theme);
     () = frame.render_widget(Clear, area);
-    let list = List::new(items)
-        .style(theme.base_style())
-        .block(
+
+    if selectable {
+        let hi = selected.min(n.saturating_sub(1));
+        let mut list_state = ListState::default();
+        () = list_state.select(Some(hi.saturating_sub(start)));
+        let list = List::new(items)
+            .style(theme.base_style())
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(theme.border_overlay())
+                    .title(title_line)
+                    .style(theme.base_style()),
+            )
+            .highlight_symbol("❯ ")
+            .highlight_style(theme.selection_style());
+        () = frame.render_stateful_widget(list, area, &mut list_state);
+    } else {
+        // Read-only dump: no ❯ selection chrome (tokens/status are not pick-lists).
+        let list = List::new(items).style(theme.base_style()).block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(theme.border_overlay())
                 .title(title_line)
                 .style(theme.base_style()),
-        )
-        .highlight_symbol("❯ ")
-        .highlight_style(theme.selection_style());
-    () = frame.render_stateful_widget(list, area, &mut list_state);
+        );
+        () = frame.render_widget(list, area);
+    }
 }
 
 /// Draw candidate list above the prompt pane (capped rows).

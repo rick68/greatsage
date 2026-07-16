@@ -9,13 +9,19 @@ use {
             TabSlashResult, enter_should_accept_menu, handle_prompt_tab, move_menu_highlight,
             refresh_slash_completion, try_dismiss_slash_menu,
         },
-        state::{ESC_CLEAR_WINDOW, TuiFocus, TuiState, rect_contains},
+        state::{
+            ESC_CLEAR_WINDOW, TuiFocus, TuiState, dismiss_key_stealing_overlays,
+            hit_prompt_or_status, rect_contains,
+        },
     },
     crate::{
         agents::{AgentConfig, CodingAgent, CodingAgentPromptChannel},
         cli::Cli,
         config::Config,
-        repl::{DispatchResult, dispatch_slash_command, session_state::ReplSessionState},
+        repl::{
+            DispatchResult, ReplEcsDashboard, dispatch_slash_command,
+            session_dashboard::SessionDashboardSnapshot, session_state::ReplSessionState,
+        },
         session::SessionRuntimeStatus,
     },
     bevy::{
@@ -78,6 +84,10 @@ fn strip_shell_prefix(line: &str) -> &str {
 }
 
 /// Mouse: left-click focuses panes; wheel scrolls panel or scrollback.
+///
+/// Clicks **outside** the operator panel dismiss key-stealing overlays (panel /
+/// palette / cheatsheet). Otherwise focus can look like Prompt (caret drawn) while
+/// printable keys are still swallowed — “click prompt but cannot type.”
 pub fn mouse_input_system(
     mut mice: MessageReader<MouseMessage>,
     mut state: ResMut<TuiState>,
@@ -91,24 +101,39 @@ pub fn mouse_input_system(
                 if state.operator_panel.open
                     && rect_contains(state.operator_panel.last_rect, ev.column, ev.row)
                 {
-                    let rect = state.operator_panel.last_rect;
-                    if rect.width > 2 && rect.height > 2 && !state.operator_panel.lines.is_empty() {
-                        let inner_row = ev.row.saturating_sub(rect.y.saturating_add(1));
-                        let n = state.operator_panel.lines.len();
-                        let hi = state.operator_panel.selected.min(n.saturating_sub(1));
-                        let max_vis = (rect.height.saturating_sub(2) as usize).max(1);
-                        let start = if n <= max_vis {
-                            0
-                        } else {
-                            hi.saturating_sub(max_vis / 2).min(n - max_vis)
-                        };
-                        let idx = start.saturating_add(inner_row as usize).min(n - 1);
-                        state.operator_panel.selected = idx;
-                        state.sync_prompt_from_operator_selection();
+                    // Selectable catalogs: click row to highlight + fill. Read-only: no-op.
+                    if state.operator_panel.is_selectable() {
+                        let rect = state.operator_panel.last_rect;
+                        if rect.width > 2
+                            && rect.height > 2
+                            && !state.operator_panel.lines.is_empty()
+                        {
+                            let inner_row = ev.row.saturating_sub(rect.y.saturating_add(1));
+                            let n = state.operator_panel.lines.len();
+                            let hi = state.operator_panel.selected.min(n.saturating_sub(1));
+                            let max_vis = (rect.height.saturating_sub(2) as usize).max(1);
+                            let start = if n <= max_vis {
+                                0
+                            } else {
+                                hi.saturating_sub(max_vis / 2).min(n - max_vis)
+                            };
+                            let idx = start.saturating_add(inner_row as usize).min(n - 1);
+                            state.operator_panel.selected = idx;
+                            state.sync_prompt_from_operator_selection();
+                        }
                     }
                     continue;
                 }
-                if rect_contains(state.last_prompt_rect, ev.column, ev.row) {
+                // Outside panel (and any chrome click): drop overlays that steal keys.
+                () = dismiss_key_stealing_overlays(&mut state);
+
+                // Prompt + status strip both mean “I want to type”.
+                if hit_prompt_or_status(
+                    state.last_prompt_rect,
+                    state.last_status_rect,
+                    ev.column,
+                    ev.row,
+                ) {
                     state.focus = TuiFocus::Prompt;
                     state.clear_esc_arm();
                 } else if rect_contains(state.last_scrollback_rect, ev.column, ev.row) {
@@ -128,8 +153,7 @@ pub fn mouse_input_system(
             // Wheel: panel → palette → scrollback.
             MouseEventKind::ScrollUp => {
                 if state.operator_panel.open {
-                    state.operator_panel.move_selection(1);
-                    state.sync_prompt_from_operator_selection();
+                    panel_wheel(&mut state, 1);
                 } else if state.command_palette.open {
                     state.command_palette.move_highlight(1);
                 } else {
@@ -138,8 +162,7 @@ pub fn mouse_input_system(
             }
             MouseEventKind::ScrollDown => {
                 if state.operator_panel.open {
-                    state.operator_panel.move_selection(-1);
-                    state.sync_prompt_from_operator_selection();
+                    panel_wheel(&mut state, -1);
                 } else if state.command_palette.open {
                     state.command_palette.move_highlight(-1);
                 } else {
@@ -188,6 +211,7 @@ pub fn input_system(
     tokio_runtime: Res<TokioTasksRuntime>,
     auth_ui: Res<super::auth_ui::AuthUiChannel>,
     runtime_status: Query<&SessionRuntimeStatus>,
+    ecs_dashboard: ReplEcsDashboard,
 ) {
     let line_count = scrollback.line_count();
     let turn_starts = scrollback.turn_starts.clone();
@@ -378,25 +402,23 @@ pub fn input_system(
             continue;
         }
 
-        // ── Operator panel navigation (separate window; not scrollback) ───
+        // ── Operator panel (separate window; not scrollback) ─────────────
         if state.operator_panel.open {
+            if !state.operator_panel.is_selectable() {
+                // Read-only dump (/tokens, …): any key closes so typing continues.
+                () = dismiss_readonly_panel(
+                    &mut state,
+                    &agent_config,
+                    message.code,
+                    message.modifiers,
+                );
+                continue;
+            }
             match message.code {
-                KeyCode::Up => {
-                    state.operator_panel.move_selection(-1);
-                    state.sync_prompt_from_operator_selection();
-                }
-                KeyCode::Down => {
-                    state.operator_panel.move_selection(1);
-                    state.sync_prompt_from_operator_selection();
-                }
-                KeyCode::PageUp => {
-                    state.operator_panel.move_selection(-10);
-                    state.sync_prompt_from_operator_selection();
-                }
-                KeyCode::PageDown => {
-                    state.operator_panel.move_selection(10);
-                    state.sync_prompt_from_operator_selection();
-                }
+                KeyCode::Up => panel_nav(&mut state, -1),
+                KeyCode::Down => panel_nav(&mut state, 1),
+                KeyCode::PageUp => panel_nav(&mut state, -10),
+                KeyCode::PageDown => panel_nav(&mut state, 10),
                 KeyCode::Home => {
                     state.operator_panel.selected = 0;
                     state.sync_prompt_from_operator_selection();
@@ -572,7 +594,26 @@ pub fn input_system(
                     return;
                 }
                 if line.starts_with('/') {
-                    let session_processing = agent_busy;
+                    let runtime = tokio_runtime.runtime();
+                    let session_id = coding_agent
+                        .as_ref()
+                        .map(|a| a.session_id())
+                        .unwrap_or_default();
+                    // Match line REPL: info slash needs Session ECS snapshot (not None).
+                    let dashboard = if slash_needs_dashboard(&line) {
+                        Some(ecs_dashboard.info_snapshot(
+                            session_id,
+                            &agent_config.model,
+                            coding_agent.as_deref(),
+                            runtime,
+                        ))
+                    } else {
+                        None
+                    };
+                    let session_processing = coding_agent
+                        .as_ref()
+                        .map(|a| ecs_dashboard.is_processing(a.session_id()))
+                        .unwrap_or(agent_busy);
                     () = handle_slash(
                         &line,
                         &mut state,
@@ -581,7 +622,8 @@ pub fn input_system(
                         &config,
                         &cli,
                         coding_agent.as_deref(),
-                        tokio_runtime.runtime(),
+                        runtime,
+                        dashboard,
                         session_processing,
                         &mut exit,
                         &prompt_channel,
@@ -677,6 +719,68 @@ fn move_cursor_right(state: &mut TuiState) {
     state.cursor = next;
 }
 
+/// `/status` `/tokens` `/cost` `/context` need a prebuilt Session ECS dashboard.
+fn slash_needs_dashboard(line: &str) -> bool {
+    let cmd = line
+        .split_whitespace()
+        .next()
+        .unwrap_or(line)
+        .trim();
+    matches!(cmd, "/status" | "/tokens" | "/cost" | "/context")
+}
+
+/// Catalog panels (`/help`) keep select+fill; dumps are read-only.
+fn slash_panel_is_selectable(line: &str) -> bool {
+    let cmd = line
+        .split_whitespace()
+        .next()
+        .unwrap_or(line)
+        .trim();
+    matches!(cmd, "/help")
+}
+
+fn panel_viewport_h(state: &TuiState) -> usize {
+    (state.operator_panel.last_rect.height.saturating_sub(2) as usize).max(1)
+}
+
+fn panel_nav(state: &mut TuiState, delta: isize) {
+    if state.operator_panel.is_selectable() {
+        state.operator_panel.move_selection(delta);
+        state.sync_prompt_from_operator_selection();
+    } else {
+        let vh = panel_viewport_h(state);
+        state.operator_panel.scroll_by(delta, vh);
+    }
+}
+
+fn panel_wheel(state: &mut TuiState, delta: isize) {
+    // Wheel still scrolls long read-only dumps; keys dismiss (see dismiss_readonly_panel).
+    panel_nav(state, delta);
+}
+
+/// Close a read-only panel; printable keys land in the prompt so typing continues.
+fn dismiss_readonly_panel(
+    state: &mut TuiState,
+    agent_config: &crate::agents::AgentConfig,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+) {
+    state.close_operator_panel();
+    state.focus = TuiFocus::Prompt;
+    state.clear_esc_arm();
+    state.clear_ime_preedit();
+    if let KeyCode::Char(c) = code
+        && !modifiers.contains(KeyModifiers::CONTROL)
+        && !modifiers.contains(KeyModifiers::ALT)
+        && !c.is_control()
+    {
+        // Insert into prompt so the same keystroke starts the next input.
+        // (`?` on empty draft would open palette if handled later; insert here instead.)
+        () = insert_char(state, c);
+        refresh_slash_completion(state, agent_config, false);
+    }
+}
+
 fn handle_slash(
     line: &str,
     state: &mut TuiState,
@@ -686,6 +790,7 @@ fn handle_slash(
     cli: &Cli,
     coding_agent: Option<&CodingAgent>,
     runtime: &tokio::runtime::Runtime,
+    dashboard: Option<SessionDashboardSnapshot>,
     session_processing: bool,
     exit: &mut MessageWriter<AppExit>,
     prompt_channel: &CodingAgentPromptChannel,
@@ -698,7 +803,7 @@ fn handle_slash(
         None,
         coding_agent,
         runtime,
-        None,
+        dashboard,
         cli.bare,
         session_processing,
     ) {
@@ -725,7 +830,12 @@ fn handle_slash(
                 .unwrap_or("output")
                 .trim_start_matches('/')
                 .to_string();
-            () = state.open_operator_panel(title, lines);
+            if slash_panel_is_selectable(line) {
+                () = state.open_operator_panel(title, lines);
+            } else {
+                // /tokens /status /cost /… — scrollable dump, not a pick-list.
+                () = state.open_operator_panel_readonly(title, lines);
+            }
         }
         DispatchResult::ResendPrompt { prompt, hint } => {
             () = state.set_status_hint(hint);
@@ -737,10 +847,10 @@ fn handle_slash(
             () = lines.push(
                 String::from("(agent file ops simplified in TUI foundation — use line REPL for /save /load /jump)"),
             );
-            () = state.open_operator_panel("agent", lines);
+            () = state.open_operator_panel_readonly("agent", lines);
         }
         DispatchResult::AwaitClearConfirm { prompt } => {
-            () = state.open_operator_panel(
+            () = state.open_operator_panel_readonly(
                 "confirm",
                 [
                     prompt,
@@ -751,7 +861,10 @@ fn handle_slash(
             );
         }
         DispatchResult::Unknown => {
-            () = state.open_operator_panel("unknown", [format!("unknown command: {line}")]);
+            () = state.open_operator_panel_readonly(
+                "unknown",
+                [format!("unknown command: {line}")],
+            );
         }
     }
 }
